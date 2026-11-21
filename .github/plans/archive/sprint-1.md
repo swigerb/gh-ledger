@@ -1270,3 +1270,10 @@ Behavior tests:
   - Add `gh ledger rates` commands that scaffold `~/.copilot-ledger/rates.json` from `docs/configuration.md`'s examples and validate it, printing the same errors the loader would.
 - **Reconciliation.** GitHub Docs say to read AI-unit consumption from `github.copilot.nano_aiu` on the root `invoke_agent` span only. Third-party write-ups say dividing it by 10^9 gives AI credits, but GitHub doesn't document that. Consider storing it per invocation and comparing it with computed credits.
 - **Sprints 3 and 4.** The runaway-loop circuit breaker, the MCP server, PR receipts with the GitHub Action, and a `rates.json` update command, per the roadmap.
+
+## Amendments during implementation
+
+Recorded by `ledger-architect` on 2026-11-21, during Sprint 5 (audit finding A12); Sprint 1 was archived without this section. Line numbers refer to this file.
+
+1. **PR #4 (Task 1), CI.** The architect added `.github/workflows/ci.yml`, which this plan didn't list. It runs `dotnet build CopilotLedger.slnx` and `dotnet test CopilotLedger.slnx` on `ubuntu-latest` and `windows-latest` for pushes to `main`, pull requests, and manual runs. Sprint 2's plan recorded it (`.github/plans/archive/sprint-2.md`, line 36).
+2. **Found later: `Calculate` could throw.** The contract at L333 ("Throws only ArgumentNullException") and L599 ("Otherwise `Calculate` never throws") didn't hold. `JsonRateCardCalculator.Calculate` threw `OverflowException` for an extreme overlay rate, such as 10^22 USD per 1M tokens, because Task 2 bounded a rate only by requiring `rate × 1,000,000` to fit in a `decimal`. Sprint 2 restored the contract: its Task 3 (PR #15) rejects rates above 1,000,000 USD per 1M tokens, and its Task 2 ingestor (PR #14) also catches `OverflowException`.
