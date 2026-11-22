@@ -26,8 +26,8 @@ jobs:
             rid: win-x64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: 10.0.x
       - run: dotnet build CopilotLedger.slnx
@@ -36,7 +36,10 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File action/tests/receipt.Tests.ps1
       - name: Publish single-file gh-ledger
-        run: dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r ${{ matrix.rid }} -o artifacts/gh-ledger
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+        run: dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r "$RID" -o artifacts/gh-ledger
       - name: Smoke-test the published binary
         shell: bash
         timeout-minutes: 5
@@ -48,6 +51,12 @@ jobs:
           started=$(./artifacts/gh-ledger/gh-ledger daemon start | tr -d '\r')
           echo "$started"
           grep -Eq '^gh-ledger daemon started \(pid [0-9]+\) on http://localhost:4318\.$' <<< "$started"
+          trace='{"resourceSpans":[{"resource":{"attributes":[]},"scopeSpans":[{"spans":[{"traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"b7ad6b7169203331","name":"chat claude-opus-5.5","kind":3,"startTimeUnixNano":"1795219200000000000","endTimeUnixNano":"1795219202000000000","attributes":[{"key":"gen_ai.operation.name","value":{"stringValue":"chat"}},{"key":"gen_ai.request.model","value":{"stringValue":"claude-opus-5.5"}},{"key":"gen_ai.usage.input_tokens","value":{"intValue":"100000"}},{"key":"gen_ai.usage.output_tokens","value":{"intValue":"5000"}}]}]}]}]}'
+          test "$(curl -sS -H 'Content-Type: application/json' --data "$trace" http://localhost:4318/v1/traces)" = "{}"
+          spend=$(./artifacts/gh-ledger/gh-ledger branch --all-repos --since all --json | tr -d '\r')
+          echo "$spend"
+          grep -q '"spans": 1,' <<< "$spend"
+          grep -q '"aiCredits": 50,' <<< "$spend"
           ./artifacts/gh-ledger/gh-ledger status
           ./artifacts/gh-ledger/gh-ledger breaker status
           ./artifacts/gh-ledger/gh-ledger budget list
