@@ -54,3 +54,5 @@ gh api repos/actions/checkout/commits/v7.0.1 --jq .sha
 ```
 
 Read the release notes for breaking changes, then replace the SHA and the comment in every workflow that uses the action, in this repository and in swigerb/copilot-ledger-action.
+
+`receipt.yml` pins swigerb/copilot-ledger-action to the commit of one of its releases in the same way. After each release of the action, look up the commit its tag points to, as above, and update the pin.

@@ -16,5 +16,4 @@ jobs:
   receipt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./action
+      - uses: swigerb/copilot-ledger-action@d5eb3423731be103ef50f2720d27d661afc3d426 # v1.0.0
