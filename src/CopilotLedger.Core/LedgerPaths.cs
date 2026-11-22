@@ -6,5 +6,4 @@ public static class LedgerPaths
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".copilot-ledger");
-
 }
