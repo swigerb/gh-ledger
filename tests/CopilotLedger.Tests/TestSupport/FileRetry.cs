@@ -53,4 +53,24 @@ public static class FileRetry
             }
         }
     }
+
+    // Deletes the file, retrying every 25 ms for up to 10 seconds while Windows reports it in use
+    // or pending deletion.
+    public static void Delete(string path)
+    {
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            try
+            {
+                File.Delete(path);
+                return;
+            }
+            catch (Exception ex) when (
+                (ex is IOException or UnauthorizedAccessException) && DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(25);
+            }
+        }
+    }
 }

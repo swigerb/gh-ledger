@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <None Include="..\..\docs\configuration.md" Link="docs\configuration.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\docs\guide.md" Link="docs\guide.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
