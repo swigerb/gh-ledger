@@ -48,7 +48,7 @@ public sealed class InstallCommandTests
             [("CopilotLedger", "\"C:\\tools\\gh-ledger.exe\" daemon start")],
             platform.StartupCommandWrites);
         using JsonDocument manifest = JsonDocument.Parse(
-            await File.ReadAllTextAsync(ManifestPath(temp.Path)));
+            await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));
         Assert.Equal(
             @"C:\tools\gh-ledger.exe",
             manifest.RootElement.GetProperty("executablePath").GetString());
@@ -107,7 +107,7 @@ public sealed class InstallCommandTests
             [("CopilotLedger", "\"C:\\tools\\gh-ledger.exe\" daemon start")],
             platform.StartupCommandWrites);
         using JsonDocument manifest = JsonDocument.Parse(
-            await File.ReadAllTextAsync(ManifestPath(temp.Path)));
+            await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));
         Assert.Equal(
             @"C:\tools\gh-ledger.exe",
             manifest.RootElement.GetProperty("executablePath").GetString());
@@ -146,7 +146,7 @@ public sealed class InstallCommandTests
             second.Out);
         Assert.Single(platform.StartupCommandWrites);
         using JsonDocument manifest = JsonDocument.Parse(
-            await File.ReadAllTextAsync(ManifestPath(temp.Path)));
+            await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));
         Assert.True(
             manifest.RootElement.GetProperty("windowsUserVariableSet").GetBoolean());
         Assert.Equal(
@@ -168,7 +168,7 @@ public sealed class InstallCommandTests
             platform.UserVariableWrites);
 
         using (JsonDocument manifest = JsonDocument.Parse(
-                   await File.ReadAllTextAsync(ManifestPath(temp.Path))))
+                   await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path))))
         {
             Assert.Equal(
                 "false",
@@ -198,14 +198,14 @@ public sealed class InstallCommandTests
         await using CliHarness harness = new(temp.Path, platform);
 
         CliRun first = await harness.RunAsync("install");
-        string afterFirst = await File.ReadAllTextAsync(profile);
+        string afterFirst = await FileRetry.ReadAllTextAsync(profile);
         CliRun second = await harness.RunAsync("install");
 
         Assert.Equal(0, first.ExitCode);
         Assert.Equal(
             "export FOO=1\n\n# >>> copilot-ledger >>>\nexport COPILOT_OTEL_ENABLED=true\n# <<< copilot-ledger <<<\n",
             afterFirst.Replace("\r\n", "\n"));
-        Assert.Equal(afterFirst, await File.ReadAllTextAsync(profile));
+        Assert.Equal(afterFirst, await FileRetry.ReadAllTextAsync(profile));
         Assert.Empty(platform.UserVariableWrites);
         Assert.Equal(
             "'/opt/bin/gh-ledger' \"$@\"",
@@ -216,7 +216,7 @@ public sealed class InstallCommandTests
             $"{profile} already sets COPILOT_OTEL_ENABLED.",
             second.Out);
         using JsonDocument manifest = JsonDocument.Parse(
-            await File.ReadAllTextAsync(ManifestPath(temp.Path)));
+            await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));
         Assert.Equal(
             [profile],
             manifest.RootElement.GetProperty("profileFiles")
@@ -249,7 +249,7 @@ public sealed class InstallCommandTests
         Assert.Equal(0, run.ExitCode);
         Assert.Equal(
             "# >>> copilot-ledger >>>\nexport COPILOT_OTEL_ENABLED=true\n# <<< copilot-ledger <<<\n",
-            (await File.ReadAllTextAsync(
+            (await FileRetry.ReadAllTextAsync(
                 Path.Combine(temp.Path, "home", profileName))).Replace("\r\n", "\n"));
     }
 
@@ -284,7 +284,7 @@ public sealed class InstallCommandTests
         Assert.Contains(expectedMessage, run.Out);
         Assert.False(
             JsonDocument.Parse(
-                await File.ReadAllTextAsync(ManifestPath(temp.Path)))
+                await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)))
                 .RootElement.GetProperty("ghAliasSet").GetBoolean());
     }
 
@@ -412,7 +412,7 @@ public sealed class InstallCommandTests
                     "copilot-ledger.desktop")));
             Assert.Equal(
                 "export FOO=1\n",
-                (await File.ReadAllTextAsync(
+                (await FileRetry.ReadAllTextAsync(
                     Path.Combine(temp.Path, "home", ".zshrc"))).Replace("\r\n", "\n"));
         }
         else if (caseName == "no-manifest")
@@ -461,9 +461,9 @@ public sealed class InstallCommandTests
             Exec="/opt/bin/gh-ledger" daemon start
             Terminal=false
             """.ReplaceLineEndings("\n") + "\n",
-            await File.ReadAllTextAsync(autostart));
+            await FileRetry.ReadAllTextAsync(autostart));
         using (JsonDocument manifest = JsonDocument.Parse(
-                   await File.ReadAllTextAsync(ManifestPath(temp.Path))))
+                   await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path))))
         {
             Assert.Equal(
                 autostart,
@@ -554,9 +554,9 @@ public sealed class InstallCommandTests
             </dict>
             </plist>
             """.ReplaceLineEndings("\n") + "\n",
-            await File.ReadAllTextAsync(agent));
+            await FileRetry.ReadAllTextAsync(agent));
         using (JsonDocument manifest = JsonDocument.Parse(
-                   await File.ReadAllTextAsync(ManifestPath(temp.Path))))
+                   await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path))))
         {
             Assert.Equal(
                 agent,
@@ -619,7 +619,7 @@ public sealed class InstallCommandTests
         }
 
         using JsonDocument manifest = JsonDocument.Parse(
-            await File.ReadAllTextAsync(ManifestPath(temp.Path)));
+            await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));
         Assert.Equal(
             JsonValueKind.Null,
             manifest.RootElement.GetProperty("startupItem").ValueKind);
@@ -724,7 +724,7 @@ public sealed class InstallCommandTests
         }
 
         using JsonDocument manifest = JsonDocument.Parse(
-            await File.ReadAllTextAsync(ManifestPath(temp.Path)));
+            await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));
         Assert.Equal(
             JsonValueKind.Null,
             manifest.RootElement.GetProperty("startupItem").ValueKind);

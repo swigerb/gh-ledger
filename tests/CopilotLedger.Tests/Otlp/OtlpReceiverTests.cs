@@ -227,8 +227,14 @@ public sealed class OtlpReceiverTests
     [Fact]
     public async Task RC8_IngestFailure_ReturnsRetryable503()
     {
-        RecordingIngestor ingestor = new() { Exception = new InvalidOperationException() };
-        await using var app = Build(ingestor);
+        InvalidOperationException failure = new();
+        RecordingIngestor ingestor = new() { Exception = failure };
+        List<Exception> reported = [];
+        await using var app = OtlpReceiverApp.Build(
+            new OtlpReceiverOptions(),
+            ingestor,
+            builder => builder.UseTestServer(),
+            reported.Add);
         await app.StartAsync();
         using HttpClient client = app.GetTestClient();
         using HttpResponseMessage response = await client.SendAsync(
@@ -239,6 +245,7 @@ public sealed class OtlpReceiverTests
         Assert.Equal(
             "The ledger is unavailable; retry later.",
             await ReadJsonErrorAsync(response));
+        Assert.Same(failure, Assert.Single(reported));
     }
 
     [Fact]

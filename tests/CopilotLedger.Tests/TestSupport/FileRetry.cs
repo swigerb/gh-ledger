@@ -36,4 +36,21 @@ public static class FileRetry
             }
         }
     }
+
+    // Like ReadAllTextAsync, for synchronous helpers such as GitFixture.Create.
+    public static string ReadAllText(string path)
+    {
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            try
+            {
+                return File.ReadAllText(path);
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(25);
+            }
+        }
+    }
 }

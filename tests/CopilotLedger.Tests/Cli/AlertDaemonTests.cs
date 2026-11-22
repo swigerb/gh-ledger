@@ -71,7 +71,7 @@ public sealed class AlertDaemonTests
             process.Arguments);
         Assert.Equal(
             "<toast><visual><binding template=\"ToastGeneric\"><text>CopilotLedger circuit breaker tripped</text><text>swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status</text></binding></visual></toast>",
-            File.ReadAllText(
+            await FileRetry.ReadAllTextAsync(
                 Path.Combine(temp.Path, "data", "alert-toast.xml")));
         Assert.Contains(
             "ALERT CopilotLedger circuit breaker tripped: swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status",

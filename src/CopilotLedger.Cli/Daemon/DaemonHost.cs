@@ -104,10 +104,14 @@ internal static class DaemonHost
                     context.TimeProvider),
                 new CopilotSessionWorkspaceLocator(context.CopilotHome, context.TimeProvider),
                 monitor);
+            IngestFailureLog ingestFailures = new(
+                message => WriteLog(writer, context, message),
+                context.TimeProvider);
             app = OtlpReceiverApp.Build(
                 new OtlpReceiverOptions { Port = port },
                 ingestor,
-                context.ConfigureWebHost);
+                context.ConfigureWebHost,
+                ingestFailures.Report);
 
             if (!OperatingSystem.IsWindows())
             {

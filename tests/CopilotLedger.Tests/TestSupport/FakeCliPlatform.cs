@@ -9,9 +9,20 @@ public sealed record DetachedStart(
 
 public sealed class FakeCliPlatform : ICliPlatform
 {
+    private string? _homeDirectory;
+
     public bool IsWindows { get; set; }
     public bool IsMacOS { get; set; }
-    public string HomeDirectory { get; set; } = "/home/test";
+
+    // Throws until a test sets it, so install can't write a profile or sign-in item outside the test's TempDirectory.
+    public string HomeDirectory
+    {
+        get => _homeDirectory
+            ?? throw new InvalidOperationException(
+                "Set FakeCliPlatform.HomeDirectory to a directory under the test's TempDirectory.");
+        set => _homeDirectory = value;
+    }
+
     public string? ProcessPath { get; set; } = "/opt/gh-ledger/gh-ledger";
     public string? ShellPath { get; set; }
     public Dictionary<string, string> ProcessVariables { get; } =

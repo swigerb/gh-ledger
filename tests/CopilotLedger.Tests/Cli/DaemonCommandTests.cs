@@ -1,5 +1,10 @@
+using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using CopilotLedger.Tests.TestSupport;
+using Microsoft.Data.Sqlite;
 
 namespace CopilotLedger.Tests.Cli;
 
@@ -16,7 +21,7 @@ public sealed class DaemonCommandTests
         JsonElement root = state.RootElement;
         Assert.Equal(Environment.ProcessId, root.GetProperty("processId").GetInt32());
         Assert.Equal("http://localhost:4318", root.GetProperty("endpoint").GetString());
-        Assert.Equal("0.4.0", root.GetProperty("version").GetString());
+        Assert.Equal("0.4.1", root.GetProperty("version").GetString());
         Assert.Equal(
             Path.Combine(temp.Path, "data", "ledger.db"),
             root.GetProperty("databasePath").GetString());
@@ -159,5 +164,67 @@ public sealed class DaemonCommandTests
         Assert.Equal(0, daemon.ExitCode);
         Assert.False(File.Exists(stopPath));
         Assert.False(File.Exists(statePath));
+    }
+
+    [Fact]
+    public async Task DM7_IngestFailuresAreLoggedAtMostOnceAMinute()
+    {
+        using var temp = new TempDirectory();
+        ManualTimeProvider clock = new(
+            DateTimeOffset.Parse("2026-11-21T15:00:00Z", CultureInfo.InvariantCulture));
+        await using var harness = new CliHarness(temp.Path, timeProvider: clock);
+        await harness.StartInProcessDaemonAsync();
+
+        // Without the spans table, every request fails in RecordAsync, as it would with a broken or full ledger.
+        await using (SqliteConnection connection = new(
+            $"Data Source={Path.Combine(temp.Path, "data", "ledger.db")}"))
+        {
+            await connection.OpenAsync();
+            await using SqliteCommand drop = connection.CreateCommand();
+            drop.CommandText = "DROP TABLE spans;";
+            await drop.ExecuteNonQueryAsync();
+        }
+
+        using HttpClient client = harness.CreateDaemonClient();
+        HttpStatusCode first = await PostTraceAsync(client);
+        HttpStatusCode second = await PostTraceAsync(client);
+        clock.Advance(TimeSpan.FromMinutes(1));
+        HttpStatusCode third = await PostTraceAsync(client);
+
+        // After the clock steps back, the next failure is logged at once.
+        clock.Advance(TimeSpan.FromMinutes(-2));
+        HttpStatusCode fourth = await PostTraceAsync(client);
+        CliRun stop = await harness.RunAsync("daemon", "stop");
+        CliRun daemon = await harness.InProcessDaemon!;
+
+        Assert.Equal(
+            [
+                HttpStatusCode.ServiceUnavailable,
+                HttpStatusCode.ServiceUnavailable,
+                HttpStatusCode.ServiceUnavailable,
+                HttpStatusCode.ServiceUnavailable,
+            ],
+            [first, second, third, fourth]);
+        Assert.Equal(0, stop.ExitCode);
+        Assert.Equal(0, daemon.ExitCode);
+        Assert.Equal(
+            [
+                "2026-11-21T15:00:00.0000000+00:00 Warning: could not record spans: SqliteException: SQLite Error 1: 'no such table: spans'.",
+                "2026-11-21T15:01:00.0000000+00:00 Warning: could not record spans: SqliteException: SQLite Error 1: 'no such table: spans'.",
+                "2026-11-21T14:59:00.0000000+00:00 Warning: could not record spans: SqliteException: SQLite Error 1: 'no such table: spans'.",
+            ],
+            harness.DaemonOutput.Split('\n').Where(
+                line => line.Contains(" Warning: could not record spans: ", StringComparison.Ordinal)));
+
+        // The other lines are "daemon listening", "daemon stopped", and the empty string after the last line break.
+        Assert.Equal(6, harness.DaemonOutput.Split('\n').Length);
+    }
+
+    private static async Task<HttpStatusCode> PostTraceAsync(HttpClient client)
+    {
+        using ByteArrayContent content = new(Encoding.UTF8.GetBytes(OtlpFixtures.CopilotChatTraceJson));
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        using HttpResponseMessage response = await client.PostAsync("/v1/traces", content);
+        return response.StatusCode;
     }
 }

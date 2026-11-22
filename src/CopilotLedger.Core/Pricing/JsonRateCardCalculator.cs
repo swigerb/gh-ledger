@@ -70,13 +70,6 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         }
     }
 
-    public static JsonRateCardCalculator LoadDefault()
-    {
-        return File.Exists(LedgerPaths.DefaultRatesOverlayPath)
-            ? LoadEmbeddedWithOverlay(LedgerPaths.DefaultRatesOverlayPath)
-            : LoadEmbedded();
-    }
-
     // baseJson is a complete rates document, such as a downloaded rates.json; its errors have no prefix. When overlayPath
     // isn't null, that overlay is merged as LoadEmbeddedWithOverlay merges it, and its errors start with overlayPath.
     public static JsonRateCardCalculator LoadWithOverlay(string baseJson, string? overlayPath)
