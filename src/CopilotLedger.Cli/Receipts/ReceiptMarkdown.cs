@@ -15,7 +15,7 @@ public static class ReceiptMarkdown
 {
     public const string Marker = "<!-- copilot-ledger-receipt -->";
     public const string ReceiptsDirectory = ".github/copilot-ledger/receipts";
-    public const int MaximumBytes = 65536;   // as in action/receipt.ps1; keeps a receipt within GitHub's 65,536-character comment limit
+    public const int MaximumBytes = 65536;   // as in receipt.ps1 in swigerb/copilot-ledger-action; keeps a receipt within GitHub's 65,536-character comment limit
 
     internal static string ToJson(PullRequestReceipt receipt)
     {

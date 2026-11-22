@@ -32,9 +32,6 @@ jobs:
           dotnet-version: 10.0.x
       - run: dotnet build CopilotLedger.slnx
       - run: dotnet test CopilotLedger.slnx
-      - name: Test the receipt action
-        shell: pwsh
-        run: pwsh -NoProfile -File action/tests/receipt.Tests.ps1
       - name: Publish single-file gh-ledger
         shell: bash
         env:
