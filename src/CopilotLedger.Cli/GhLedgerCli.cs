@@ -12,12 +12,12 @@ namespace CopilotLedger.Cli;
 
 public static class GhLedgerCli
 {
-    // AssemblyInformationalVersionAttribute: "0.4.0"
+    // AssemblyInformationalVersionAttribute: "0.4.1"
     public static string Version { get; } =
         typeof(GhLedgerCli).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion
-        ?? "0.4.0";
+        ?? "0.4.1";
 
     // Builds a new RootCommand, parses args, and invokes it with
     // new InvocationConfiguration { Output = context.Out, Error = context.Error, ProcessTerminationTimeout = null }.

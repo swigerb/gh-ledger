@@ -33,18 +33,18 @@ public sealed class RatesCommandTests
             first.Out);
         Assert.Equal(
             Encoding.UTF8.GetBytes(Scaffold.ReplaceLineEndings("\n") + "\n"),
-            File.ReadAllBytes(path));
-        string original = await File.ReadAllTextAsync(path);
+            await FileRetry.ReadAllBytesAsync(path));
+        string original = await FileRetry.ReadAllTextAsync(path);
 
         CliRun second = await harness.RunAsync("rates", "init");
         Assert.Equal(1, second.ExitCode);
         Assert.Equal(
             $"{path} already exists. Use --force to replace it.\n",
             second.Error);
-        Assert.Equal(original, await File.ReadAllTextAsync(path));
+        Assert.Equal(original, await FileRetry.ReadAllTextAsync(path));
         CliRun forced = await harness.RunAsync("rates", "init", "--force");
         Assert.Equal(0, forced.ExitCode);
-        Assert.Equal(original, await File.ReadAllTextAsync(path));
+        Assert.Equal(original, await FileRetry.ReadAllTextAsync(path));
     }
 
     [Fact]

@@ -263,14 +263,14 @@ public sealed class BreakerCommandTests
 
             """.ReplaceLineEndings("\n"),
             enabled.Out);
-        Assert.Equal(expected, File.ReadAllText(flag));
+        Assert.Equal(expected, await FileRetry.ReadAllTextAsync(flag));
 
         File.Delete(flag);
         Assert.Equal(
             0,
             (await harness.RunAsync(
                 "breaker", "config", "--flag-file", "on")).ExitCode);
-        Assert.Equal(expected, File.ReadAllText(flag));
+        Assert.Equal(expected, await FileRetry.ReadAllTextAsync(flag));
 
         Assert.Equal(
             0,

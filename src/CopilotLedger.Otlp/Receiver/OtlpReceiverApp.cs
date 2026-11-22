@@ -12,10 +12,12 @@ public static class OtlpReceiverApp
 {
     // Serves the OTLP endpoints on localhost (127.0.0.1 and ::1) at options.Port.
     // configureWebHost runs after the defaults; tests pass builder => builder.UseTestServer().
+    // ingestFailed receives each exception from IngestAsync that turns a request into a 503, so the caller can log it.
     public static WebApplication Build(
         OtlpReceiverOptions options,
         ILedgerIngestor ingestor,
-        Action<IWebHostBuilder>? configureWebHost = null)
+        Action<IWebHostBuilder>? configureWebHost = null,
+        Action<Exception>? ingestFailed = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(ingestor);
@@ -43,9 +45,9 @@ public static class OtlpReceiverApp
         configureWebHost?.Invoke(builder.WebHost);
         WebApplication app = builder.Build();
 
-        app.MapPost("/v1/traces", context => HandleAsync(context, options, ingestor, traces: true));
-        app.MapPost("/v1/metrics", context => HandleAsync(context, options, ingestor, traces: false));
-        app.MapPost("/v1/logs", context => HandleAsync(context, options, ingestor, traces: false));
+        app.MapPost("/v1/traces", context => HandleAsync(context, options, ingestor, ingestFailed, traces: true));
+        app.MapPost("/v1/metrics", context => HandleAsync(context, options, ingestor, ingestFailed, traces: false));
+        app.MapPost("/v1/logs", context => HandleAsync(context, options, ingestor, ingestFailed, traces: false));
         return app;
     }
 
@@ -53,6 +55,7 @@ public static class OtlpReceiverApp
         HttpContext context,
         OtlpReceiverOptions options,
         ILedgerIngestor ingestor,
+        Action<Exception>? ingestFailed,
         bool traces)
     {
         OtlpEncoding encoding = OtlpHttp.EncodingFromContentType(
@@ -160,8 +163,9 @@ public static class OtlpReceiverApp
         {
             return;
         }
-        catch
+        catch (Exception ex)
         {
+            ingestFailed?.Invoke(ex);
             context.Response.Headers.RetryAfter = "5";
             await OtlpHttp.WriteErrorAsync(
                 context.Response,

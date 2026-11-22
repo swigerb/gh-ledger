@@ -24,6 +24,11 @@ public static class GitFixture
         File.WriteAllText(
             Path.Combine(git, "config"),
             "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n");
+
+        // Reading the files back waits out a brief antivirus lock, so the resolver sees them when the test runs.
+        _ = FileRetry.ReadAllText(Path.Combine(git, "HEAD"));
+        _ = FileRetry.ReadAllText(branch);
+        _ = FileRetry.ReadAllText(Path.Combine(git, "config"));
         return repo;
     }
 

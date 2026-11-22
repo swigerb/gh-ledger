@@ -156,9 +156,11 @@ public sealed class CircuitBreakerMonitor
 
         try
         {
+            // The trip is committed and published, so an aborted request mustn't leave its flag file unwritten.
             await CircuitFlagFile.SyncAsync(
                 _store,
-                trip.RepositoryRoot);
+                trip.RepositoryRoot,
+                CancellationToken.None);
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException)

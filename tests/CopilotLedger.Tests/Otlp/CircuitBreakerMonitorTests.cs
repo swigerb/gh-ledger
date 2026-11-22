@@ -240,10 +240,10 @@ public sealed class CircuitBreakerMonitorTests
             """;
         Assert.Equal(
             expected.ReplaceLineEndings("\n"),
-            File.ReadAllText(flag));
+            await FileRetry.ReadAllTextAsync(flag));
         Assert.Equal(
             "*\n",
-            File.ReadAllText(
+            await FileRetry.ReadAllTextAsync(
                 Path.Combine(harness.Repo, ".copilot-ledger", ".gitignore")));
 
         await harness.Store.ResetBreakerTripsAsync(BreakerTripFilter.All);
@@ -391,6 +391,38 @@ public sealed class CircuitBreakerMonitorTests
                 "swigerb/copilot-ledger",
                 "feature/ledger"));
         Assert.Equal(NOW, exceeded.AlertedAt);
+    }
+
+    [Fact]
+    public async Task BM12_CancellationAfterATripStillWritesTheFlagFile()
+    {
+        using TempDirectory temp = new();
+        Harness harness = await Harness.CreateAsync(
+            temp,
+            BreakerSettings.Default with { FlagFile = true },
+            monitor: false);
+        for (int request = 1; request <= 6; request++)
+        {
+            await harness.Ingestor.IngestAsync(TraceHRequest(request));
+        }
+
+        // The sink cancels the token as the trip is published, as a client that disconnects right then would.
+        using CancellationTokenSource aborted = new();
+        CancelingAlertSink sink = new(aborted);
+        CircuitBreakerMonitor breaker = new(harness.Store, sink);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => breaker.EvaluateAsync([TraceH], aborted.Token));
+
+        IReadOnlyList<BreakerTrip> trips =
+            await harness.Store.GetOpenBreakerTripsAsync(BreakerTripFilter.All);
+        AssertTripH(Assert.Single(trips), harness.Repo);
+        Assert.Equal(BreakerAlertKind.Trip, Assert.Single(sink.Alerts).Kind);
+        Assert.Empty(sink.Warnings);
+        string directory = Path.Combine(harness.Repo, ".copilot-ledger");
+        Assert.Equal(
+            CircuitFlagFile.Render(harness.Repo, trips),
+            await FileRetry.ReadAllTextAsync(Path.Combine(directory, "CIRCUIT_OPEN")));
+        Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
     }
 
     private static void AssertTripH(BreakerTrip trip, string repo)
@@ -546,5 +578,20 @@ public sealed class CircuitBreakerMonitorTests
                     new CopilotSessionWorkspaceLocator(home));
             return new Harness(databasePath, store, ingestor, sink, repo);
         }
+    }
+
+    // Records alerts and warnings, and cancels source when an alert is published.
+    private sealed class CancelingAlertSink(CancellationTokenSource source) : IBreakerAlertSink
+    {
+        public List<BreakerAlert> Alerts { get; } = [];
+        public List<string> Warnings { get; } = [];
+
+        public void Publish(BreakerAlert alert)
+        {
+            Alerts.Add(alert);
+            source.Cancel();
+        }
+
+        public void Warn(string message) => Warnings.Add(message);
     }
 }

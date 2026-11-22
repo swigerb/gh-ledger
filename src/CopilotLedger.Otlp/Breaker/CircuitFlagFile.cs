@@ -68,7 +68,8 @@ public static class CircuitFlagFile
     }
 
     // Makes the flag file match the ledger. Throws IOException or UnauthorizedAccessException from the file system, and
-    // whatever the store throws. Does nothing when repositoryRoot isn't an existing directory.
+    // whatever the store throws, including OperationCanceledException. Whatever it throws, it first tries to delete the
+    // temporary file it was writing. Does nothing when repositoryRoot isn't an existing directory.
     public static async Task SyncAsync(
         SqliteLedgerStore store,
         string repositoryRoot,
@@ -118,8 +119,7 @@ public static class CircuitFlagFile
                     await File.WriteAllTextAsync(temp, desired, Utf8, cancellationToken);
                     File.Move(temp, path, overwrite: true);
                 }
-                catch (Exception ex) when (
-                    ex is IOException or UnauthorizedAccessException)
+                catch
                 {
                     try
                     {
