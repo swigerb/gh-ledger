@@ -1,8 +1,8 @@
-# Using gh-ledger
+# gh-ledger command reference
 
-## What gh-ledger does
+gh-ledger runs a local OpenTelemetry receiver at `http://localhost:4318`, records GitHub Copilot's usage in a SQLite ledger on your machine, and reports AI spend by repository, branch, model, agent, and prompt. It needs no Docker and no cloud service. For walkthroughs with sample output, see the [user guide](guide.md).
 
-CopilotLedger runs a local OTLP receiver at `http://localhost:4318`. It records spend from Copilot CLI, the GitHub Copilot app, and VS Code in `~/.copilot-ledger/ledger.db`. It needs no Docker and no cloud service.
+**Command names.** This page writes commands as `gh ledger <command>`, which runs gh-ledger as a GitHub CLI extension. If you built gh-ledger yourself and have no `gh ledger` alias, run the binary by its path instead, as `<folder>/gh-ledger <command>`. `gh-ledger` is the program's own name, so `--help` and gh-ledger's messages say `gh-ledger`; with the extension, run the commands they show as `gh ledger`.
 
 ## Get gh-ledger
 
@@ -12,119 +12,141 @@ Install the GitHub CLI extension:
 gh extension install swigerb/gh-ledger
 ```
 
-It downloads the release binary for your platform, which then runs as `gh ledger <command>`. Or publish one single-file, self-contained binary for your runtime identifier:
+gh downloads the release binary for your platform to:
+
+- Windows: `%LOCALAPPDATA%\GitHub CLI\extensions\gh-ledger\gh-ledger.exe`
+- macOS and Linux: `~/.local/share/gh/extensions/gh-ledger/gh-ledger`
+
+When `XDG_DATA_HOME` is set, gh uses `$XDG_DATA_HOME/gh/extensions/gh-ledger/` instead. The path stays the same when you upgrade, so the sign-in item and an MCP registration keep working.
+
+To build from source instead, publish one single-file, self-contained binary for your runtime identifier:
 
 ```shell
 dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r <rid> -o artifacts/gh-ledger
 ```
 
-Use `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, or `osx-arm64`. Keep the binary in a permanent folder, because `install` points the sign-in item and the `gh ledger` alias at it.
+Use `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, or `osx-arm64`. Move `gh-ledger` (`gh-ledger.exe` on Windows) from `artifacts/gh-ledger` to a permanent folder, then run `<folder>/gh-ledger install`. `install` points the sign-in item and the `gh ledger` alias at that copy; it doesn't add the folder to `PATH`.
 
-## Install
+## Install and uninstall
 
-Run `gh-ledger install`. It sets `COPILOT_OTEL_ENABLED=true` in the Windows user environment or in a marked block in your shell profile, sets the `gh ledger` alias (unless gh-ledger is running as the GitHub CLI extension, which provides `gh ledger` itself), registers the daemon to start when you sign in, starts the daemon, and records the changes in `install.json`. It changes nothing else: in particular, it does not edit `PATH` or other OpenTelemetry variables.
+`gh ledger install` makes these changes and records them in `install.json`:
 
-Use `gh-ledger install --dry-run` to print the changes without making them. Restart the GitHub Copilot app, VS Code, and open terminals afterward.
+- It sets `COPILOT_OTEL_ENABLED=true`: as a user environment variable on Windows, or in a marked block in your shell profile elsewhere (`.zshrc` for zsh, `.bash_profile` for bash on macOS, `.bashrc` for bash on Linux, and `.profile` otherwise).
+- For a binary you built, it sets the `gh ledger` alias when `gh` is on `PATH`. The extension doesn't need one. On Windows, the alias needs `sh.exe` from Git for Windows.
+- It registers the daemon to start when you sign in: the `CopilotLedger` value under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` on Windows, `~/Library/LaunchAgents/io.github.swigerb.copilot-ledger.plist` on macOS, or `copilot-ledger.desktop` in `$XDG_CONFIG_HOME/autostart` (default `~/.config/autostart`) on Linux.
+- It starts the daemon.
 
-The sign-in item is the `CopilotLedger` value under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` on Windows, `~/Library/LaunchAgents/io.github.swigerb.copilot-ledger.plist` on macOS, and `copilot-ledger.desktop` in `$XDG_CONFIG_HOME/autostart` (default `~/.config/autostart`) on Linux.
+It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTelemetry variables. Use `--dry-run` to print the changes without making them. Afterward, restart the GitHub Copilot app, VS Code, and open terminals so they see `COPILOT_OTEL_ENABLED`.
 
-`install` and `gh-ledger status` show these warnings:
+`install` and `status` warn about settings that keep Copilot's telemetry from reaching CopilotLedger:
 
-- `OTEL_EXPORTER_OTLP_ENDPOINT` set to an endpoint elsewhere means Copilot exports there instead of to CopilotLedger.
-- `COPILOT_OTEL_FILE_EXPORTER_PATH` means Copilot writes telemetry to that file instead of exporting it to CopilotLedger.
-- `COPILOT_OTEL_EXPORTER_TYPE` set to anything other than `otlp-http` means it should be removed or set to `otlp-http`.
-- Any of `OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_KEY`, `OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE`, `OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE`, or `OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY` means Copilot turns off export to `http://` endpoints.
-- `OTEL_EXPORTER_OTLP_PROTOCOL` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` set to `grpc` is unsupported because CopilotLedger accepts only `http/protobuf` and `http/json`.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` set to any endpoint other than `http://localhost:4318`.
+- `COPILOT_OTEL_FILE_EXPORTER_PATH`, which makes Copilot write telemetry to a file instead.
+- `COPILOT_OTEL_EXPORTER_TYPE` set to anything other than `otlp-http`.
+- Any of `OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_KEY`, `OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE`, `OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE`, or `OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY`, which turn off export to `http://` endpoints.
+- `OTEL_EXPORTER_OTLP_PROTOCOL` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` set to `grpc`; CopilotLedger accepts only `http/protobuf` and `http/json`.
 
-On Windows, the `gh ledger` alias needs `sh.exe` from Git for Windows; the extension and the `gh-ledger` executable don't.
+`install` also warns when `COPILOT_LEDGER_HOME` is set, because the daemon started at sign-in uses it only if your sign-in session sets it too. `status` warns when `install.json` names a different executable, for example after you switch from a binary you built to the extension; run `install` again from the copy you want to keep.
 
-As the extension, `status` shows `(GitHub CLI extension)` after the version and names `gh ledger` commands. `status` warns when `install.json` names a different executable, for example after switching from a downloaded binary to the extension; run `install` again from the copy you want the sign-in item to start.
+`gh ledger uninstall` stops the daemon, removes the sign-in item, and reverses the environment variable, profile block, and alias changes recorded in `install.json`, restoring the variable's previous value. `--dry-run` prints the changes without making them. Your ledger stays, and so does an MCP registration: remove it with `copilot mcp remove ledger`, and remove the `ledger` entry from VS Code's `mcp.json` if you added one. To remove the extension too, run `gh extension remove ledger` afterward.
 
-The sign-in item and the daemon run the extension's binary, and Windows can't replace a running program. Stop the daemon before you upgrade: `gh ledger daemon stop`, `gh extension upgrade ledger`, then `gh ledger daemon start`.
+**Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server. To upgrade:
+
+```shell
+gh ledger daemon stop
+gh extension upgrade ledger
+gh ledger daemon start
+```
 
 ## The daemon
 
-`gh-ledger daemon run` runs the receiver in the foreground. `gh-ledger daemon start` starts it as a detached process, and `gh-ledger daemon stop` stops it. `daemon start` gives the daemon the null device as its standard input, output, and error, so a script can capture its output, for example `started=$(gh-ledger daemon start)`, and go on while the daemon runs. The daemon uses `daemon.json` for state, `daemon.lock` for single-instance locking, and `daemon.log` for detached-process logs.
+- `gh ledger daemon run [--port <port>] [--log-file <path>]` runs the receiver in the foreground. It logs to standard output, or appends to `--log-file`.
+- `gh ledger daemon start [--port <port>]` starts it as a detached process that logs to `daemon.log`. The daemon gets the null device as its standard input, output, and error, so a script can capture the command's output, for example `started=$(gh ledger daemon start)`.
+- `gh ledger daemon stop` asks the daemon to stop, waits up to 15 seconds, and then ends its process if it's still running.
 
-After `install`, the daemon starts when you sign in. Copilot drops telemetry while the daemon is not running.
+The port defaults to 4318. Only one daemon runs at a time. Copilot's telemetry is lost while no daemon is running.
 
 ## Reports
 
-Use `gh-ledger status [--json]` for daemon state, rates, Copilot export configuration, warnings, and today/7-day/30-day totals.
+| Command | Reports |
+|---|---|
+| `gh ledger status [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals for today and the last 7 and 30 days |
+| `gh ledger branch [--repo <key> \| --all-repos] [--since <period>] [--json]` | Spend by branch in the current repository, or in another or every repository; outside a Git repository, every repository |
+| `gh ledger agents [--repo <key>] [--since <period>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
+| `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
 
-Use `gh-ledger branch [--repo <key> | --all-repos] [--since <period>] [--json]` for repository branch spend. Without a repository option, it uses the current Git repository; it falls back to all repositories outside a repository.
-
-Use `gh-ledger agents [--repo <key>] [--since <period>] [--json]` for spend by agent, and `gh-ledger top-prompts [--repo <key>] [--since <period>] [--limit <1-100>] [--json]` for the highest-cost prompt traces. `--limit` defaults to 10.
-
-The repository key can be an `owner/repo` slug, a repository root, or `(none)`. Periods accept `today`, `all`, `1d` through `3650d`, or `yyyy-MM-dd`; the default is `30d`.
-
-Tables round money to cents. JSON preserves exact decimal amounts.
-
-`(none)` under Agent means Copilot reported no agent name. Copilot's default agent reports none, while built-in subagents such as `explore` report their own names. A custom agent reports the `name` in its `.agent.md` file both when started with `copilot --agent` and when called as a subagent. A custom agent without a `name` reports its file name without `.agent.md`.
+- A repository key is an `owner/repo` slug, a local repository root for a repository whose `origin` has no `owner/repo` path, or `(none)` for spend outside any repository.
+- `--since` takes `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date; the default is `30d`.
+- Tables round money to cents; JSON keeps exact amounts.
+- Spend is split into GitHub AI credits (`AI credits` and `GitHub USD`), Foundry BYOK (`BYOK USD`), and local models, whose `Local saved` is the cloud spend they avoided. `Unpriced` counts requests without a price; see [configuration.md](configuration.md).
+- An agent shows as `(none)` when Copilot reports no agent name, as its default agent does. Built-in subagents such as `explore` report their own names, and a custom agent reports the `name` in its `.agent.md` file, or the file's name without `.agent.md`.
 
 ## Circuit breaker
 
-The daemon watches every prompt for two kinds of runaway loop and trips a circuit breaker when it sees one:
+The daemon checks every prompt against two rules and trips the breaker when one is broken:
 
-- **Credit velocity.** One prompt's billed spend (GitHub AI credits plus BYOK) exceeds 150 AI credits ($1.50) within 5 minutes.
-- **Retry churn.** One prompt makes 5 failed tool calls in a row, with no successful command and no new commit between them. A failed call is a shell command that exits with a non-zero code, or a tool call that Copilot reports as an error.
+- **Credit velocity:** one prompt's billed spend, GitHub AI credits plus Foundry BYOK at $0.01 per credit, exceeds 150 AI credits within 5 minutes.
+- **Retry churn:** one prompt makes 5 failed tool calls in a row, with no successful command and no new commit between them. A failed call is a shell command with a non-zero exit code or a tool call that Copilot reports as an error. Copilot doesn't export the commands themselves, so any failing command counts. VS Code's Local agent harness may not report exit codes, so this rule may not trip there.
 
-Copilot exports neither the command a shell call ran nor the file an edit changed, so retry churn counts any failing command, and any successful command resets the count. Edits that never run a failing command don't count. VS Code's Local agent harness may not report exit codes, so retry churn may never trip there.
+A trip writes an `ALERT` line to `daemon.log` and shows a desktop notification: a toast on Windows, a notification on macOS, and `notify-send` on Linux when it's installed. It doesn't stop the agent. Each rule trips at most once per prompt, and a trip stays open until you reset it.
 
-When the breaker trips, the daemon writes an `ALERT` line to `daemon.log` and shows a desktop notification: a toast on Windows, a notification on macOS, or `notify-send` on Linux when it's installed. The trip stays open until you reset it. Each prompt trips each rule at most once.
+- `gh ledger breaker status [--json]` shows the rules and the open trips.
+- `gh ledger breaker reset` closes the current branch's open trips. Use `--id <id>` for one trip, `--repo <key> --branch <name>` for another branch, or `--all`.
+- `gh ledger breaker config` shows the rules and changes them with `--velocity-credits <credits>` (1 to 1,000,000, with up to 2 decimal places), `--velocity-minutes <minutes>` (1 to 1,440), and `--churn-failures <count>` (2 to 100). `--notifications off` keeps the `ALERT` line but stops desktop notifications.
 
-- `gh-ledger breaker status [--json]` shows the rules and the open trips.
-- `gh-ledger breaker reset` closes the open trips on the current branch. Use `--id <id>` for one trip, `--repo <key> --branch <name>` for another branch, or `--all`.
-- `gh-ledger breaker config` shows the rules. Change them with `--velocity-credits <credits>` (1 to 1000000), `--velocity-minutes <minutes>` (1 to 1440), and `--churn-failures <count>` (2 to 100). `--notifications off` keeps the log line but stops desktop notifications.
-- `gh-ledger breaker config --flag-file on` also writes `.copilot-ledger/CIRCUIT_OPEN` in the repository root while a trip is open, so a wrapper script can stop an agent. The file holds JSON describing the open trips. A `.copilot-ledger/.gitignore` keeps it out of commits, and `breaker reset` removes it. Trips without a local repository root get no file. If the daemon logs that it couldn't update the file, run `gh-ledger breaker config --flag-file on` again to rewrite it.
+With `--flag-file on`, the daemon also writes `.copilot-ledger/CIRCUIT_OPEN` in the repository root while a trip is open there, so a wrapper script can stop an agent. The file holds the open trips as JSON, a `.copilot-ledger/.gitignore` keeps it out of commits, and `breaker reset` removes it. Trips outside a local repository get no file. If the daemon logs that it couldn't update the file, run `gh ledger breaker config --flag-file on` again.
 
 ## Budgets
 
-A budget is a soft cap in AI credits for one branch. When the branch's billed spend exceeds it, the daemon alerts once; nothing is blocked. BYOK spend counts at $0.01 per AI credit.
+A budget is a soft cap in AI credits for one branch. When the branch's billed spend exceeds it, the daemon alerts once, the same way as a breaker trip; nothing is blocked. Foundry BYOK spend counts at $0.01 per credit.
 
-- `gh-ledger budget set <credits>` sets the current branch's budget. Setting it again re-arms the alert.
-- `gh-ledger budget clear` removes it, and `gh-ledger budget list [--json]` lists every budget with its spend.
-- `budget set` and `budget clear` accept `--repo <key> --branch <name>` for another branch.
+- `gh ledger budget set <credits> [--repo <key> --branch <name>]` sets the current branch's budget, or another branch's. Credits are more than 0 and at most 1,000,000, with up to 2 decimal places. Setting a budget again re-arms its alert.
+- `gh ledger budget clear [--repo <key> --branch <name>]` removes it.
+- `gh ledger budget list [--json]` lists every budget with its spend.
 
 ## Pull request receipts
 
-`gh-ledger export-pr` writes the current branch's receipt for its pull request to `.github/copilot-ledger/receipts/<branch>-<hash>.md` in the repository root, where `<branch>` is the branch name with characters other than letters, digits, `.`, `_`, and `-` replaced by `-`. Commit that file on the branch and push it. The CopilotLedger action then posts it on the pull request; see [Posting PR receipts with the CopilotLedger action](action.md).
+`gh ledger export-pr` writes the current branch's AI spend receipt to `.github/copilot-ledger/receipts/<branch>-<hash>.md` in the repository, where `<branch>` is the branch name with characters other than letters, digits, `.`, `_`, and `-` replaced by `-`. Commit the file on the branch and push it; the [CopilotLedger PR Receipt action](https://github.com/swigerb/copilot-ledger-action), `uses: swigerb/copilot-ledger-action@v1`, posts it on the pull request.
 
-The receipt covers all spend recorded on the branch. It lists GitHub AI Credits by model, Foundry BYOK spend, local-model tokens and the cloud spend they avoided, requests that couldn't be priced, the number of circuit-breaker trips, and the most expensive prompt in AI credits. A collapsible section holds a table by billing channel and model, and the receipt's data as JSON. Its totals equal the branch's row in `gh-ledger branch --since all --json`.
+The receipt covers all spend recorded on the branch: GitHub AI credits by model, Foundry BYOK spend, local-model tokens and the cloud spend they avoided, unpriced requests, circuit-breaker trips, and the most expensive prompt, with the data as JSON. A turn is one model request. Its totals equal the branch's row in `gh ledger branch --since all --json`. Branch and model names appear in code spans, so they never become mentions or links.
 
 - `--stdout` writes the Markdown to standard output instead of the file.
 - `--json` writes the JSON data to standard output instead of the file.
 
-A receipt can be at most 65,536 bytes, the most the CopilotLedger action posts; `export-pr` refuses a larger one, with or without `--stdout`. `export-pr` needs a branch with at least one commit and a GitHub remote named `origin`. A turn is one model request. Branch and model names appear in code spans, so they never become mentions or links.
+`export-pr` needs a branch with at least one commit and a GitHub remote named `origin`, and it refuses a receipt over 65,536 bytes, the most the action posts.
 
 ## MCP server
 
-`gh-ledger mcp` runs an MCP server on standard input and output, so Copilot can read the ledger and see the circuit breaker. Register it once with Copilot CLI:
+`gh ledger mcp` runs an MCP server on standard input and output, so Copilot can read the ledger and see the circuit breaker. Register it with Copilot CLI using the gh-ledger binary's path, which for the extension is shown under [Get gh-ledger](#get-gh-ledger). In PowerShell on Windows:
 
-```shell
-copilot mcp add ledger -- /path/to/gh-ledger mcp
+```powershell
+copilot mcp add ledger -- "$env:LOCALAPPDATA\GitHub CLI\extensions\gh-ledger\gh-ledger.exe" mcp
 ```
 
-That adds `ledger` to `~/.copilot/mcp-config.json`. VS Code's Copilot agent harness reads the same file. The GitHub Copilot app runs the same agent runtime; if it doesn't list the server, add it in the app's MCP settings with the same command. For VS Code's Local agent harness, add the server to `mcp.json` under `servers`, with `"command": "/path/to/gh-ledger"` and `"args": ["mcp"]`.
+On macOS and Linux:
 
-The server offers four tools. Each uses the current repository and branch unless you pass `repository` and `branch`:
+```shell
+copilot mcp add ledger -- ~/.local/share/gh/extensions/gh-ledger/gh-ledger mcp
+```
 
-- `get_branch_ledger`: the branch's spend, top model, budget, and circuit-breaker status.
+That adds `ledger` to `~/.copilot/mcp-config.json`, which VS Code's Copilot agent harness also reads. The GitHub Copilot app runs the same agent runtime; if it doesn't list the server, add it in the app's MCP settings with the same command. For VS Code's Local agent harness, add the server to `mcp.json` under `servers`, with the binary's path as `"command"` and `["mcp"]` as `"args"`.
+
+The server has four tools. Each uses the current repository and branch unless you pass `repository` and `branch`:
+
+- `get_branch_ledger`: the branch's spend, top model, budget, and circuit-breaker state.
 - `get_top_expensive_prompts`: the branch's most expensive prompt chains, with output tokens and failed tool calls; `limit` (1 to 20, default 5) and `orderBy` (`cost`, `outputTokens`, or `failedToolCalls`).
 - `get_agent_breakdown`: the branch's spend by agent.
 - `set_branch_budget`: sets the branch's budget in AI credits (`aiCredits`).
 
-The first three are read-only. `set_branch_budget` changes only the budget, so Copilot asks before running it; in prompt mode, allow it with `--allow-tool 'ledger(set_branch_budget)'`. No tool can reset the circuit breaker. While the breaker is open for the branch or the session, or the branch is over its budget, every result starts with a `WARNING:` line.
+The first three are read-only. `set_branch_budget` changes only the budget, so Copilot asks before running it; in prompt mode, allow it with `--allow-tool 'ledger(set_branch_budget)'`. While the breaker is open for the branch or the session, or the branch is over budget, every result starts with a `WARNING:` line. No tool can reset the breaker.
 
 ## Rates
 
-Run `gh-ledger rates init` to create a starter overlay and `gh-ledger rates validate` to validate it. See [configuration.md](configuration.md) for the rates format and pricing channels.
+- `gh ledger rates init [--force]` creates a starter rates overlay, `rates.json` in the data directory.
+- `gh ledger rates validate [--file <path>]` checks the overlay, or another file, with the same rules the daemon uses.
+- `gh ledger rates update` downloads `rates.json` from the latest gh-ledger release and keeps it when it's newer than the rates in use and your overlay still applies. It uses your system proxy. Restart the daemon afterward; it reads rates when it starts.
 
-`gh-ledger rates update` downloads `rates.json` from the latest gh-ledger release and keeps it when it's newer than the rates in use and your overlay still applies to it. It uses your system proxy. Restart the daemon afterward; it reads rates when it starts.
-
-## Uninstall
-
-`gh-ledger uninstall` stops the daemon if it is running, removes the sign-in item, and reverses the environment variable, profile block, and `gh` alias changes recorded by `install`, restoring the previous environment value when applicable. `gh-ledger uninstall --dry-run` prints the changes without applying them. Ledger data is kept. If you installed the GitHub CLI extension, run `gh extension remove ledger` afterward.
+See [configuration.md](configuration.md) for pricing, the overlay format, and where files are kept.
 
 ## Privacy
 
@@ -132,10 +154,10 @@ CopilotLedger stores no prompt or response content, working directories, or remo
 
 ## Troubleshooting
 
-- **Port 4318 in use.** Stop the other listener or the old daemon before starting CopilotLedger.
-- **`gh extension upgrade` or `remove` fails on Windows.** The daemon is running from the extension's binary. Run `gh ledger daemon stop` first.
-- **Nothing recorded.** Run `gh-ledger status`, address its warnings, and restart Copilot.
-- **Desktop-launched apps may not read the profile.** Apps started outside a terminal, such as from the macOS Dock or a Linux desktop launcher, may not read shell profiles, so they may not see the `COPILOT_OTEL_ENABLED` that `install` put there. If no data is recorded after using such an app, start it from a terminal.
-- **Move the data directory.** Set `COPILOT_LEDGER_HOME` before running `gh-ledger`.
-- **A console window flashes at sign-in.** Windows 11 24H2 and later start `gh-ledger` without a window. Earlier versions of Windows show its window for about a second.
-- **The daemon started at sign-in uses the default data directory.** If you set `COPILOT_LEDGER_HOME`, set it where your sign-in session sees it, such as a Windows user environment variable.
+- **Nothing is recorded.** Run `gh ledger status`, address its warnings, and restart Copilot.
+- **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example because the disk is full or the database is damaged, and Copilot is told to retry. The warning repeats at most once a minute; fix the cause shown after it.
+- **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
+- **`gh extension upgrade` or `remove` fails on Windows.** A program is running the extension's binary: the daemon, or the MCP server of a Copilot session. Run `gh ledger daemon stop`, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code, then try again.
+- **Apps started from the desktop record nothing.** On macOS and Linux, apps started outside a terminal may not read your shell profile, so they don't see `COPILOT_OTEL_ENABLED`. Start them from a terminal.
+- **Move the data directory.** Set `COPILOT_LEDGER_HOME` before running gh-ledger. The daemon started at sign-in uses it only if your sign-in session sets it too, for example as a Windows user environment variable.
+- **A console window flashes at sign-in.** Windows 11 24H2 and later start gh-ledger without a window; earlier versions show it for about a second.

@@ -9,11 +9,13 @@ CopilotLedger works with no configuration. This page explains how it prices usag
 | `~/.copilot-ledger/` | Data directory (`%USERPROFILE%\.copilot-ledger\` on Windows) |
 | `~/.copilot-ledger/ledger.db` | The local SQLite ledger (WAL mode) |
 | `~/.copilot-ledger/rates.json` | Optional rates overlay, which you create |
-| `~/.copilot-ledger/rates.downloaded.json` | Newer built-in rates saved by `gh-ledger rates update` |
+| `~/.copilot-ledger/rates.downloaded.json` | Newer built-in rates saved by `gh ledger rates update` |
 | `~/.copilot-ledger/daemon.json` | Written while the daemon runs: process ID, endpoint, start time, and database path |
 | `~/.copilot-ledger/daemon.lock` | Held while the daemon runs, so only one daemon runs at a time |
-| `~/.copilot-ledger/daemon.log` | The daemon's log when it's started with `gh-ledger daemon start` |
-| `~/.copilot-ledger/install.json` | What `gh-ledger install` changed, so `gh-ledger uninstall` can undo it |
+| `~/.copilot-ledger/daemon.stop` | Written by `gh ledger daemon stop` to ask the daemon to stop; the daemon deletes it |
+| `~/.copilot-ledger/daemon.log` | The daemon's log when it's started with `gh ledger daemon start` or at sign-in |
+| `~/.copilot-ledger/alert-toast.xml` | Windows only: the latest desktop notification, which the daemon passes to PowerShell to show it |
+| `~/.copilot-ledger/install.json` | What `gh ledger install` changed, so `gh ledger uninstall` can undo it |
 
 Set the `COPILOT_LEDGER_HOME` environment variable to keep these files in another directory.
 
@@ -53,13 +55,13 @@ With bring-your-own-key (BYOK), Microsoft Foundry bills you directly, not GitHub
 
 Until you add prices, BYOK requests are still counted and attributed to repository, branch, model, and agent, with status `byok_unpriced` and $0.00 cost.
 
-## Newer rates between releases: `gh-ledger rates update`
+## Newer rates between releases: `gh ledger rates update`
 
-Each gh-ledger release attaches the `rates.json` it was built with. `gh-ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.json`, through your system proxy, and checks it with the same rules as the built-in rates.
+Each gh-ledger release attaches the `rates.json` it was built with. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.json`, through your system proxy, and checks it with the same rules as the built-in rates.
 
 Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
 
-CopilotLedger's base rates are `rates.downloaded.json` when that file is valid and newer than the built-in rates, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read is ignored with a warning in `gh-ledger status`, `gh-ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh-ledger status` shows `(downloaded)` after the rates version when the download is in use.
+CopilotLedger's base rates are `rates.downloaded.json` when that file is valid and newer than the built-in rates, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read is ignored with a warning in `gh ledger status`, `gh ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh ledger status` shows `(downloaded)` after the rates version when the download is in use.
 
 The daemon reads rates when it starts, so restart it after an update. Spans already recorded keep the prices they were recorded with.
 
@@ -67,7 +69,7 @@ The daemon reads rates when it starts, so restart it after an update. Spans alre
 
 To change pricing, create `~/.copilot-ledger/rates.json`. CopilotLedger merges it over the built-in rates when it loads them, so you only write what you want to change.
 
-Run `gh-ledger rates init` to create a starter file, and `gh-ledger rates validate` to check it against the same rules the daemon uses.
+Run `gh ledger rates init` to create a starter file, and `gh ledger rates validate` to check it against the same rules the daemon uses. The daemon reads the file when it starts, so restart it after a change: `gh ledger daemon stop`, then `gh ledger daemon start`.
 
 - Every section is optional except `"schemaVersion": 1`.
 - A model with a new `id` is added. A model with the same `id` as a built-in one replaces it.
