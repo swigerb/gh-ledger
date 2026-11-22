@@ -95,7 +95,7 @@ internal static class DaemonFiles
     }
 
     // Deletes the file. When Windows reports it in use (for example while antivirus scans a file that was
-    // just written), retries every 25 ms, up to 20 attempts, then gives up silently.
+    // just written), retries every 25 ms, up to 200 attempts (5 seconds), then gives up silently.
     public static void DeleteIfExists(string path)
     {
         for (int attempt = 1; ; attempt++)
@@ -121,7 +121,7 @@ internal static class DaemonFiles
         }
     }
 
-    private const int DeleteAttempts = 20;
+    private const int DeleteAttempts = 200;
 
     private static readonly TimeSpan DeleteRetryDelay = TimeSpan.FromMilliseconds(25);
 }
