@@ -16,7 +16,7 @@ Task R is different. It runs in the other repository, swigerb/copilot-ledger-act
 
 Every task ships with its tests, listed under "Test specifications". A gh-ledger task is done only when `dotnet test` runs the whole suite, including its new cases, with 0 failed and 0 skipped. Task R's verification runs the action's PowerShell tests.
 
-Most new code and docs in this plan are marked **copy exactly**. The architect built every task in scratch copies of both repositories: the code compiled with `TreatWarningsAsErrors`, `dotnet test` passed 670 tests after Task 5, and the action's PowerShell tests passed all 18 cases. Copy each block character for character, including every comment line, `using` directive, blank line, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs. Write every new file with `\n` line breaks and one `\n` at the end. An edited file keeps its byte order mark and its ending as they are. Of the files this plan edits, only the test project file has a byte order mark, and it has no line break at its end.
+Most new code and docs in this plan are marked **copy exactly**. The architect built every task in scratch copies of both repositories: the code compiled with `TreatWarningsAsErrors`, `dotnet test` passed 671 tests after Task 5, and the action's PowerShell tests passed all 18 cases. Copy each block character for character, including every comment line, `using` directive, blank line, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs. Write every new file with `\n` line breaks and one `\n` at the end. An edited file keeps its byte order mark and its ending as they are. Of the files this plan edits, only the test project file has a byte order mark, and it has no line break at its end.
 
 Each test case lists every assertion it makes, most of them as code. Write all of them, in the order given. Don't drop one because it looks redundant, and don't turn an exact comparison into `Contains` or `StartsWith`. Never normalize the product's output in a test (no `ReplaceLineEndings`, `Replace("\r\n", …)`, or `Trim` on an actual value); `CliHarness` already turns `\r\n` into `\n` in `Out` and `Error`.
 
@@ -24,7 +24,7 @@ The final section, "Final step: end-to-end check and releases", isn't a builder 
 
 ## Tasks
 
-- [ ] Task 1: Audit Fixes & Version 0.4.1 (CopilotLedger.Otlp, Core, Cli & tests). The daemon logs why it answers 503, at most once a minute (A1). Test reads and writes of fresh files wait out antivirus locks (A2). Dead members are removed (A5), the fake platform loses its default home directory (A10), and the breaker passes its cancellation token on (A11). The version becomes 0.4.1.
+- [ ] Task 1: Audit Fixes & Version 0.4.1 (CopilotLedger.Otlp, Core, Cli & tests). The daemon logs why it answers 503, at most once a minute (A1). Test reads and writes of fresh files wait out antivirus locks (A2). Dead members are removed (A5), the fake platform loses its default home directory (A10), and once a trip is recorded, the breaker finishes its flag file even if the request is cancelled (A11). The version becomes 0.4.1.
 - [ ] Task 2: Workflow Hardening (CI & Release workflows). Pin every action to a full commit SHA (A7), pass matrix values to `run` scripts through the environment (A6), and make the Release workflow check that a changed `rates.json` comes with a later `ratesVersion` (A4). CI's smoke test also sends a real OTLP trace to the published binary and checks what it recorded.
 - [ ] Task 3: User Guide with Tested Samples (docs & tests). Rewrite `docs/guide.md` as short scenarios, each with a goal, the exact commands, and sample output (A8). Add `GuideSamplesTests`, which runs every sample's command against a deterministic example ledger and checks that the output is exactly what the guide shows.
 - [ ] Task 4: Documentation Sweep (README & docs). Rewrite `README.md`, `docs/cli.md`, and `docs/releasing.md`, and edit `docs/configuration.md`, so the docs are accurate and concise, say each thing once, and follow one naming rule for `gh ledger` and `gh-ledger`. Covers A3 (the extension's binary path for MCP), A4 (the `ratesVersion` release step), A9 (the data files table), and how to update pinned actions.
@@ -38,13 +38,13 @@ A12, the Sprint 1 archive's missing amendments section, isn't a builder task. Th
 ## Starting point
 
 - Sprint 4 is complete. Tasks 1–5 merged in PRs #41, #42, #43, #45, and #46, all on the first pass and byte-exact with the plan (`main` at `3a0a514`). `dotnet test CopilotLedger.slnx` passes 649 tests (0 failed, 0 skipped), the action's PowerShell tests pass 18 cases, and CI is green on `ubuntu-latest` and `windows-latest` (run 44922053265). Sprint 4's plan is archived at `.github/plans/archive/sprint-4.md`; its amendments section records none.
-- gh-ledger v0.4.0 is released: tag `v0.4.0` at `3a0a514`, published 2026-11-21 by the Release workflow (run 44938792097) with all eight assets. So `gh extension install swigerb/gh-ledger` works, `rates update` finds a `rates.json`, and `swigerb/gh-ledger/action@v0.4.0` keeps working, because tags don't move. The docs stop showing it.
+- gh-ledger v0.4.0 is released: tag `v0.4.0` at `3a0a514`, published 2026-11-21 by the Release workflow run for the tag push (44938942680), after a manual dry run (44938792097), with all eight assets. So `gh extension install swigerb/gh-ledger` works, `rates update` finds a `rates.json`, and `swigerb/gh-ledger/action@v0.4.0` keeps working, because tags don't move. The docs stop showing it.
 - The architect's audit of `3a0a514` found A1–A12 and no blockers, and the orchestrator accepted all twelve. Tasks 1–4 fix A1–A11; this plan's pull request fixes A12.
 - swigerb/copilot-ledger-action exists. It's public, and its default branch `main` is at `c18a67b` ("Initial commit"), with GitHub's `README.md` stub and an MIT `LICENSE` ("Copyright (c) 2026 Brian Swiger").
 - Merged behavior this plan depends on (read from the code at `3a0a514`):
   - `OtlpReceiverApp.Build(options, ingestor, configureWebHost)` maps `/v1/traces`, `/v1/metrics`, and `/v1/logs` to `HandleAsync`. When `IngestAsync` throws anything but a cancellation of the request, a bare `catch` answers 503 with `Retry-After: 5` and `The ledger is unavailable; retry later.`, and nothing is logged (A1).
   - `DaemonHost.RunAsync` writes log lines as `{TimeProvider.GetUtcNow():O} {message}` through its private `WriteLog(writer, context, message)`. It builds the receiver after the ingestor, then runs `EnqueuePendingAsync` and `StartAsync`, then writes `daemon.json` and logs `gh-ledger <version> daemon listening on http://localhost:<port> (pid <pid>); ledger <path>`.
-  - `CircuitBreakerMonitor.EvaluateAsync` calls `CircuitFlagFile.SyncAsync(_store, trip.RepositoryRoot)` without passing its `cancellationToken` on (A11).
+  - `CircuitBreakerMonitor.EvaluateAsync` calls `CircuitFlagFile.SyncAsync(_store, trip.RepositoryRoot)` without its `cancellationToken`, and nothing says whether that's deliberate (A11). `SyncAsync` deletes its temporary file only when the write or move throws `IOException` or `UnauthorizedAccessException`.
   - Nothing in `src/` or `tests/` calls `JsonRateCardCalculator.LoadDefault()`, `LedgerPaths.DefaultDatabasePath`, or `LedgerPaths.DefaultRatesOverlayPath` (A5). `LedgerPaths.DataDirectory` is used.
   - `FakeCliPlatform.HomeDirectory` defaults to `/home/test`, so a macOS or Linux `install` test that forgot to set it would write under a real `/home/test` (A10). Every current test that needs it sets it.
   - `FileRetry` has `ReadAllTextAsync` and `ReadAllBytesAsync`, which retry an `IOException` every 25 ms for up to 10 seconds. 25 test reads of files the product just wrote call `File.Read*` directly, and `GitFixture.Create` doesn't wait out a lock on the `.git` files it writes (A2).
@@ -54,7 +54,7 @@ A12, the Sprint 1 archive's missing amendments section, isn't a builder task. Th
   - `CliHarness` runs commands in-process with `FakeCliPlatform`, and has `RunAsync`, `RunInAsync`, `RunWithHttpAsync`, `StartInProcessDaemonAsync`, `CreateDaemonClient`, `InProcessDaemon`, and `DaemonOutput`. `DaemonCommands.StartAsync` and `StopAsync` measure their timeouts with `context.TimeProvider`, so under a `ManualTimeProvider` that nobody advances they wait until `daemon.json` appears or the daemon's lock is released, however long that takes.
   - The three workflows use `actions/*@vN` tags. `ci.yml` writes `${{ matrix.rid }}` into a `run` script (A6), and its smoke test starts the published binary's daemon but sends it no telemetry. `receipt.yml` checks out the repository and runs `./action`.
 - Sprint 4's public contracts are fixed. Sprint 5 changes only these existing artifacts, each called out in its task:
-  - Task 1: `OtlpReceiverApp.Build` (one optional parameter) and `HandleAsync`, `DaemonHost`, `CircuitBreakerMonitor`, `JsonRateCardCalculator` and `LedgerPaths` (removals), the Cli project file and `GhLedgerCli` (version), `.github/workflows/ci.yml` (version), `FileRetry`, `GitFixture`, `FakeCliPlatform`, and the tests its section lists;
+  - Task 1: `OtlpReceiverApp.Build` (one optional parameter) and `HandleAsync`, `DaemonHost`, `CircuitBreakerMonitor`, `CircuitFlagFile.SyncAsync`, `JsonRateCardCalculator` and `LedgerPaths` (removals), the Cli project file and `GhLedgerCli` (version), `.github/workflows/ci.yml` (version), `FileRetry`, `GitFixture`, `FakeCliPlatform`, and the tests its section lists;
   - Task 2: `.github/workflows/ci.yml`, `release.yml`, and `receipt.yml`;
   - Task 3: `docs/guide.md`, `FileRetry`, and the test project file;
   - Task 4: `README.md`, `docs/cli.md`, `docs/configuration.md`, and `docs/releasing.md`;
@@ -98,6 +98,15 @@ Sources: actions/runner-images [`Ubuntu2404-Readme.md`](https://github.com/actio
 - Without a tag argument, `gh release download` downloads assets from the latest release and requires `--pattern` or `--archive`. It fails when no asset matches.
 - The latest gh-ledger release is v0.4.0. Its `rates.json` asset is the embedded `rates.json` at `3a0a514`, whose `ratesVersion` is `2026-11-20`.
 
+### Upgrading the extension while gh-ledger runs
+
+Sources: cli/cli v2.103.3 [`pkg/cmd/extension/manager.go`](https://github.com/cli/cli/blob/v2.103.3/pkg/cmd/extension/manager.go) and [`http.go`](https://github.com/cli/cli/blob/v2.103.3/pkg/cmd/extension/http.go); the MCP specification, [Transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#stdio); `copilot mcp --help` (Copilot CLI 1.0.112); a probe on Windows 11 ARM64.
+
+- `gh extension upgrade` of a binary extension calls `installBin`, which downloads the new asset straight to `<data>/extensions/gh-ledger/gh-ledger[.exe]` with `downloadAsset`, opening that file with `O_CREATE|O_WRONLY|O_TRUNC` (`http.go`, line 95). `gh extension remove` calls `os.RemoveAll` on the extension's directory.
+- In MCP's stdio transport, "the client launches the MCP server as a subprocess" and ends it by closing its standard input. So each Copilot session that loads the `ledger` server keeps a `gh-ledger mcp` process running until the session ends.
+- **Probe.** While a `gh-ledger mcp` process ran (started with redirected standard input, in a temporary `COPILOT_LEDGER_HOME`), opening its executable for writing failed with "The process cannot access the file … because it is being used by another process." After its standard input was closed, the server exited with code 0, and the same open succeeded. Sprint 4 found the same for the daemon. So on Windows, `gh extension upgrade` and `gh extension remove` fail while the daemon or any Copilot session's MCP server runs the extension's binary.
+- `copilot mcp` has the subcommands `list`, `get`, `add`, `remove`, `enable`, and `disable`. `copilot mcp remove <name>` removes a server from the user configuration, `~/.copilot/mcp-config.json`. `copilot mcp add <name> -- <command> [args...]` adds a local (stdio) server, as the docs show.
+
 ### GitHub Markdown
 
 Source: GitHub's REST API, `POST /markdown` with `"mode": "gfm"`.
@@ -108,7 +117,7 @@ Source: GitHub's REST API, `POST /markdown` with `"mode": "gfm"`.
 
 Probes ran on Windows 11 ARM64 with .NET SDK 10.0.404, PowerShell 7.6, and the MSYS `sh` (bash 5.3), `curl`, `grep`, and `tr` that ship with the Copilot app's Git.
 
-- **The CI ingestion smoke (Task 2).** A `win-arm64` single-file publish of Task 1's code, with a temporary `COPILOT_LEDGER_HOME`, ran Task 2's new smoke lines under MSYS `sh` on port 54318. The POST returned `{}`, and `branch --all-repos --since all --json` listed one row, `(none)` / `(none)`, with `"spans": 1,` and `"aiCredits": 600,`. 600 AI credits is `(1,000,000 × 4 + 100,000 × 20) / 1,000,000 = 6.00` USD at `claude-opus-5.5`'s $4 input and $20 output per 1M tokens. `1795219200000000000` ns is 2026-11-21T00:00:00Z.
+- **The CI ingestion smoke (Task 2).** A `win-arm64` single-file publish of the scratch code, with a temporary `COPILOT_LEDGER_HOME`, ran Task 2's whole bash smoke step under MSYS `sh` on port 54318 (with a stand-in for `sleep`, which that `sh` lacks). It exited 0. The POST returned `{}`, and `branch --all-repos --since all --json` listed one row, `(none)` / `(none)`, with `"spans": 1,` and `"aiCredits": 50,`. 50 AI credits is `(100,000 × 4 + 5,000 × 20) / 1,000,000 = 0.50` USD at `claude-opus-5.5`'s $4 input and $20 output per 1M tokens, below the breaker's 150-credit velocity rule: `breaker status` printed `Circuit breaker: closed`, `daemon.log` had no `ALERT` line, and no `alert-toast.xml` was written. The first version of the trace, 600 credits on one prompt, tripped the breaker and showed a toast on the reviewer's machine. `1795219200000000000` ns is 2026-11-21T00:00:00Z.
 - **The Release workflow's rates check (Task 2).** The `rates` job's script ran locally under MSYS `sh`, downloading the real v0.4.0 `rates.json` with `gh`. An unchanged file printed `rates.json is unchanged since the latest release (2026-11-20).` and exited 0. A changed file with `ratesVersion` `2026-11-21` printed `rates.json changed since the latest release; ratesVersion moves from 2026-11-20 to 2026-11-21.` and exited 0. A changed file that kept `2026-11-20` printed `::error::rates.json changed since the latest release, but its ratesVersion 2026-11-20 isn't later than 2026-11-20. Set ratesVersion to the date of the change.` and exited 1. Against a repository with no release (swigerb/copilot-ledger-action), `gh` printed `release not found`, and the job printed `Skipping the check: no rates.json was downloaded from the latest release.` and exited 0. `jq` isn't installed on the architect's machine, so a PowerShell stand-in replaced it (see "Assumptions").
 - **A1.** After `DROP TABLE spans;` on a running daemon's ledger, every `POST /v1/traces` fails inside `RecordAsync` with `SqliteException: SQLite Error 1: 'no such table: spans'.` and gets 503 (DM7 runs exactly this). At `3a0a514` the receiver's bare `catch` writes nothing, so `daemon.log` gives no sign that spans aren't being recorded.
 - **The guide's stand-in daemon (Task 3).** An earlier `GuideWorld` whose stand-in daemon deleted `daemon.json` and `daemon.stop` with `File.Delete` before releasing its lock hung 2 of 11 test runs. The blame collector's hang dump named `GS2_CommandSamplesShowTheirOutput(id: "daemon-stop")`: under the manual clock, `daemon stop` waits until the lock is released, and a delete that throws (an antivirus scan of the just-written `daemon.stop`, the issue #30 pattern) left the lock held forever. With Task 3's `GuideWorld`, which deletes through `FileRetry.Delete`, releases the lock in `finally`, and gives each start its own lock and stop token, 30 of 30 runs passed.
@@ -118,6 +127,7 @@ Probes ran on Windows 11 ARM64 with .NET SDK 10.0.404, PowerShell 7.6, and the M
 
 - **The rates check on a runner.** The `rates` job's `jq -S .` hasn't run: the local check used a PowerShell stand-in (`ConvertFrom-Json`, then `ConvertTo-Json -Compress`). jq 1.7 and later keep number literals as written, so two files that differ only in how a number is written count as changed, which only asks for a later `ratesVersion`. The orchestrator's manual Release run in Task 2's verification runs the job for real.
 - **The ingestion smoke on the runners.** It ran under bash on Windows ARM64 only; `ubuntu-latest` and `windows-latest` first run it in Task 2's CI.
+- **Upgrading on macOS and Linux while gh-ledger runs** wasn't tested (carried from Sprint 4). The docs give every platform the same steps: stop the daemon and close the Copilot sessions and apps that use the MCP server first. That's needed on Windows and harmless elsewhere.
 - **The new tests on Linux.** DM7 and `GuideSamplesTests` ran on Windows. They use only the fake platform, in-memory hosting, and temporary directories, like the Sprint 4 tests that pass on `ubuntu-latest`, and `GuideWorld` builds every shown path from Windows-style strings that don't depend on the OS. They first run on Linux in Task 1's and Task 3's CI.
 - **The Marketplace name** is checked again when the release is published. "CopilotLedger PR Receipt" was free on 2026-11-21.
 - **`@v1` before it exists.** The docs show `uses: swigerb/copilot-ledger-action@v1` from Task 3 on, but `v1` exists only after the orchestrator's release (see "Final step"). Until then, the action repository's README and gh-ledger's docs describe a version that can't be used yet.
@@ -127,22 +137,23 @@ Probes ran on Windows 11 ARM64 with .NET SDK 10.0.404, PowerShell 7.6, and the M
 
 - **The receiver reports and the daemon logs.** `OtlpReceiverApp.Build` gains an optional fourth parameter, `Action<Exception>? ingestFailed`. `HandleAsync` calls it with each exception that turns a request into a 503, just before it writes the response; a cancelled request still returns silently, as before. The Otlp project stays free of logging, and existing callers compile unchanged.
 - **At most once a minute.** The daemon passes `IngestFailureLog.Report`, which writes `Warning: could not record spans: <exception type>: <message>` through the daemon's `WriteLog` for the first failure, then at most once every minute, measured with `context.TimeProvider`. A ledger that stays unavailable (a full disk, or a locked or damaged database) gets one line a minute while Copilot keeps retrying, instead of one line per request. A line that can't be written (`IOException` or `ObjectDisposedException`) is dropped, so logging can never turn a 503 into a crash.
+- **A clock that steps back.** The interval uses the wall clock, the same clock as the log's timestamps. When the clock is earlier than the last line's time, for example after a time sync, the next failure is written at once instead of being held back until the old time plus a minute. Rejected: `TimeProvider.GetTimestamp`, which is monotonic, because the tests' `ManualTimeProvider` doesn't drive it and the log lines show wall-clock time anyway.
 - **Nothing from the request is logged**, only the exception's type and message. The ingestor never holds prompt or response content.
 - **Rejected:** `ILogger` (the daemon has no logging pipeline; its log is `WriteLog`), and logging inside the Otlp project, which has no log writer.
 
 ### Test hygiene (Task 1, A2, A5, A10, A11)
 
-- **Fresh files.** Every test read of a file the product just wrote goes through `FileRetry`: 25 lines in six test files. `GitFixture.Create` reads back the three `.git` files it wrote through a new synchronous `FileRetry.ReadAllText`, because `GitFixture` is synchronous and its callers are many. This is the issue #30 pattern: Windows antivirus briefly locks new files.
+- **Fresh files.** Every test read of a file the product just wrote goes through `FileRetry`: 25 lines in five test files. `GitFixture.Create` reads back the three `.git` files it wrote through a new synchronous `FileRetry.ReadAllText`, because `GitFixture` is synchronous and its callers are many. This is the issue #30 pattern: Windows antivirus briefly locks new files.
 - **Dead members are removed** (A5): `JsonRateCardCalculator.LoadDefault()`, `LedgerPaths.DefaultDatabasePath`, and `LedgerPaths.DefaultRatesOverlayPath`. They'd bypass `COPILOT_LEDGER_HOME` and `rates.downloaded.json` if anyone used them.
 - **No default home** (A10). `FakeCliPlatform.HomeDirectory` throws `InvalidOperationException` until a test sets it, so a test that forgets can't write a profile or sign-in item outside its `TempDirectory`. All 649 existing tests still pass, so none relied on the default.
-- **The token** (A11). `CircuitBreakerMonitor` passes its `cancellationToken` to `CircuitFlagFile.SyncAsync`.
+- **The flag file always finishes** (A11, the orchestrator's decision). `CircuitBreakerMonitor` calls `CircuitFlagFile.SyncAsync` with `CancellationToken.None` on purpose, and a comment says why. By then the trip is committed and its alert published. If a client disconnect cancelled the sync, the flag file would stay unwritten, with nothing logged and no retry. `SyncAsync` now deletes its temporary file whatever the write or move throws, not only `IOException` and `UnauthorizedAccessException`, so a cancelled `breaker reset` or `breaker config --flag-file` leaves no `CIRCUIT_OPEN.<guid>.tmp` behind.
 
 ### Workflows (Task 2, A4, A6, A7)
 
-- **SHA pins, no Dependabot.** Every `uses:` names a full commit SHA with its version in a comment, for example `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`. Nothing updates them automatically; Dependabot would open pull requests on its own, which the user didn't ask for. `docs/releasing.md` explains how to update a pin. GitHub's newer workflow lockfiles are deferred.
+- **SHA pins, no Dependabot.** Every `uses:` of another repository's action names a full commit SHA with its version in a comment, for example `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`. Nothing updates them automatically; Dependabot would open pull requests on its own, which the user didn't ask for. `docs/releasing.md` explains how to update a pin. GitHub's newer workflow lockfiles are deferred.
 - **Matrix values reach scripts only through `env`** (A6). CI's publish step reads `$RID`, as the Release workflow already does.
 - **`ratesVersion` check** (A4). A new `rates` job compares `src/CopilotLedger.Core/Pricing/rates.json` with the latest release's `rates.json` asset, both canonicalized with `jq -S .`. Unchanged passes. Changed passes only when the new `ratesVersion` sorts after the old one; for `yyyy-MM-dd` dates, string order is date order. If nothing can be downloaded (no release yet, or a network error), the job prints a message and passes: missing a check only delays `rates update` users until the next release, while failing would block every release on a download hiccup. The job runs on manual runs too, so the dry run in `docs/releasing.md` checks it, and the `release` job needs it.
-- **A scripted end-to-end check in CI.** The smoke test now posts a real OTLP/HTTP JSON trace to the published binary's daemon over a real socket and checks `branch --all-repos --since all --json`: one span, 600 AI credits. It complements Task 3's `GuideSamplesTests`, which run in-process. Generating the guide's samples from the published binary instead was rejected: it would need a real `install` on the runner (user environment, sign-in items), and real clocks and process IDs, so the output couldn't be exact.
+- **A scripted end-to-end check in CI.** The smoke test now posts a real OTLP/HTTP JSON trace to the published binary's daemon over a real socket and checks `branch --all-repos --since all --json`: one span, 50 AI credits. 50 credits stays below the breaker's 150-credit rule, so the smoke trips nothing and shows no notification, on the runner or for anyone who runs it locally. It complements Task 3's `GuideSamplesTests`, which run in-process. Generating the guide's samples from the published binary instead was rejected: it would need a real `install` on the runner (user environment, sign-in items), and real clocks and process IDs, so the output couldn't be exact.
 
 ### The user guide (Task 3, A8)
 
@@ -153,12 +164,14 @@ Probes ran on Windows 11 ARM64 with .NET SDK 10.0.404, PowerShell 7.6, and the M
 - **The version is in the samples** (both `status` samples and the receipt), so `docs/releasing.md` lists the guide among the places a version bump changes, and `GuideSamplesTests` fails until it's updated.
 - **Not shown:** output that gh-ledger doesn't print (`gh extension install`, `upgrade`, and `remove`), and `rates init`, whose example world already has an overlay.
 - **gh-ledger's messages still say `gh-ledger <command>`** under the extension (deferred). The guide says once, in its introduction, to type those commands as `gh ledger <command>`.
+- **One starting state.** After the setup section, every sample starts from the same `Month` state, and the introduction says so. That's why the overlay's rates version, BYOK spend, and the open breaker trip appear before the sections that explain them.
 
 ### The documentation (Task 4, A3, A4, A9)
 
 - **One job per document, each fact in one place.** `README.md`: what CopilotLedger is, the quick start, and links. `docs/guide.md`: the scenarios. `docs/cli.md`: the reference for every command and option, plus troubleshooting. `docs/configuration.md`: pricing, the overlay, and the data files. `docs/releasing.md`: maintainers. The action's README in its own repository documents the action. Other documents link instead of repeating.
-- **One naming rule.** Commands are written `gh ledger <command>`. `gh-ledger` names the program: the binary, `--help`, and its messages. `docs/cli.md` says once that a binary built from source without the `gh ledger` alias runs as `gh-ledger <command>`, and that a `gh-ledger <command>` in a message is typed `gh ledger <command>` under the extension.
-- **Fixes folded in:** the MCP registration with the extension's binary path for each OS (A3); the `ratesVersion` release step and how to update pinned actions (A4, A7); `daemon.stop` and `alert-toast.xml` in the files table (A9); the report scopes (only `branch` defaults to the current repository); `daemon stop` ending the process after 15 seconds; restarting the daemon after an overlay change; the shell profile `install` edits; `daemon.log` at sign-in; and the new `could not record spans` warning in troubleshooting.
+- **One naming rule.** Commands are written `gh ledger <command>`. `gh-ledger` names the program: the binary, `--help`, and its messages. `docs/cli.md` says once that a binary built from source without the `gh ledger` alias runs by its path, as `<folder>/gh-ledger <command>` (it isn't on `PATH`), and that a `gh-ledger <command>` in a message is typed `gh ledger <command>` under the extension.
+- **Fixes folded in:** the MCP registration with the extension's binary path for each OS (A3); the `ratesVersion` release step, with every sample and test that shows the old date, and how to update pinned actions (A4, A7); `daemon.stop` and `alert-toast.xml` in the files table (A9); the report scopes (only `branch` defaults to the current repository); `daemon stop` ending the process after 15 seconds; restarting the daemon after an overlay change; the shell profile `install` edits; `daemon.log` at sign-in; building from source into a permanent folder and running `install` from there; and the new `could not record spans` warning in troubleshooting.
+- **Upgrading and removing the extension.** The daemon and every Copilot session that uses the `ledger` MCP server run the extension's binary, and on Windows gh can't rewrite or delete it until they stop. So the guide, `docs/cli.md`, and troubleshooting say to stop the daemon and close the Copilot sessions and apps that use the MCP server before `gh extension upgrade` or `remove`. The steps are the same on every platform: only Windows was verified, and the steps do no harm elsewhere. `uninstall` doesn't touch an MCP registration (registering it in `install` is deferred), so the docs add `copilot mcp remove ledger`, and removing the VS Code entry.
 
 ### The action repository (Task R and Task 5)
 
@@ -180,7 +193,8 @@ Probes ran on Windows 11 ARM64 with .NET SDK 10.0.404, PowerShell 7.6, and the M
 | `src/CopilotLedger.Otlp/Receiver/OtlpReceiverApp.cs` | `Build` takes `ingestFailed`; `HandleAsync` reports each 503's exception (A1) |
 | `src/CopilotLedger.Cli/Daemon/IngestFailureLog.cs` | New, copy exactly (A1) |
 | `src/CopilotLedger.Cli/Daemon/DaemonHost.cs` | Passes `IngestFailureLog.Report` to `Build` (A1) |
-| `src/CopilotLedger.Otlp/Breaker/CircuitBreakerMonitor.cs` | Passes `cancellationToken` on (A11) |
+| `src/CopilotLedger.Otlp/Breaker/CircuitBreakerMonitor.cs` | Runs the flag-file sync with `CancellationToken.None`, and says why (A11) |
+| `src/CopilotLedger.Otlp/Breaker/CircuitFlagFile.cs` | `SyncAsync` deletes its temporary file whatever it throws (A11) |
 | `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs` | Remove `LoadDefault()` (A5) |
 | `src/CopilotLedger.Core/LedgerPaths.cs` | Remove `DefaultDatabasePath` and `DefaultRatesOverlayPath` (A5) |
 | `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`, `src/CopilotLedger.Cli/GhLedgerCli.cs`, `.github/workflows/ci.yml` | Version 0.4.1 |
@@ -189,6 +203,7 @@ Probes ran on Windows 11 ARM64 with .NET SDK 10.0.404, PowerShell 7.6, and the M
 | `tests/CopilotLedger.Tests/TestSupport/FakeCliPlatform.cs` | `HomeDirectory` throws until set (A10) |
 | `tests/CopilotLedger.Tests/Otlp/OtlpReceiverTests.cs` | RC8 checks the callback (Task 1 tests) |
 | `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs` | DM1's version; new DM7 (Task 1 tests) |
+| `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs` | New BM12 (Task 1 tests), plus two of the A2 reads below |
 | `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs` | `StatusText`'s version (Task 1 tests) |
 | `AlertDaemonTests.cs`, `BreakerCommandTests.cs`, `InstallCommandTests.cs`, `RatesCommandTests.cs` (in `tests/CopilotLedger.Tests/Cli/`) and `CircuitBreakerMonitorTests.cs` (in `tests/CopilotLedger.Tests/Otlp/`) | 25 reads of fresh files go through `FileRetry` (A2, Task 1 tests) |
 
@@ -312,7 +327,8 @@ New file `src/CopilotLedger.Cli/Daemon/IngestFailureLog.cs`:
 namespace CopilotLedger.Cli.Daemon;
 
 // Writes "Warning: could not record spans: <type>: <message>" for the first ingestion failure, then at most once a
-// minute, so a ledger that stays unavailable can't flood daemon.log. A line that can't be written is dropped.
+// minute, so a ledger that stays unavailable can't flood daemon.log. After the clock steps back, the next failure is
+// written at once. A line that can't be written is dropped.
 internal sealed class IngestFailureLog(Action<string> write, TimeProvider timeProvider)
 {
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
@@ -325,7 +341,7 @@ internal sealed class IngestFailureLog(Action<string> write, TimeProvider timePr
         DateTimeOffset now = timeProvider.GetUtcNow();
         lock (_gate)
         {
-            if (_lastWritten is DateTimeOffset last && now - last < Interval)
+            if (_lastWritten is DateTimeOffset last && now >= last && now - last < Interval)
             {
                 return;
             }
@@ -380,11 +396,12 @@ with:
             {
 ```
 
-### Pass the token on (A11, copy exactly)
+### Finish the flag file (A11, copy exactly)
 
 In `src/CopilotLedger.Otlp/Breaker/CircuitBreakerMonitor.cs`, replace:
 
 ```csharp
+        try
         {
             await CircuitFlagFile.SyncAsync(
                 _store,
@@ -397,14 +414,66 @@ In `src/CopilotLedger.Otlp/Breaker/CircuitBreakerMonitor.cs`, replace:
 with:
 
 ```csharp
+        try
         {
+            // The trip is committed and published, so an aborted request mustn't leave its flag file unwritten.
             await CircuitFlagFile.SyncAsync(
                 _store,
                 trip.RepositoryRoot,
-                cancellationToken);
+                CancellationToken.None);
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException)
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Otlp/Breaker/CircuitFlagFile.cs`, replace:
+
+```csharp
+    }
+
+    // Makes the flag file match the ledger. Throws IOException or UnauthorizedAccessException from the file system, and
+    // whatever the store throws. Does nothing when repositoryRoot isn't an existing directory.
+    public static async Task SyncAsync(
+        SqliteLedgerStore store,
+        string repositoryRoot,
+```
+
+with:
+
+```csharp
+    }
+
+    // Makes the flag file match the ledger. Throws IOException or UnauthorizedAccessException from the file system, and
+    // whatever the store throws, including OperationCanceledException. Whatever it throws, it first tries to delete the
+    // temporary file it was writing. Does nothing when repositoryRoot isn't an existing directory.
+    public static async Task SyncAsync(
+        SqliteLedgerStore store,
+        string repositoryRoot,
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Otlp/Breaker/CircuitFlagFile.cs`, replace:
+
+```csharp
+                    await File.WriteAllTextAsync(temp, desired, Utf8, cancellationToken);
+                    File.Move(temp, path, overwrite: true);
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException)
+                {
+                    try
+                    {
+```
+
+with:
+
+```csharp
+                    await File.WriteAllTextAsync(temp, desired, Utf8, cancellationToken);
+                    File.Move(temp, path, overwrite: true);
+                }
+                catch
+                {
+                    try
+                    {
 ```
 
 ### Remove dead members (A5, copy exactly)
@@ -650,7 +719,7 @@ public sealed class FakeCliPlatform : ICliPlatform
 ### Acceptance criteria
 
 - `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors.
-- `dotnet test CopilotLedger.slnx` passes 650 tests: the 649 from before plus DM7. 0 failed, 0 skipped.
+- `dotnet test CopilotLedger.slnx` passes 651 tests: the 649 from before plus DM7 and BM12. 0 failed, 0 skipped.
 - Each file in the table matches this section and "Task 1 tests" exactly, and no other file changes.
 - `src/`, `tests/`, and `.github/workflows/` contain no `0.4.0`, `LoadDefault`, `DefaultDatabasePath`, or `DefaultRatesOverlayPath`.
 
@@ -672,14 +741,14 @@ dotnet test CopilotLedger.slnx
 
 What changes, for review:
 
-- **All three:** each `uses:` names a full commit SHA with its version in a comment, from the table in "Verified facts" (A7).
-- **`ci.yml`:** the publish step reads the runtime identifier from `$RID`, set in `env` (A6). The bash smoke step, after its `daemon start` check, posts one OTLP/HTTP JSON trace to the daemon, expects the response `{}`, and checks that `branch --all-repos --since all --json` shows 1 span and 600 AI credits. Its other lines, the PowerShell capture step, and the "Test the receipt action" step (which Task 5 removes) don't change.
+- **All three:** each remote `uses:` names a full commit SHA with its version in a comment, from the table in "Verified facts" (A7). `receipt.yml`'s local `uses: ./action` stays until Task 5.
+- **`ci.yml`:** the publish step reads the runtime identifier from `$RID`, set in `env` (A6). The bash smoke step, after its `daemon start` check, posts one OTLP/HTTP JSON trace to the daemon, expects the response `{}`, and checks that `branch --all-repos --since all --json` shows 1 span and 50 AI credits. Its other lines, the PowerShell capture step, and the "Test the receipt action" step (which Task 5 removes) don't change.
 - **`release.yml`:** a new `rates` job checks `ratesVersion` (A4), and the `release` job needs it.
 - **`receipt.yml`:** only the pin. Task 5 replaces this file.
 
 ### The smoke test's trace
 
-The trace has one `chat` span for `claude-opus-5.5`, 1,000,000 input and 100,000 output tokens, starting at 2026-11-21T00:00:00Z. It has no resource attributes, so the span is recorded under repository `(none)` and branch `(none)`, and `--all-repos --since all` finds it whatever the runner's date and directory. It costs `(1,000,000 × 4 + 100,000 × 20) / 1,000,000 = 6.00` USD, or 600 AI credits. `branch --json` writes indented JSON, so the checks match the whole `"spans": 1,` and `"aiCredits": 600,` properties.
+The trace has one `chat` span for `claude-opus-5.5`, 100,000 input and 5,000 output tokens, starting at 2026-11-21T00:00:00Z. It has no resource attributes, so the span is recorded under repository `(none)` and branch `(none)`, and `--all-repos --since all` finds it whatever the runner's date and directory. It costs `(100,000 × 4 + 5,000 × 20) / 1,000,000 = 0.50` USD, or 50 AI credits: below the breaker's 150-credit rule, so the smoke test trips no breaker and shows no desktop notification, on the runner or on a developer's machine. `branch --json` writes indented JSON, so the checks match the whole `"spans": 1,` and `"aiCredits": 50,` properties.
 
 ### `.github/workflows/ci.yml` (copy exactly)
 
@@ -737,12 +806,12 @@ jobs:
           started=$(./artifacts/gh-ledger/gh-ledger daemon start | tr -d '\r')
           echo "$started"
           grep -Eq '^gh-ledger daemon started \(pid [0-9]+\) on http://localhost:4318\.$' <<< "$started"
-          trace='{"resourceSpans":[{"resource":{"attributes":[]},"scopeSpans":[{"spans":[{"traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"b7ad6b7169203331","name":"chat claude-opus-5.5","kind":3,"startTimeUnixNano":"1795219200000000000","endTimeUnixNano":"1795219202000000000","attributes":[{"key":"gen_ai.operation.name","value":{"stringValue":"chat"}},{"key":"gen_ai.request.model","value":{"stringValue":"claude-opus-5.5"}},{"key":"gen_ai.usage.input_tokens","value":{"intValue":"1000000"}},{"key":"gen_ai.usage.output_tokens","value":{"intValue":"100000"}}]}]}]}]}'
+          trace='{"resourceSpans":[{"resource":{"attributes":[]},"scopeSpans":[{"spans":[{"traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"b7ad6b7169203331","name":"chat claude-opus-5.5","kind":3,"startTimeUnixNano":"1795219200000000000","endTimeUnixNano":"1795219202000000000","attributes":[{"key":"gen_ai.operation.name","value":{"stringValue":"chat"}},{"key":"gen_ai.request.model","value":{"stringValue":"claude-opus-5.5"}},{"key":"gen_ai.usage.input_tokens","value":{"intValue":"100000"}},{"key":"gen_ai.usage.output_tokens","value":{"intValue":"5000"}}]}]}]}]}'
           test "$(curl -sS -H 'Content-Type: application/json' --data "$trace" http://localhost:4318/v1/traces)" = "{}"
           spend=$(./artifacts/gh-ledger/gh-ledger branch --all-repos --since all --json | tr -d '\r')
           echo "$spend"
           grep -q '"spans": 1,' <<< "$spend"
-          grep -q '"aiCredits": 600,' <<< "$spend"
+          grep -q '"aiCredits": 50,' <<< "$spend"
           ./artifacts/gh-ledger/gh-ledger status
           ./artifacts/gh-ledger/gh-ledger breaker status
           ./artifacts/gh-ledger/gh-ledger budget list
@@ -938,8 +1007,8 @@ jobs:
 ### Acceptance criteria
 
 - The three files match the blocks above exactly.
-- Every `uses:` names a 40-character commit SHA followed by `# v<version>`. No `run:` script contains `${{`.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 650 tests (0 failed, 0 skipped).
+- Every remote `uses:` names a 40-character commit SHA followed by `# v<version>`; the only other `uses:` is `receipt.yml`'s `./action`. No `run:` script contains `${{`.
+- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 651 tests (0 failed, 0 skipped).
 - CI on the pull request passes on `ubuntu-latest` and `windows-latest`, including the new smoke lines, and the Receipt workflow runs with the pinned checkout.
 
 ### Verify
@@ -1013,7 +1082,7 @@ A sample starts with a line `<!-- sample: <id> -->` and ends with a line `<!-- /
 
 CopilotLedger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
 
-The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
+The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). After setup, every sample starts from the same state: a month of spend, a rates overlay with Foundry BYOK prices, a budget for `feature/search`, and an open circuit-breaker trip, so early samples show things that later sections explain. A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
 
 - [Set up CopilotLedger](#set-up-copilotledger)
 - [See what you spent](#see-what-you-spent)
@@ -1520,7 +1589,7 @@ Restart the daemon as it says. Requests already recorded keep the prices they we
 
 **Goal:** move to a new gh-ledger release, or remove CopilotLedger.
 
-The daemon runs from the extension's binary, which Windows can't replace while it runs, so stop the daemon before you upgrade:
+The daemon runs the extension's binary, and so does every Copilot session that uses the `ledger` MCP server. Windows can't replace that file while either runs it, so before you upgrade, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code if they use the MCP server, and stop the daemon:
 
 <!-- sample: daemon-stop -->
 ```shell
@@ -1536,6 +1605,8 @@ gh-ledger daemon stopped.
 gh extension upgrade ledger
 ```
 
+Then start the daemon again, and reopen your Copilot apps:
+
 <!-- sample: daemon-start -->
 ```shell
 gh ledger daemon start
@@ -1546,7 +1617,7 @@ gh-ledger daemon started (pid 4242) on http://localhost:4318.
 ```
 <!-- /sample -->
 
-To remove CopilotLedger, undo `install`, then remove the extension:
+To remove CopilotLedger, undo `install`:
 
 <!-- sample: uninstall -->
 ```shell
@@ -1560,6 +1631,14 @@ Removed COPILOT_OTEL_ENABLED from your user account.
 CopilotLedger is uninstalled. Your ledger data is still in C:\Users\you\.copilot-ledger.
 ```
 <!-- /sample -->
+
+If you registered the MCP server, remove it, and remove the `ledger` entry from VS Code's `mcp.json` if you added one:
+
+```shell
+copilot mcp remove ledger
+```
+
+Then close the Copilot sessions and apps that still run it, and remove the extension:
 
 ```shell
 gh extension remove ledger
@@ -1899,7 +1978,7 @@ The test project file starts with a UTF-8 byte order mark and has no line break 
 ### Acceptance criteria
 
 - The files match this section and "Task 3 tests" exactly.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 670 tests: the 650 from before plus GS1, GS2's 14 cases, and GS3–GS7. 0 failed, 0 skipped.
+- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 671 tests: the 651 from before plus GS1, GS2's 14 cases, and GS3–GS7. 0 failed, 0 skipped.
 - Five runs of the guide tests in a row each pass all 20.
 
 ### Verify
@@ -1927,9 +2006,9 @@ Run the last command five times. Each run passes 20 tests.
 What changes, for review:
 
 - **`README.md`** is the front door: what CopilotLedger does, its features and requirements, a quick start (`gh extension install`, `gh ledger install`, `status`, `branch`), and links. The workflow YAML and the upgrade steps move to the guide, the action's README, and `docs/cli.md`; building from source points to `docs/cli.md` and adds the build and test commands.
-- **`docs/cli.md`** is the reference. It states the naming rule once; gives the extension's binary path on each OS; merges install, uninstall, and upgrading into one section (the shell profile `install` edits, when it sets the alias, every warning, and the `install.json` mismatch); covers the daemon's options, its null standard handles, and `daemon stop` ending the process after 15 seconds; lists the reports in a table that says which ones default to the current repository; covers the breaker, budgets, and receipts (`uses: swigerb/copilot-ledger-action@v1`); registers the MCP server with the extension's binary path (A3); and adds the `could not record spans` warning to troubleshooting.
+- **`docs/cli.md`** is the reference. It states the naming rule once; gives the extension's binary path on each OS, and for a binary built from source, moving it to a permanent folder and running `<folder>/gh-ledger install`; merges install, uninstall, and upgrading into one section (the shell profile `install` edits, when it sets the alias, every warning, the `install.json` mismatch, removing the MCP registration after `uninstall`, and why the daemon and Copilot's MCP servers must stop before `gh extension upgrade` or `remove`); covers the daemon's options, its null standard handles, and `daemon stop` ending the process after 15 seconds; lists the reports in a table that says which ones default to the current repository; covers the breaker, budgets, and receipts (`uses: swigerb/copilot-ledger-action@v1`); registers the MCP server with the extension's binary path (A3); and adds the `could not record spans` warning to troubleshooting.
 - **`docs/configuration.md`** names commands `gh ledger`, adds `daemon.stop` and `alert-toast.xml` to the files table (A9), says that `daemon.log` is also written when the daemon starts at sign-in, and says to restart the daemon after changing the overlay.
-- **`docs/releasing.md`** adds the guide's samples to the places that hold the version, adds a `ratesVersion` step (A4), says the dry run checks `ratesVersion`, and explains how to update pinned actions (A7).
+- **`docs/releasing.md`** adds the guide's samples to the places that hold the version, adds a `ratesVersion` step that lists every sample and test showing the old date (A4), says the dry run checks `ratesVersion`, and explains how to update pinned actions (A7).
 
 ### `README.md` (copy exactly)
 
@@ -2001,7 +2080,7 @@ MIT. See [LICENSE](LICENSE).
 
 gh-ledger runs a local OpenTelemetry receiver at `http://localhost:4318`, records GitHub Copilot's usage in a SQLite ledger on your machine, and reports AI spend by repository, branch, model, agent, and prompt. It needs no Docker and no cloud service. For walkthroughs with sample output, see the [user guide](guide.md).
 
-**Command names.** This page writes commands as `gh ledger <command>`, which runs gh-ledger as a GitHub CLI extension. If you built gh-ledger yourself and didn't set the `gh ledger` alias, run `gh-ledger <command>` instead. `gh-ledger` is the program's own name, so `--help` and gh-ledger's messages say `gh-ledger`; with the extension, run the commands they show as `gh ledger`.
+**Command names.** This page writes commands as `gh ledger <command>`, which runs gh-ledger as a GitHub CLI extension. If you built gh-ledger yourself and have no `gh ledger` alias, run the binary by its path instead, as `<folder>/gh-ledger <command>`. `gh-ledger` is the program's own name, so `--help` and gh-ledger's messages say `gh-ledger`; with the extension, run the commands they show as `gh ledger`.
 
 ## Get gh-ledger
 
@@ -2018,13 +2097,13 @@ gh downloads the release binary for your platform to:
 
 When `XDG_DATA_HOME` is set, gh uses `$XDG_DATA_HOME/gh/extensions/gh-ledger/` instead. The path stays the same when you upgrade, so the sign-in item and an MCP registration keep working.
 
-To build from source instead, publish one single-file, self-contained binary for your runtime identifier, and keep it in a permanent folder:
+To build from source instead, publish one single-file, self-contained binary for your runtime identifier:
 
 ```shell
 dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r <rid> -o artifacts/gh-ledger
 ```
 
-Use `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, or `osx-arm64`.
+Use `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, or `osx-arm64`. Move `gh-ledger` (`gh-ledger.exe` on Windows) from `artifacts/gh-ledger` to a permanent folder, then run `<folder>/gh-ledger install`. `install` points the sign-in item and the `gh ledger` alias at that copy; it doesn't add the folder to `PATH`.
 
 ## Install and uninstall
 
@@ -2047,9 +2126,9 @@ It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTele
 
 `install` also warns when `COPILOT_LEDGER_HOME` is set, because the daemon started at sign-in uses it only if your sign-in session sets it too. `status` warns when `install.json` names a different executable, for example after you switch from a binary you built to the extension; run `install` again from the copy you want to keep.
 
-`gh ledger uninstall` stops the daemon, removes the sign-in item, and reverses the environment variable, profile block, and alias changes recorded in `install.json`, restoring the variable's previous value. `--dry-run` prints the changes first. Your ledger stays. To remove the extension too, run `gh extension remove ledger` afterward.
+`gh ledger uninstall` stops the daemon, removes the sign-in item, and reverses the environment variable, profile block, and alias changes recorded in `install.json`, restoring the variable's previous value. `--dry-run` prints the changes without making them. Your ledger stays, and so does an MCP registration: remove it with `copilot mcp remove ledger`, and remove the `ledger` entry from VS Code's `mcp.json` if you added one. To remove the extension too, run `gh extension remove ledger` afterward.
 
-**Upgrading the extension.** The daemon runs from the extension's binary, and Windows can't replace a running program, so stop it first:
+**Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server. To upgrade:
 
 ```shell
 gh ledger daemon stop
@@ -2156,7 +2235,7 @@ CopilotLedger stores no prompt or response content, working directories, or remo
 - **Nothing is recorded.** Run `gh ledger status`, address its warnings, and restart Copilot.
 - **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example because the disk is full or the database is damaged, and Copilot is told to retry. The warning repeats at most once a minute; fix the cause shown after it.
 - **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
-- **`gh extension upgrade` or `remove` fails on Windows.** The daemon is running from the extension's binary; run `gh ledger daemon stop` first.
+- **`gh extension upgrade` or `remove` fails on Windows.** A program is running the extension's binary: the daemon, or the MCP server of a Copilot session. Run `gh ledger daemon stop`, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code, then try again.
 - **Apps started from the desktop record nothing.** On macOS and Linux, apps started outside a terminal may not read your shell profile, so they don't see `COPILOT_OTEL_ENABLED`. Start them from a terminal.
 - **Move the data directory.** Set `COPILOT_LEDGER_HOME` before running gh-ledger. The daemon started at sign-in uses it only if your sign-in session sets it too, for example as a Windows user environment variable.
 - **A console window flashes at sign-in.** Windows 11 24H2 and later start gh-ledger without a window; earlier versions show it for about a second.
@@ -2267,7 +2346,11 @@ Releases are GitHub Releases of this repository. They make `gh extension install
    - the version that the smoke test in `.github/workflows/ci.yml` compares with;
    - the tests that expect it: `DaemonCommandTests.DM1` and `ReportCommandTests.StatusText`;
    - the samples in `docs/guide.md` that show it: both `status` samples and the receipt. `GuideSamplesTests` fails until they match.
-2. If `src/CopilotLedger.Core/Pricing/rates.json` changed since the latest release, set its `ratesVersion` to the date of the change (`yyyy-MM-dd`), later than the latest release's. `gh ledger rates update` only takes rates with a later version, and the Release workflow fails when `rates.json` changed but its `ratesVersion` didn't move forward.
+2. If `src/CopilotLedger.Core/Pricing/rates.json` changed since the latest release, set its `ratesVersion` to the date of the change (`yyyy-MM-dd`), later than the latest release's. `gh ledger rates update` only takes rates with a later version, and the Release workflow fails when `rates.json` changed but its `ratesVersion` didn't move forward. In the same change, replace the old date wherever it's shown:
+   - the samples in `docs/guide.md` that show it: `status-first`, `status`, `rates-validate`, and `rates-update`. The `rates-update` sample and `GuideSamplesTests.GS4` download version `2026-12-15`; if that isn't later than the new date, change it in both;
+   - the tests that expect it: in `ReportCommandTests` (including `StatusText`), `RatesCommandTests`, `RatesUpdateTests`, `RateOverlayTests`, and `JsonRateCardCalculatorTests`, and in `TestSupport/PublishedRates.cs`. `RatesUpdateTests` downloads versions before, equal to, and after the old date; keep each in the same place relative to the new one.
+
+   `GuideSamplesTests` and the other tests fail until they match.
 3. Optional: run the Release workflow on `main` from the Actions tab. A manual run builds all six binaries, smoke-tests the three that GitHub's runners can run (`win-x64`, `linux-x64`, and `osx-arm64`), checks `ratesVersion`, and uploads the six binaries as workflow artifacts. It never creates a release, even when it's started from a tag.
 4. Tag the merged commit and push the tag:
 
@@ -2313,7 +2396,7 @@ Read the release notes for breaking changes, then replace the SHA and the commen
 
 - The four files match this section exactly.
 - Every relative link in `README.md` and `docs/*.md` names a file that exists, and every `#anchor` names a heading in it. GitHub makes a heading's anchor by lowercasing it, dropping punctuation other than `-` and `_`, and turning spaces into `-`.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 670 tests (0 failed, 0 skipped).
+- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 671 tests (0 failed, 0 skipped).
 
 ### Verify
 
@@ -2444,7 +2527,7 @@ Read the release notes for breaking changes, then replace the SHA and the commen
 - `action/` and `docs/action.md` no longer exist.
 - Outside `.github/plans/`, no file mentions `action/receipt.ps1`, `action/tests`, `docs/action.md`, `uses: ./action`, or `gh-ledger/action`.
 - `receipt.yml` matches the block above with the orchestrator's SHA, and no `ci.yml` step runs `receipt.Tests.ps1`.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 670 tests (0 failed, 0 skipped).
+- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 671 tests (0 failed, 0 skipped).
 - On the pull request, the Receipt workflow downloads `swigerb/copilot-ledger-action` at that SHA and finishes. A pull request without a receipt gets a notice, not a failure.
 
 ### Verify
@@ -2479,7 +2562,7 @@ How they relate to gh-ledger's `action/` at `3a0a514`, for review:
 
 ```yaml
 name: CopilotLedger PR Receipt
-description: Posts the AI spend receipt that gh ledger export-pr commits as one pull request comment, updated on later pushes.
+description: Posts the AI spend receipt from gh ledger export-pr as one pull request comment, updated on later pushes.
 author: swigerb
 branding:
   icon: dollar-sign
@@ -2943,11 +3026,11 @@ with:
     [Fact]
 ```
 
-**DM1 and DM7** (`DaemonCommandTests`, copy exactly). DM1 expects version `0.4.1`. DM7 starts the in-process daemon with a manual clock at 2026-11-21T15:00:00Z and drops the `spans` table, so every ingestion fails. It posts the same Copilot trace three times, advancing the clock one minute before the third, then stops the daemon. It asserts:
+**DM1 and DM7** (`DaemonCommandTests`, copy exactly). DM1 expects version `0.4.1`. DM7 starts the in-process daemon with a manual clock at 2026-11-21T15:00:00Z and drops the `spans` table, so every ingestion fails. It posts the same Copilot trace three times, advancing the clock one minute before the third, then steps the clock back two minutes, to 14:59, and posts a fourth time. Then it stops the daemon. It asserts:
 
-- all three responses are 503, and `daemon stop` and the daemon both exit 0;
-- the log has exactly two `could not record spans` lines, in order: the first failure at 15:00, and the third at 15:01 (the second, at 15:00, is suppressed);
-- the log has 5 lines in all, counting the empty string after its last line break: `daemon listening`, the two warnings, and `daemon stopped`. The test doesn't assert the `daemon listening` line's position, because the daemon writes it just after `daemon.json`, so in rare runs it could follow the first warning.
+- all four responses are 503, and `daemon stop` and the daemon both exit 0;
+- the log has exactly three `could not record spans` lines, in order: the first failure at 15:00, the third at 15:01 (the second, at 15:00, is suppressed), and the fourth at 14:59, written at once because the clock stepped back;
+- the log has 6 lines in all, counting the empty string after its last line break: `daemon listening`, the three warnings, and `daemon stopped`. The test doesn't assert the `daemon listening` line's position, because the daemon writes it just after `daemon.json`, so in rare runs it could follow the first warning.
 
 Edit 1 of 3 in `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs`, replace:
 
@@ -3036,24 +3119,34 @@ with:
         HttpStatusCode second = await PostTraceAsync(client);
         clock.Advance(TimeSpan.FromMinutes(1));
         HttpStatusCode third = await PostTraceAsync(client);
+
+        // After the clock steps back, the next failure is logged at once.
+        clock.Advance(TimeSpan.FromMinutes(-2));
+        HttpStatusCode fourth = await PostTraceAsync(client);
         CliRun stop = await harness.RunAsync("daemon", "stop");
         CliRun daemon = await harness.InProcessDaemon!;
 
         Assert.Equal(
-            [HttpStatusCode.ServiceUnavailable, HttpStatusCode.ServiceUnavailable, HttpStatusCode.ServiceUnavailable],
-            [first, second, third]);
+            [
+                HttpStatusCode.ServiceUnavailable,
+                HttpStatusCode.ServiceUnavailable,
+                HttpStatusCode.ServiceUnavailable,
+                HttpStatusCode.ServiceUnavailable,
+            ],
+            [first, second, third, fourth]);
         Assert.Equal(0, stop.ExitCode);
         Assert.Equal(0, daemon.ExitCode);
         Assert.Equal(
             [
                 "2026-11-21T15:00:00.0000000+00:00 Warning: could not record spans: SqliteException: SQLite Error 1: 'no such table: spans'.",
                 "2026-11-21T15:01:00.0000000+00:00 Warning: could not record spans: SqliteException: SQLite Error 1: 'no such table: spans'.",
+                "2026-11-21T14:59:00.0000000+00:00 Warning: could not record spans: SqliteException: SQLite Error 1: 'no such table: spans'.",
             ],
             harness.DaemonOutput.Split('\n').Where(
                 line => line.Contains(" Warning: could not record spans: ", StringComparison.Ordinal)));
 
         // The other lines are "daemon listening", "daemon stopped", and the empty string after the last line break.
-        Assert.Equal(5, harness.DaemonOutput.Split('\n').Length);
+        Assert.Equal(6, harness.DaemonOutput.Split('\n').Length);
     }
 
     private static async Task<HttpStatusCode> PostTraceAsync(HttpClient client)
@@ -3062,6 +3155,101 @@ with:
         content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         using HttpResponseMessage response = await client.PostAsync("/v1/traces", content);
         return response.StatusCode;
+    }
+}
+```
+
+**BM12** (`CircuitBreakerMonitorTests`, copy exactly). It records trace H's spans without a monitor, so no trip is recorded yet. Then it runs a `CircuitBreakerMonitor` whose sink cancels the evaluation's token when the trip is published, the moment a client disconnect would hurt most. It asserts:
+
+- `EvaluateAsync` throws an `OperationCanceledException`, from the budget check that runs after the trip;
+- the trip is recorded as in BM1 (`AssertTripH`), the one alert is a trip, and nothing was warned;
+- the flag file exists and equals `CircuitFlagFile.Render` of the open trips, and `.copilot-ledger` holds no `*.tmp` file.
+
+With the token passed to `SyncAsync` instead of `CancellationToken.None`, BM12 fails: the sync throws before it writes the flag file. Add it after BM11, and add `CancelingAlertSink` after `Harness`:
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs`, replace:
+
+```csharp
+        Assert.Equal(NOW, exceeded.AlertedAt);
+    }
+
+    private static void AssertTripH(BreakerTrip trip, string repo)
+    {
+        Assert.Equal(1, trip.Id);
+```
+
+with:
+
+```csharp
+        Assert.Equal(NOW, exceeded.AlertedAt);
+    }
+
+    [Fact]
+    public async Task BM12_CancellationAfterATripStillWritesTheFlagFile()
+    {
+        using TempDirectory temp = new();
+        Harness harness = await Harness.CreateAsync(
+            temp,
+            BreakerSettings.Default with { FlagFile = true },
+            monitor: false);
+        for (int request = 1; request <= 6; request++)
+        {
+            await harness.Ingestor.IngestAsync(TraceHRequest(request));
+        }
+
+        // The sink cancels the token as the trip is published, as a client that disconnects right then would.
+        using CancellationTokenSource aborted = new();
+        CancelingAlertSink sink = new(aborted);
+        CircuitBreakerMonitor breaker = new(harness.Store, sink);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => breaker.EvaluateAsync([TraceH], aborted.Token));
+
+        IReadOnlyList<BreakerTrip> trips =
+            await harness.Store.GetOpenBreakerTripsAsync(BreakerTripFilter.All);
+        AssertTripH(Assert.Single(trips), harness.Repo);
+        Assert.Equal(BreakerAlertKind.Trip, Assert.Single(sink.Alerts).Kind);
+        Assert.Empty(sink.Warnings);
+        string directory = Path.Combine(harness.Repo, ".copilot-ledger");
+        Assert.Equal(
+            CircuitFlagFile.Render(harness.Repo, trips),
+            await FileRetry.ReadAllTextAsync(Path.Combine(directory, "CIRCUIT_OPEN")));
+        Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
+    }
+
+    private static void AssertTripH(BreakerTrip trip, string repo)
+    {
+        Assert.Equal(1, trip.Id);
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs`, replace:
+
+```csharp
+            return new Harness(databasePath, store, ingestor, sink, repo);
+        }
+    }
+}
+```
+
+with:
+
+```csharp
+            return new Harness(databasePath, store, ingestor, sink, repo);
+        }
+    }
+
+    // Records alerts and warnings, and cancels source when an alert is published.
+    private sealed class CancelingAlertSink(CancellationTokenSource source) : IBreakerAlertSink
+    {
+        public List<BreakerAlert> Alerts { get; } = [];
+        public List<string> Warnings { get; } = [];
+
+        public void Publish(BreakerAlert alert)
+        {
+            Alerts.Add(alert);
+            source.Cancel();
+        }
+
+        public void Warn(string message) => Warnings.Add(message);
     }
 }
 ```
@@ -3090,7 +3278,7 @@ with:
         Rates:   2026-11-20
 ```
 
-**Fresh-file reads (A2).** On each line below (line numbers at `3a0a514`), the text after the line's indentation is exactly the "Replace" cell; change it to the "With" cell and keep the indentation. Nothing else in these files changes, and every enclosing test is already `async`.
+**Fresh-file reads (A2).** On each line below (line numbers at `3a0a514`), the text after the line's indentation is exactly the "Replace" cell; change it to the "With" cell and keep the indentation. Nothing else in these files changes except BM12's additions, which come after these lines, and every enclosing test is already `async`.
 
 | File | Line | Replace | With |
 |---|---|---|---|
@@ -3120,7 +3308,7 @@ with:
 | `CircuitBreakerMonitorTests.cs` | 243 | `File.ReadAllText(flag));` | `await FileRetry.ReadAllTextAsync(flag));` |
 | `CircuitBreakerMonitorTests.cs` | 246 | `File.ReadAllText(` | `await FileRetry.ReadAllTextAsync(` |
 
-A5, A10, and A11 get no new tests. The build shows that nothing used the removed members. A10 changes only test support, and the suite passing with the throwing getter shows that no test relied on the default. A11 passes an existing token one call further.
+A5 and A10 get no new tests. The build shows that nothing used the removed members. A10 changes only test support, and the suite passing with the throwing getter shows that no test relied on the default. The wider cleanup in `SyncAsync` has no test: nothing public can make the write or move throw anything but `IOException` or `UnauthorizedAccessException` at a known moment.
 
 ### Task 2 tests
 
@@ -3134,7 +3322,7 @@ No .NET tests. CI's new smoke lines are the test, on `ubuntu-latest` and `window
 - **GS2** (14 cases) runs each command sample in its state, asserts exit code 0 and an empty `Error`, and compares `Out`, with the data directory shown as `C:\Users\you\.copilot-ledger`, to the sample's text plus `\n`.
 - **GS3** stops the stand-in daemon, asserts exit code 0, then runs `gh ledger daemon start` and compares it as GS2 does.
 - **GS4** runs `rates update` with a `FakeHttpHandler` that serves the built-in rates with `ratesVersion` `2026-12-15`, after asserting that the sample's command is `gh ledger rates update`, and compares as GS2 does.
-- **GS5** stops the stand-in, starts the real daemon in-process, posts the trace from `ChatTrace` (which must get 200), stops the daemon, and asserts both exit codes. The log must have exactly four elements after splitting on `\n`: the `daemon listening` line (checked with `StartsWith` up to `(pid `, because the process ID varies), the sample's `ALERT` line exactly, `daemon stopped`, and the empty string. The alert is published while the request is handled, and shutdown drains the alert queue before it logs `daemon stopped`, so the order is fixed.
+- **GS5** stops the stand-in, starts the real daemon in-process, posts the trace from `ChatTrace` (which must get 200), stops the daemon, and asserts both exit codes. The log must have exactly four elements after splitting on `\n`. The first two, in either order, are the `daemon listening` line (checked with `StartsWith` up to `(pid `, because the process ID varies) and the sample's `ALERT` line exactly: `StartInProcessDaemonAsync` waits only for `daemon.json`, which the daemon writes just before it logs `listening`, so the alert can come first. Then come `daemon stopped`, because shutdown drains the alert queue before logging it, and the empty string.
 - **GS6** compares `gh ledger export-pr --stdout` with the quoted receipt, unquoted, plus `\n`.
 - **GS7** runs `gh ledger mcp` over pipes, calls `get_branch_ledger` with no arguments, checks that the server exits 0 and wrote nothing to `Out` or `Error`, and compares the tool's text, with its last line (the JSON) indented, to the sample.
 
@@ -3252,10 +3440,14 @@ public sealed partial class GuideSamplesTests
         Assert.Equal(0, (await world.Harness.InProcessDaemon!).ExitCode);
         string[] lines = world.Harness.DaemonOutput.Split('\n');
         Assert.Equal(4, lines.Length);
-        Assert.StartsWith(
-            $"2026-11-21T21:30:00.0000000+00:00 gh-ledger {GhLedgerCli.Version} daemon listening on http://localhost:4318 (pid ",
-            lines[0]);
-        Assert.Equal(sample.Text, lines[1]);
+
+        // The daemon logs "listening" just after it writes daemon.json, so the alert can come before it.
+        Assert.Single(
+            lines[..2],
+            line => line.StartsWith(
+                $"2026-11-21T21:30:00.0000000+00:00 gh-ledger {GhLedgerCli.Version} daemon listening on http://localhost:4318 (pid ",
+                StringComparison.Ordinal));
+        Assert.Single(lines[..2], line => line == sample.Text);
         Assert.Equal("2026-11-21T21:30:00.0000000+00:00 gh-ledger daemon stopped", lines[2]);
         Assert.Equal(string.Empty, lines[3]);
     }
@@ -3744,7 +3936,7 @@ After Task 5 merges and CI on `main` is green, the orchestrator:
    - `rates update`;
    - `gh extension install swigerb/gh-ledger`.
 2. **Releases the action first**, because the docs say `@v1`. It creates `v1.0.0` at the commit Task 5 pinned, with `gh release create v1.0.0 --repo swigerb/copilot-ledger-action --target <commit> --title v1.0.0 --generate-notes`. Then, from a clone, it creates the major tag at the same commit: `git fetch --tags origin`, `git tag v1 v1.0.0`, and `git push origin v1`. The user lists the release on Marketplace in the browser, as the action's README describes. If the end-to-end check needs a fix in the action, the fixed commit becomes `v1.0.0`, and `receipt.yml`'s pin moves to it in a small pull request.
-3. **Releases gh-ledger v0.4.1**, following `docs/releasing.md`: a manual Release run on `main` (the dry run, which also checks `ratesVersion`), then the tag. Afterward, `gh extension upgrade ledger` takes an installed 0.4.0 to 0.4.1 (`gh ledger status` shows `gh-ledger 0.4.1 (GitHub CLI extension)`), and `gh ledger rates update` prints `Rates are up to date (2026-11-20).`, because the rates didn't change.
+3. **Releases gh-ledger v0.4.1**, following `docs/releasing.md`: a manual Release run on `main` (the dry run, which also checks `ratesVersion`), then the tag. Afterward, with the daemon stopped and the Copilot sessions that use the MCP server closed, `gh extension upgrade ledger` takes an installed 0.4.0 to 0.4.1 (`gh ledger status` shows `gh-ledger 0.4.1 (GitHub CLI extension)`), and `gh ledger rates update` prints `Rates are up to date (2026-11-20).`, because the rates didn't change.
 
 When the sprint closes, `ledger-architect` archives this plan with its amendments.
 
@@ -3755,7 +3947,7 @@ When the sprint closes, `ledger-architect` archives this plan with its amendment
 - **The guide on macOS and Linux.** The samples show Windows. A second `GuideWorld` platform could produce the setup scenario's `install` and `status` output for a shell profile.
 - **Reconciliation with `nano_aiu`** (carried). Store each `chat` span's `github.copilot.nano_aiu` and report drift per model, never the root `invoke_agent` total. Protobuf carries it as an IEEE `double`, so it needs a decimal-only design.
 - **Breaker state in `status`** (carried).
-- **MCP registration in `install`** (carried). `install` could run `copilot mcp add` or edit `~/.copilot/mcp-config.json`, with `uninstall` undoing it.
+- **MCP registration in `install`** (carried). `install` could run `copilot mcp add` or edit `~/.copilot/mcp-config.json`, with `uninstall` undoing it; until then, the docs give `copilot mcp remove ledger`.
 - **`COPILOT_LEDGER_HOME` in sign-in items** (carried). Pass the data directory to the sign-in item instead of warning.
 - **Headless Linux** (carried). A `systemd --user` unit for machines without a desktop session.
 - **A tool gate** (carried). A user-level `preToolUse` hook that denies tools while the breaker is open; it needs the hook contract verified live.
@@ -3763,7 +3955,7 @@ When the sprint closes, `ledger-architect` archives this plan with its amendment
 - **Smarter retry churn** (carried). Telling test and build commands apart needs the command text, which Copilot exports only with content capture.
 - **Signed receipts and a pre-push hook** (carried). A signature can't vouch for a local ledger, and a pre-push hook can't add to the push it runs in; see `.github/plans/archive/sprint-4.md`.
 - **`export-pr --since`** (carried), for branch names that are reused.
-- **Restarting the daemon around `gh extension upgrade`** (carried), for example a `gh ledger upgrade` command, instead of documenting `daemon stop` first.
+- **Upgrading without stopping everything by hand** (carried). For example, a `gh ledger upgrade` command that stops the daemon, upgrades, and restarts it, instead of documenting `daemon stop` first. Copilot's MCP servers would still hold the binary on Windows, so it could only report which processes are left.
 - **Build provenance** (carried). `actions/attest-build-provenance` for the release assets, verifiable with `gh attestation verify`.
 - **Arm64 smoke tests** (carried). Run the `linux-arm64` and `win-arm64` binaries on Arm64 runners, and `osx-x64` under Rosetta.
 - **Checking for newer rates automatically** (carried), for example a `status` hint when the latest release's rates are newer.
