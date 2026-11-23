@@ -20,7 +20,9 @@ public static class TestSpans
         long inputTokens = 0,
         long outputTokens = 0,
         long cacheReadInputTokens = 0,
-        long cacheWriteInputTokens = 0)
+        long cacheWriteInputTokens = 0,
+        CacheCounterState? cacheReadState = null,
+        CacheCounterState? cacheWriteState = null)
     {
         DateTimeOffset start = startTime ?? new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero);
         return new NormalizedGenAiSpan
@@ -43,6 +45,12 @@ public static class TestSpans
             OutputTokens = outputTokens,
             CacheReadInputTokens = cacheReadInputTokens,
             CacheWriteInputTokens = cacheWriteInputTokens,
+
+            // Only a reported counter can be nonzero. Pass a state to record a reported 0.
+            CacheReadState = cacheReadState
+                ?? (cacheReadInputTokens == 0 ? CacheCounterState.Absent : CacheCounterState.Reported),
+            CacheWriteState = cacheWriteState
+                ?? (cacheWriteInputTokens == 0 ? CacheCounterState.Absent : CacheCounterState.Reported),
         };
     }
 }

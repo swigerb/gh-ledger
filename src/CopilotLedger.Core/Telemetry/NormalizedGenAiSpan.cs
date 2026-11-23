@@ -20,4 +20,6 @@ public sealed record NormalizedGenAiSpan
     public long OutputTokens { get; init; }                  // gen_ai.usage.output_tokens
     public long CacheReadInputTokens { get; init; }          // gen_ai.usage.cache_read.input_tokens
     public long CacheWriteInputTokens { get; init; }         // gen_ai.usage.cache_write.input_tokens (legacy: cache_creation)
+    public CacheCounterState CacheReadState { get; init; }   // Reported when the span carried the cache-read attribute
+    public CacheCounterState CacheWriteState { get; init; }  // Reported when it carried cache_write (or legacy cache_creation)
 }

@@ -468,6 +468,99 @@ public sealed class GenAiSpanNormalizerTests
             link => AssertLink(link, null, null, null, 0));
     }
 
+    [Theory]
+    [InlineData(0, CacheCounterState.Reported, CacheCounterState.Reported, 300, 100)]
+    [InlineData(1, CacheCounterState.Reported, CacheCounterState.Absent, 300, 0)]
+    [InlineData(2, CacheCounterState.Absent, CacheCounterState.Reported, 0, 200)]
+    [InlineData(3, CacheCounterState.Absent, CacheCounterState.Absent, 0, 0)]
+    [InlineData(4, CacheCounterState.Reported, CacheCounterState.Absent, 0, 0)]
+    [InlineData(5, CacheCounterState.Absent, CacheCounterState.Reported, 0, 0)]
+    [InlineData(6, CacheCounterState.Absent, CacheCounterState.Reported, 0, 0)]
+    public void NZ13_CacheCounterStates_SayWhichCountersTheSpanCarried(
+        int caseNumber,
+        CacheCounterState readState,
+        CacheCounterState writeState,
+        long cacheRead,
+        long cacheWrite)
+    {
+        OtlpAttribute[] cache = caseNumber switch
+        {
+            0 =>
+            [
+                Int(GenAiAttributeNames.CacheReadInputTokens, 300),
+                Int(GenAiAttributeNames.CacheWriteInputTokens, 100),
+            ],
+            1 => [Int(GenAiAttributeNames.CacheReadInputTokens, 300)],
+            2 => [Int(GenAiAttributeNames.LegacyCacheCreationInputTokens, 200)],
+            3 => [],
+            4 => [Int(GenAiAttributeNames.CacheReadInputTokens, 0)],
+            5 => [Int(GenAiAttributeNames.LegacyCacheCreationInputTokens, 0)],
+            6 =>
+            [
+                Int(GenAiAttributeNames.CacheWriteInputTokens, 0),
+                Int(GenAiAttributeNames.LegacyCacheCreationInputTokens, 50),
+            ],
+            _ => throw new ArgumentOutOfRangeException(nameof(caseNumber)),
+        };
+
+        NormalizedGenAiSpan span = Assert.Single(GenAiSpanNormalizer.Normalize(
+            Request(
+                CopilotResource,
+                Span(attributes:
+                [
+                    Str(GenAiAttributeNames.OperationName, "chat"),
+                    Int(GenAiAttributeNames.InputTokens, 1000),
+                    Int(GenAiAttributeNames.OutputTokens, 7),
+                    .. cache,
+                ]))).InferenceSpans);
+
+        Assert.Equal(readState, span.CacheReadState);
+        Assert.Equal(writeState, span.CacheWriteState);
+        Assert.Equal(cacheRead, span.CacheReadInputTokens);
+        Assert.Equal(cacheWrite, span.CacheWriteInputTokens);
+        Assert.Equal(1000, span.InputTokens);
+        Assert.Equal(7, span.OutputTokens);
+    }
+
+    [Fact]
+    public void NZ14_CopilotCapture_LeavesOutZeroCacheCounters()
+    {
+        NormalizedTraceBatch batch = GenAiSpanNormalizer.Normalize(CopilotTraces.TraceBA());
+
+        Assert.Collection(
+            batch.InferenceSpans,
+            span =>
+            {
+                Assert.Equal("00f067aa0ba902bb", span.SpanId);
+                Assert.Equal(CacheCounterState.Absent, span.CacheReadState);
+                Assert.Equal(CacheCounterState.Reported, span.CacheWriteState);
+                Assert.Equal(0, span.CacheReadInputTokens);
+                Assert.Equal(3662, span.CacheWriteInputTokens);
+                Assert.True(CacheMetrics.IsReported(span.CacheReadState, span.CacheWriteState));
+            },
+            span =>
+            {
+                Assert.Equal("00f067aa0ba902bd", span.SpanId);
+                Assert.Equal(CacheCounterState.Reported, span.CacheReadState);
+                Assert.Equal(CacheCounterState.Reported, span.CacheWriteState);
+                Assert.Equal(3662, span.CacheReadInputTokens);
+                Assert.Equal(99, span.CacheWriteInputTokens);
+            },
+            span =>
+            {
+                Assert.Equal("00f067aa0ba902b8", span.SpanId);
+                Assert.Equal(CacheCounterState.Reported, span.CacheReadState);
+                Assert.Equal(CacheCounterState.Absent, span.CacheWriteState);
+                Assert.Equal(15872, span.CacheReadInputTokens);
+                Assert.Equal(0, span.CacheWriteInputTokens);
+            });
+        NormalizedGenAiSpan unreported = Assert.Single(
+            GenAiSpanNormalizer.Normalize(CopilotTraces.TraceF()).InferenceSpans);
+        Assert.Equal(CacheCounterState.Absent, unreported.CacheReadState);
+        Assert.Equal(CacheCounterState.Absent, unreported.CacheWriteState);
+        Assert.False(CacheMetrics.IsReported(unreported.CacheReadState, unreported.CacheWriteState));
+    }
+
     private static void AssertLink(
         GenAiSpanLink link,
         string? operationName,
