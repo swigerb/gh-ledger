@@ -584,6 +584,9 @@ WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/sear
   "aiCreditsUsd": 6.1775,
   "foundryByokUsd": 0.49,
   "localSavedUsd": 0.1725,
+  "apiEquivalentUsd": 6.49,
+  "apiEquivalentUnpricedSpans": 2,
+  "apiEquivalentEstimatedSpans": 1,
   "billedAiCredits": 666.75,
   "topModel": "claude-opus-5.5",
   "budget": {
