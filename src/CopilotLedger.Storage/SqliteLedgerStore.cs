@@ -37,6 +37,7 @@ public sealed partial class SqliteLedgerStore
         """;
 
     // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
+    // Only effective rows count: an imported row that a live row superseded is kept for diagnosis and never reported.
     private const string FilterSql = """
         (@from IS NULL OR start_time_unix_ms >= @from)
           AND (@to IS NULL OR start_time_unix_ms < @to)
@@ -44,6 +45,13 @@ public sealed partial class SqliteLedgerStore
           AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
           AND (@pull_request IS NULL OR pull_request_number = @pull_request)
           AND (@agent IS NULL OR COALESCE(agent_name, '(none)') = @agent)
+          AND accounting_state = 'effective'
+        """;
+
+    // An execute_tool link counts unless an imported row that was superseded owns it (its live twin's links count instead).
+    private const string EffectiveLinkSql = """
+        (owner_span_row_id IS NULL
+                 OR EXISTS (SELECT 1 FROM spans WHERE spans.id = span_links.owner_span_row_id AND spans.accounting_state = 'effective'))
         """;
 
     // CacheMetrics.IsReported: the span carried at least one cache counter.
@@ -237,7 +245,7 @@ public sealed partial class SqliteLedgerStore
                 SELECT id, operation_name, billing_channel, model_id, start_time_unix_ms,
                        input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, request_model
                 FROM spans
-                WHERE api_equivalent_status IS NULL
+                WHERE api_equivalent_status IS NULL AND accounting_state = 'effective'
                 ORDER BY id;
                 """;
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -594,7 +602,7 @@ public sealed partial class SqliteLedgerStore
         await using (SqliteCommand summary = connection.CreateCommand())
         {
             summary.CommandText = """
-                SELECT MAX(conversation_id), MAX(COALESCE(repo_slug, repo_root, '(none)')), MAX(COALESCE(branch_name, '(none)')), MAX(repo_root), COUNT(*) FROM spans WHERE trace_id = @trace;
+                SELECT MAX(conversation_id), MAX(COALESCE(repo_slug, repo_root, '(none)')), MAX(COALESCE(branch_name, '(none)')), MAX(repo_root), COUNT(*) FROM spans WHERE trace_id = @trace AND accounting_state = 'effective';
                 """;
             summary.Parameters.AddWithValue("@trace", traceId);
             await using SqliteDataReader reader = await summary.ExecuteReaderAsync(cancellationToken);
@@ -627,7 +635,7 @@ public sealed partial class SqliteLedgerStore
         await using (SqliteCommand query = connection.CreateCommand())
         {
             query.CommandText = """
-                SELECT span_id, end_time_unix_ms, cost_usd_pico FROM spans WHERE trace_id = @trace AND cost_usd_pico > 0 ORDER BY end_time_unix_ms, span_id;
+                SELECT span_id, end_time_unix_ms, cost_usd_pico FROM spans WHERE trace_id = @trace AND cost_usd_pico > 0 AND accounting_state = 'effective' ORDER BY end_time_unix_ms, span_id;
                 """;
             query.Parameters.AddWithValue("@trace", traceId);
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -643,8 +651,8 @@ public sealed partial class SqliteLedgerStore
         List<ToolCallEvent> toolCalls = [];
         await using (SqliteCommand query = connection.CreateCommand())
         {
-            query.CommandText = """
-                SELECT span_id, start_time_unix_ms, tool_name, tool_exit_code, status_code FROM span_links WHERE trace_id = @trace AND operation_name = 'execute_tool' ORDER BY start_time_unix_ms, span_id;
+            query.CommandText = $"""
+                SELECT span_id, start_time_unix_ms, tool_name, tool_exit_code, status_code FROM span_links WHERE trace_id = @trace AND operation_name = 'execute_tool' AND {EffectiveLinkSql} ORDER BY start_time_unix_ms, span_id;
                 """;
             query.Parameters.AddWithValue("@trace", traceId);
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -663,7 +671,7 @@ public sealed partial class SqliteLedgerStore
         await using (SqliteCommand query = connection.CreateCommand())
         {
             query.CommandText = """
-                SELECT span_id, start_time_unix_ms, head_commit_sha FROM spans WHERE trace_id = @trace AND head_commit_sha IS NOT NULL ORDER BY start_time_unix_ms, span_id;
+                SELECT span_id, start_time_unix_ms, head_commit_sha FROM spans WHERE trace_id = @trace AND head_commit_sha IS NOT NULL AND accounting_state = 'effective' ORDER BY start_time_unix_ms, span_id;
                 """;
             query.Parameters.AddWithValue("@trace", traceId);
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -938,7 +946,8 @@ public sealed partial class SqliteLedgerStore
             SELECT b.repository, b.branch, b.budget_usd_pico, b.set_at_unix_ms, b.alerted_at_unix_ms, b.notified_at_unix_ms,
                    (SELECT COALESCE(SUM(s.cost_usd_pico), 0) FROM spans AS s
                      WHERE COALESCE(s.repo_slug, s.repo_root, '(none)') = b.repository
-                       AND COALESCE(s.branch_name, '(none)') = b.branch) AS spent_usd_pico
+                       AND COALESCE(s.branch_name, '(none)') = b.branch
+                       AND s.accounting_state = 'effective') AS spent_usd_pico
             FROM branch_budgets AS b
             WHERE (@repository IS NULL OR b.repository = @repository) AND (@branch IS NULL OR b.branch = @branch) ORDER BY b.repository, b.branch;
             """;
@@ -958,7 +967,7 @@ public sealed partial class SqliteLedgerStore
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            UPDATE branch_budgets SET alerted_at_unix_ms = @now WHERE repository = @repository AND branch = @branch AND alerted_at_unix_ms IS NULL AND budget_usd_pico < (SELECT COALESCE(SUM(cost_usd_pico), 0) FROM spans WHERE COALESCE(repo_slug, repo_root, '(none)') = @repository AND COALESCE(branch_name, '(none)') = @branch);
+            UPDATE branch_budgets SET alerted_at_unix_ms = @now WHERE repository = @repository AND branch = @branch AND alerted_at_unix_ms IS NULL AND budget_usd_pico < (SELECT COALESCE(SUM(cost_usd_pico), 0) FROM spans WHERE COALESCE(repo_slug, repo_root, '(none)') = @repository AND COALESCE(branch_name, '(none)') = @branch AND accounting_state = 'effective');
             """;
         command.Parameters.AddWithValue("@repository", repository);
         command.Parameters.AddWithValue("@branch", branch);
@@ -996,7 +1005,8 @@ public sealed partial class SqliteLedgerStore
             SELECT b.repository, b.branch, b.budget_usd_pico, b.set_at_unix_ms, b.alerted_at_unix_ms, b.notified_at_unix_ms,
                    (SELECT COALESCE(SUM(s.cost_usd_pico), 0) FROM spans AS s
                      WHERE COALESCE(s.repo_slug, s.repo_root, '(none)') = b.repository
-                       AND COALESCE(s.branch_name, '(none)') = b.branch) AS spent_usd_pico
+                       AND COALESCE(s.branch_name, '(none)') = b.branch
+                       AND s.accounting_state = 'effective') AS spent_usd_pico
             FROM branch_budgets AS b
             WHERE b.alerted_at_unix_ms IS NOT NULL AND b.alerted_at_unix_ms >= @since AND b.notified_at_unix_ms IS NULL ORDER BY b.alerted_at_unix_ms, b.repository, b.branch;
             """;
@@ -1023,7 +1033,7 @@ public sealed partial class SqliteLedgerStore
             ", ",
             Enumerable.Range(0, traces.Length).Select(index => $"@t{index}"));
         command.CommandText = $"""
-            SELECT trace_id, COUNT(*) FROM span_links WHERE trace_id IN ({parameters}) AND operation_name = 'execute_tool' AND ((tool_exit_code IS NOT NULL AND tool_exit_code <> 0) OR status_code = 2) GROUP BY trace_id;
+            SELECT trace_id, COUNT(*) FROM span_links WHERE trace_id IN ({parameters}) AND operation_name = 'execute_tool' AND ((tool_exit_code IS NOT NULL AND tool_exit_code <> 0) OR status_code = 2) AND {EffectiveLinkSql} GROUP BY trace_id;
             """;
         for (int index = 0; index < traces.Length; index++)
         {
@@ -1409,6 +1419,7 @@ public sealed partial class SqliteLedgerStore
                 FROM spans
                 WHERE (@trace IS NULL OR trace_id = @trace)
                   AND (@conversation IS NULL OR conversation_id = @conversation)
+                  AND accounting_state = 'effective'
             )
             SELECT trace_id, span_id, parent_span_id, conversation_id, agent_span_id, start_time_unix_ms,
                    COALESCE(repo_slug, repo_root, '(none)') AS repository,
