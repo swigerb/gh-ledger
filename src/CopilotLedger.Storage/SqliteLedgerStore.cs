@@ -29,6 +29,22 @@ public sealed class SqliteLedgerStore
         ) ON CONFLICT (trace_id, span_id) DO NOTHING;
         """;
 
+    // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
+    private const string FilterSql = """
+        (@from IS NULL OR start_time_unix_ms >= @from)
+          AND (@to IS NULL OR start_time_unix_ms < @to)
+          AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
+          AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+          AND (@pull_request IS NULL OR pull_request_number = @pull_request)
+          AND (@agent IS NULL OR COALESCE(agent_name, '(none)') = @agent)
+        """;
+
+    // CacheMetrics.IsReported: the span carried at least one cache counter.
+    private const string ReportedSql = "(cache_read_state = 'reported' OR cache_write_state = 'reported')";
+
+    // A span's input tokens that were neither read from nor written to the cache, never below 0.
+    private const string UncachedSql = "MAX(input_tokens - cache_read_input_tokens - cache_write_input_tokens, 0)";
+
     private readonly TimeProvider _timeProvider;
     private readonly string _connectionString;
     private bool _initialized;
@@ -164,10 +180,7 @@ public sealed class SqliteLedgerStore
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = GetRollupSql(grouping);
-        command.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
-        command.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
-        command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
-        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        AddFilterParameters(command, filter);
 
         List<LedgerRollupRow> rows = [];
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -200,6 +213,13 @@ public sealed class SqliteLedgerStore
                     reader.GetInt64(reader.GetOrdinal("cache_read_input_tokens")),
                 CacheWriteInputTokens =
                     reader.GetInt64(reader.GetOrdinal("cache_write_input_tokens")),
+                CacheReportedSpanCount =
+                    reader.GetInt64(reader.GetOrdinal("cache_reported_span_count")),
+                ReportedInputTokens = reader.GetInt64(reader.GetOrdinal("reported_input_tokens")),
+                ReportedCacheReadInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_cache_read_input_tokens")),
+                ReportedUncachedInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_uncached_input_tokens")),
                 AiCredits = AiCreditMath.UsdToAiCredits(aiCreditsUsd),
                 AiCreditsUsd = aiCreditsUsd,
                 FoundryByokUsd =
@@ -884,7 +904,7 @@ public sealed class SqliteLedgerStore
         List<PromptChainData> data = [];
         await using (SqliteCommand query = connection.CreateCommand())
         {
-            query.CommandText = """
+            query.CommandText = $"""
                 SELECT trace_id,
                        MIN(start_time_unix_ms)                                                            AS start_ms,
                        MAX(end_time_unix_ms)                                                              AS end_ms,
@@ -901,18 +921,12 @@ public sealed class SqliteLedgerStore
                        SUM(CASE WHEN billing_channel = 'foundry_byok' THEN cost_usd_pico ELSE 0 END)      AS byok_usd_pico,
                        SUM(saved_usd_pico)                                                                AS saved_usd_pico
                 FROM spans
-                WHERE (@from IS NULL OR start_time_unix_ms >= @from)
-                  AND (@to IS NULL OR start_time_unix_ms < @to)
-                  AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
-                  AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+                WHERE {FilterSql}
                 GROUP BY trace_id
                 ORDER BY github_usd_pico + byok_usd_pico DESC, saved_usd_pico DESC, start_ms DESC, trace_id ASC
                 LIMIT @limit;
                 """;
-            query.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
-            query.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
-            query.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
-            query.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+            AddFilterParameters(query, filter);
             query.Parameters.AddWithValue("@limit", limit);
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -959,16 +973,10 @@ public sealed class SqliteLedgerStore
             query.CommandText = $"""
                 SELECT DISTINCT trace_id, agent_name, model_id
                 FROM spans
-                WHERE (@from IS NULL OR start_time_unix_ms >= @from)
-                  AND (@to IS NULL OR start_time_unix_ms < @to)
-                  AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
-                  AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+                WHERE {FilterSql}
                   AND trace_id IN ({traceParameters});
                 """;
-            query.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
-            query.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
-            query.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
-            query.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+            AddFilterParameters(query, filter);
             for (int index = 0; index < data.Count; index++)
             {
                 query.Parameters.AddWithValue($"@t{index}", data[index].TraceId);
@@ -1031,18 +1039,12 @@ public sealed class SqliteLedgerStore
         EnsureInitialized();
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT COUNT(DISTINCT trace_id)
             FROM spans
-            WHERE (@from IS NULL OR start_time_unix_ms >= @from)
-              AND (@to IS NULL OR start_time_unix_ms < @to)
-              AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
-              AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch);
+            WHERE {FilterSql};
             """;
-        command.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
-        command.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
-        command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
-        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        AddFilterParameters(command, filter);
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
@@ -1082,6 +1084,19 @@ public sealed class SqliteLedgerStore
         command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
         command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
         command.Parameters.AddWithValue("@repo_root", OrDbNull(filter.RepositoryRoot));
+    }
+
+    // The parameters of FilterSql.
+    private static void AddFilterParameters(
+        SqliteCommand command,
+        LedgerFilter filter)
+    {
+        command.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
+        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        command.Parameters.AddWithValue("@pull_request", OrDbNull(filter.PullRequestNumber));
+        command.Parameters.AddWithValue("@agent", OrDbNull(filter.Agent));
     }
 
     private static async Task<IReadOnlyList<BreakerTrip>> ReadTripsAsync(
@@ -1300,14 +1315,15 @@ public sealed class SqliteLedgerStore
                    SUM(output_tokens)                                                                AS output_tokens,
                    SUM(cache_read_input_tokens)                                                      AS cache_read_input_tokens,
                    SUM(cache_write_input_tokens)                                                     AS cache_write_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END)                                    AS cache_reported_span_count,
+                   SUM(CASE WHEN {ReportedSql} THEN input_tokens ELSE 0 END)                         AS reported_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_read_input_tokens ELSE 0 END)              AS reported_cache_read_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN {UncachedSql} ELSE 0 END)                        AS reported_uncached_input_tokens,
                    SUM(CASE WHEN billing_channel = 'github_ai_credits' THEN cost_usd_pico ELSE 0 END) AS github_usd_pico,
                    SUM(CASE WHEN billing_channel = 'foundry_byok' THEN cost_usd_pico ELSE 0 END)      AS byok_usd_pico,
                    SUM(saved_usd_pico)                                                               AS saved_usd_pico
             FROM spans
-            WHERE (@from IS NULL OR start_time_unix_ms >= @from)
-              AND (@to IS NULL OR start_time_unix_ms < @to)
-              AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
-              AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+            WHERE {FilterSql}
             GROUP BY {keyAliases}
             ORDER BY github_usd_pico + byok_usd_pico DESC, saved_usd_pico DESC, {keyAliases} ASC;
             """;
