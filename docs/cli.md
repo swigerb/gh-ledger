@@ -174,6 +174,7 @@ The first four are read-only. `set_branch_budget` changes only the budget, so Co
 - `gh ledger rates init [--force]` creates a starter rates overlay, `rates.json` in the data directory.
 - `gh ledger rates validate [--file <path>]` checks the overlay, or another file, with the same rules the daemon uses.
 - `gh ledger rates update` downloads `rates.v2.json` from the latest gh-ledger release, or its `rates.json` if it has none, and keeps it when it's newer than the rates in use, has API list prices (`schemaVersion` 2), and your overlay still applies. It uses your system proxy. Restart the daemon afterward; it reads rates when it starts.
+- `gh ledger rates backfill-api-equivalent [--dry-run]` gives the requests recorded before gh-ledger had API list prices their API-equivalent prices, with the rates in use, and prints how many were priced. It changes nothing else, and `--dry-run` writes nothing. See [API-equivalent prices](configuration.md#api-equivalent-prices).
 
 See [configuration.md](configuration.md) for pricing, the overlay format, and where files are kept.
 

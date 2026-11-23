@@ -1,7 +1,9 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text;
+using CopilotLedger.Cli.Reporting;
 using CopilotLedger.Core.Pricing;
+using CopilotLedger.Storage;
 
 namespace CopilotLedger.Cli.Rates;
 
@@ -51,6 +53,19 @@ internal static class RatesCommands
             (ParseResult _, CancellationToken cancellationToken) =>
                 RatesUpdate.RunAsync(context, cancellationToken));
         rates.Add(update);
+
+        Command backfill = new(
+            "backfill-api-equivalent",
+            "Price the spans recorded without API-equivalent prices, at the rates in use.");
+        Option<bool> dryRun = new("--dry-run")
+        {
+            Description = "Show what would be recorded without writing it.",
+        };
+        backfill.Add(dryRun);
+        backfill.SetAction(
+            (ParseResult result, CancellationToken cancellationToken) =>
+                BackfillAsync(context, result.GetValue(dryRun), cancellationToken));
+        rates.Add(backfill);
         return rates;
     }
 
@@ -114,5 +129,57 @@ internal static class RatesCommands
             context.Error.WriteLine($"Invalid rates overlay: {ex.Message}");
             return 1;
         }
+    }
+
+    // Prices the legacy spans with the rates the daemon would load: the base rates and the overlay.
+    private static async Task<int> BackfillAsync(
+        CliContext context,
+        bool dryRun,
+        CancellationToken cancellationToken)
+    {
+        RatesBase rates = RateCardFiles.LoadBase(context);
+        if (rates.Warning is not null)
+        {
+            context.Out.WriteLine($"Warning: {rates.Warning}");
+        }
+
+        JsonRateCardCalculator calculator;
+        try
+        {
+            calculator = RateCardFiles.Load(rates, RateCardFiles.OverlayPath(context));
+        }
+        catch (InvalidDataException ex)
+        {
+            context.Error.WriteLine($"Invalid rates overlay: {ex.Message}");
+            return 1;
+        }
+
+        SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
+        await store.InitializeAsync(cancellationToken);
+        ApiEquivalentBackfill backfill =
+            await store.BackfillApiEquivalentAsync(calculator, dryRun, cancellationToken);
+        if (backfill.SpanCount == 0)
+        {
+            context.Out.WriteLine("Every span has an API-equivalent result; nothing to backfill.");
+            return 0;
+        }
+
+        context.Out.WriteLine(
+            $"{LedgerFormat.Count(backfill.SpanCount)} spans have no API-equivalent result. With rates {calculator.RatesVersion}:");
+        context.Out.WriteLine(
+            $"  Priced:          {LedgerFormat.Count(backfill.PricedSpanCount)} ({LedgerFormat.Usd(backfill.PricedUsd)})");
+        context.Out.WriteLine($"  Unpriced:        {LedgerFormat.Count(backfill.UnpricedSpanCount)}");
+        context.Out.WriteLine($"  Not applicable:  {LedgerFormat.Count(backfill.NotApplicableSpanCount)}");
+        if (backfill.OutOfRangeSpanCount > 0)
+        {
+            context.Out.WriteLine(
+                $"  Out of range:    {LedgerFormat.Count(backfill.OutOfRangeSpanCount)}, left without a result");
+        }
+
+        context.Out.WriteLine(
+            dryRun
+                ? "Dry run: nothing was written."
+                : $"Recorded {LedgerFormat.Count(backfill.UpdatedSpanCount)} results. Billed AI credits, BYOK USD, and local savings didn't change.");
+        return 0;
     }
 }

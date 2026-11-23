@@ -180,6 +180,111 @@ public sealed class SqliteLedgerStore
         return inserted;
     }
 
+    // Gives every span recorded without an API-equivalent result (api_equivalent_status IS NULL: recorded before schema
+    // version 5) the result calculator gives it, as LedgerIngestor would have when it recorded the span: priced as of its start
+    // time, a local span as the card's local retail baseline. Writes only the five api_* columns, never the billed cost,
+    // savings, channel, pricing status, or rates_version, and writes nothing when dryRun is true. A span whose price is beyond
+    // the pico-USD range keeps no result. Reads and writes in one transaction, so spans recorded meanwhile, which have a
+    // result, never mix in.
+    public async Task<ApiEquivalentBackfill> BackfillApiEquivalentAsync(
+        JsonRateCardCalculator calculator,
+        bool dryRun,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(calculator);
+        EnsureInitialized();
+
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        await using SqliteTransaction transaction = connection.BeginTransaction(deferred: dryRun);
+        List<(long Id, ApiEquivalentCost Cost, long? Pico)> results = [];
+        long outOfRange = 0;
+        await using (SqliteCommand query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
+            query.CommandText = """
+                SELECT id, operation_name, billing_channel, model_id, start_time_unix_ms,
+                       input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens
+                FROM spans
+                WHERE api_equivalent_status IS NULL
+                ORDER BY id;
+                """;
+            await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                ApiEquivalentCost cost = calculator.CalculateApiEquivalent(new ApiEquivalentRequest
+                {
+                    OperationName = reader.GetString(1),
+                    Channel = ToBillingChannel(reader.GetString(2)),
+                    ModelId = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(4)),
+                    InputTokens = reader.GetInt64(5),
+                    OutputTokens = reader.GetInt64(6),
+                    CacheReadInputTokens = reader.GetInt64(7),
+                    CacheWriteInputTokens = reader.GetInt64(8),
+                });
+                long? pico = null;
+                if (cost.UsdCost is decimal usd)
+                {
+                    try
+                    {
+                        pico = PicoUsd.FromUsd(usd);
+                    }
+                    catch (ArgumentOutOfRangeException)
+                    {
+                        outOfRange++;
+                        continue;
+                    }
+                }
+
+                results.Add((reader.GetInt64(0), cost, pico));
+            }
+        }
+
+        long updated = 0;
+        if (!dryRun && results.Count > 0)
+        {
+            await using SqliteCommand update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE spans
+                   SET api_equivalent_usd_pico = @pico,
+                       api_equivalent_status = @status,
+                       api_rate_card_model_id = @model,
+                       api_rates_version = @version,
+                       api_rate_card_sha256 = @sha256
+                 WHERE id = @id AND api_equivalent_status IS NULL;
+                """;
+            SqliteParameter id = update.Parameters.Add("@id", SqliteType.Integer);
+            SqliteParameter pico = update.Parameters.Add("@pico", SqliteType.Integer);
+            SqliteParameter status = update.Parameters.Add("@status", SqliteType.Text);
+            SqliteParameter model = update.Parameters.Add("@model", SqliteType.Text);
+            update.Parameters.AddWithValue("@version", calculator.RatesVersion);
+            update.Parameters.AddWithValue("@sha256", calculator.ApiRateCardSha256);
+            foreach ((long Id, ApiEquivalentCost Cost, long? Pico) result in results)
+            {
+                id.Value = result.Id;
+                pico.Value = OrDbNull(result.Pico);
+                status.Value = ToDatabaseString(result.Cost.Status);
+                model.Value = OrDbNull(result.Cost.RateCardModelId);
+                updated += await update.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        return new ApiEquivalentBackfill
+        {
+            SpanCount = results.Count + outOfRange,
+            PricedSpanCount = results.Count(result => result.Cost.Status == ApiEquivalentStatus.Priced),
+            PricedUsd = results.Sum(result => result.Cost.UsdCost ?? 0m),
+            UnpricedSpanCount = results.Count(result => result.Cost.Status == ApiEquivalentStatus.Unpriced),
+            NotApplicableSpanCount =
+                results.Count(result => result.Cost.Status == ApiEquivalentStatus.NotApplicable),
+            OutOfRangeSpanCount = outOfRange,
+            UpdatedSpanCount = updated,
+        };
+    }
+
     public async Task<IReadOnlyList<LedgerRollupRow>> GetRollupAsync(
         LedgerGrouping grouping,
         LedgerFilter filter,

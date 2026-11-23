@@ -201,7 +201,7 @@ public sealed class ApiEquivalentStoreTests
     // T1: a GitHub request priced in both lenses, and an unknown model. T2: inconsistent token counts, and a local request
     // priced as the card's local baseline. T3: a Foundry BYOK request, and an unrecognized endpoint whose model has a list
     // price. Only the first request reported cache counters.
-    private static LedgerEntry[] Entries() =>
+    internal static LedgerEntry[] Entries() =>
     [
         Entry(T1, "a000000000000001", TestSpans.Chat(
             requestModel: "test-retail",
