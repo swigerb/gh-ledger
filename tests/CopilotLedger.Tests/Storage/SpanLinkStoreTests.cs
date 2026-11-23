@@ -22,6 +22,16 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                DROP TABLE import_record_aliases;
+                DROP TABLE import_sessions;
+                DROP INDEX ux_spans_effective_import_usage;
+                DROP INDEX ix_spans_canonical_usage;
+                ALTER TABLE span_links DROP COLUMN owner_span_row_id;
+                ALTER TABLE spans DROP COLUMN superseded_by;
+                ALTER TABLE spans DROP COLUMN imported_tool_call_count;
+                ALTER TABLE spans DROP COLUMN accounting_state;
+                ALTER TABLE spans DROP COLUMN canonical_usage_id;
+                ALTER TABLE spans DROP COLUMN ingest_source;
                 ALTER TABLE spans DROP COLUMN api_equivalent_usd_pico;
                 ALTER TABLE spans DROP COLUMN api_equivalent_status;
                 ALTER TABLE spans DROP COLUMN api_rate_card_model_id;
@@ -45,7 +55,7 @@ public sealed class SpanLinkStoreTests
         SqliteConnection.ClearAllPools();
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(5L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(6L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(
             "span_links",
             await ScalarAsync(
@@ -370,6 +380,16 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                DROP TABLE import_record_aliases;
+                DROP TABLE import_sessions;
+                DROP INDEX ux_spans_effective_import_usage;
+                DROP INDEX ix_spans_canonical_usage;
+                ALTER TABLE span_links DROP COLUMN owner_span_row_id;
+                ALTER TABLE spans DROP COLUMN superseded_by;
+                ALTER TABLE spans DROP COLUMN imported_tool_call_count;
+                ALTER TABLE spans DROP COLUMN accounting_state;
+                ALTER TABLE spans DROP COLUMN canonical_usage_id;
+                ALTER TABLE spans DROP COLUMN ingest_source;
                 ALTER TABLE spans DROP COLUMN api_equivalent_usd_pico;
                 ALTER TABLE spans DROP COLUMN api_equivalent_status;
                 ALTER TABLE spans DROP COLUMN api_rate_card_model_id;
@@ -396,7 +416,7 @@ public sealed class SpanLinkStoreTests
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(5L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(6L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM spans;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM span_links;"));
         Assert.Equal(
@@ -493,7 +513,7 @@ public sealed class SpanLinkStoreTests
         await StoreAsync(temp);
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
-            await ExecuteAsync(connection, "PRAGMA user_version = 4;");
+            await ExecuteAsync(connection, "PRAGMA user_version = 5;");
         }
 
         await using SqliteConnection holder = await OpenAsync(DatabasePath(temp));
@@ -506,7 +526,7 @@ public sealed class SpanLinkStoreTests
         await using (SqliteCommand version = holder.CreateCommand())
         {
             version.Transaction = held;
-            version.CommandText = "PRAGMA user_version = 5;";
+            version.CommandText = "PRAGMA user_version = 6;";
             await version.ExecuteNonQueryAsync();
         }
 
@@ -514,13 +534,13 @@ public sealed class SpanLinkStoreTests
         await init;
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(5L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(6L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM breaker_settings;"));
         Assert.Equal(
             1L,
             await ScalarAsync(
                 check,
-                "SELECT COUNT(*) FROM pragma_table_info('spans') WHERE name = 'api_equivalent_status';"));
+                "SELECT COUNT(*) FROM pragma_table_info('spans') WHERE name = 'accounting_state';"));
     }
 
     [Fact]
@@ -549,6 +569,16 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                DROP TABLE import_record_aliases;
+                DROP TABLE import_sessions;
+                DROP INDEX ux_spans_effective_import_usage;
+                DROP INDEX ix_spans_canonical_usage;
+                ALTER TABLE span_links DROP COLUMN owner_span_row_id;
+                ALTER TABLE spans DROP COLUMN superseded_by;
+                ALTER TABLE spans DROP COLUMN imported_tool_call_count;
+                ALTER TABLE spans DROP COLUMN accounting_state;
+                ALTER TABLE spans DROP COLUMN canonical_usage_id;
+                ALTER TABLE spans DROP COLUMN ingest_source;
                 ALTER TABLE spans DROP COLUMN api_equivalent_usd_pico;
                 ALTER TABLE spans DROP COLUMN api_equivalent_status;
                 ALTER TABLE spans DROP COLUMN api_rate_card_model_id;
@@ -568,7 +598,7 @@ public sealed class SpanLinkStoreTests
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(5L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(6L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(
             "ix_spans_conversation_start",
             await ScalarAsync(

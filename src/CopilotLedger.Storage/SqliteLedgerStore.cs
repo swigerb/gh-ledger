@@ -18,7 +18,8 @@ public sealed class SqliteLedgerStore
             repo_root, repo_slug, branch_name, head_commit_sha, recorded_at_unix_ms,
             cache_read_state, cache_write_state, pull_request_number,
             api_equivalent_usd_pico, api_equivalent_status, api_rate_card_model_id,
-            api_rates_version, api_rate_card_sha256
+            api_rates_version, api_rate_card_sha256,
+            ingest_source, canonical_usage_id, imported_tool_call_count
         ) VALUES (
             @trace_id, @span_id, @parent_span_id, @operation_name, @conversation_id,
             @agent_name, @provider_name, @request_model, @response_model, @model_id,
@@ -29,7 +30,8 @@ public sealed class SqliteLedgerStore
             @repo_root, @repo_slug, @branch_name, @head_commit_sha, @recorded_at_unix_ms,
             @cache_read_state, @cache_write_state, @pull_request_number,
             @api_equivalent_usd_pico, @api_equivalent_status, @api_rate_card_model_id,
-            @api_rates_version, @api_rate_card_sha256
+            @api_rates_version, @api_rate_card_sha256,
+            @ingest_source, @canonical_usage_id, @imported_tool_call_count
         ) ON CONFLICT (trace_id, span_id) DO NOTHING;
         """;
 
@@ -172,7 +174,7 @@ public sealed class SqliteLedgerStore
             await using SqliteCommand command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = InsertSql;
-            AddInsertParameters(command, entry, recordedAtUnixMs);
+            AddInsertParameters(command, entry.Span, entry.Calculation, LiveProvenance(entry), recordedAtUnixMs);
             inserted += await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -1769,14 +1771,28 @@ public sealed class SqliteLedgerStore
         }
     }
 
+    // A live row's provenance: OTLP, with the usage identity of a GitHub-billed span (UsageIdentity.CanonicalUsageId).
+    private static RowProvenance LiveProvenance(LedgerEntry entry) =>
+        new(
+            "otlp",
+            UsageIdentity.CanonicalUsageId(
+                entry.Span.ProviderName,
+                entry.Span.ServiceRequestId,
+                entry.Calculation.Channel),
+            null,
+            entry.Git?.RepositoryRoot,
+            entry.Git?.RepositorySlug,
+            entry.Git?.BranchName,
+            entry.Git?.HeadCommitSha,
+            entry.Git?.PullRequestNumber);
+
     private static void AddInsertParameters(
         SqliteCommand command,
-        LedgerEntry entry,
+        NormalizedGenAiSpan span,
+        CreditCalculationResult calculation,
+        RowProvenance provenance,
         long recordedAtUnixMs)
     {
-        NormalizedGenAiSpan span = entry.Span;
-        CreditCalculationResult calculation = entry.Calculation;
-
         command.Parameters.AddWithValue("@trace_id", span.TraceId);
         command.Parameters.AddWithValue("@span_id", span.SpanId);
         command.Parameters.AddWithValue("@parent_span_id", OrDbNull(span.ParentSpanId));
@@ -1818,18 +1834,18 @@ public sealed class SqliteLedgerStore
         command.Parameters.AddWithValue(
             "@saved_usd_pico",
             PicoUsd.FromUsd(calculation.EstimatedCloudSavedUsd));
-        command.Parameters.AddWithValue("@repo_root", OrDbNull(entry.Git?.RepositoryRoot));
-        command.Parameters.AddWithValue("@repo_slug", OrDbNull(entry.Git?.RepositorySlug));
-        command.Parameters.AddWithValue("@branch_name", OrDbNull(entry.Git?.BranchName));
+        command.Parameters.AddWithValue("@repo_root", OrDbNull(provenance.RepositoryRoot));
+        command.Parameters.AddWithValue("@repo_slug", OrDbNull(provenance.RepositorySlug));
+        command.Parameters.AddWithValue("@branch_name", OrDbNull(provenance.BranchName));
         command.Parameters.AddWithValue(
             "@head_commit_sha",
-            OrDbNull(entry.Git?.HeadCommitSha));
+            OrDbNull(provenance.HeadCommitSha));
         command.Parameters.AddWithValue("@recorded_at_unix_ms", recordedAtUnixMs);
         command.Parameters.AddWithValue("@cache_read_state", ToDatabaseString(span.CacheReadState));
         command.Parameters.AddWithValue("@cache_write_state", ToDatabaseString(span.CacheWriteState));
         command.Parameters.AddWithValue(
             "@pull_request_number",
-            OrDbNull(entry.Git?.PullRequestNumber));
+            OrDbNull(provenance.PullRequestNumber));
         ApiEquivalentCost retail = calculation.ApiEquivalent;
         command.Parameters.AddWithValue(
             "@api_equivalent_usd_pico",
@@ -1838,6 +1854,9 @@ public sealed class SqliteLedgerStore
         command.Parameters.AddWithValue("@api_rate_card_model_id", OrDbNull(retail.RateCardModelId));
         command.Parameters.AddWithValue("@api_rates_version", retail.RatesVersion);
         command.Parameters.AddWithValue("@api_rate_card_sha256", retail.RateCardSha256);
+        command.Parameters.AddWithValue("@ingest_source", provenance.IngestSource);
+        command.Parameters.AddWithValue("@canonical_usage_id", OrDbNull(provenance.CanonicalUsageId));
+        command.Parameters.AddWithValue("@imported_tool_call_count", OrDbNull(provenance.ImportedToolCallCount));
     }
 
     // A rollup's group key: its SELECT expressions, and their aliases separated by ", ".
@@ -2041,6 +2060,17 @@ public sealed class SqliteLedgerStore
         string? GitRepositorySlug,
         string? GitBranch,
         string? GitCommitSha);
+
+    // Where a row came from ('otlp' or 'import:<source>'), its usage identity, and its Git attribution.
+    private sealed record RowProvenance(
+        string IngestSource,
+        string? CanonicalUsageId,
+        long? ImportedToolCallCount,
+        string? RepositoryRoot,
+        string? RepositorySlug,
+        string? BranchName,
+        string? HeadCommitSha,
+        int? PullRequestNumber);
 
     // A group's API-equivalent totals: as recorded, or summed by Add as spans are priced again.
     private sealed class RetailTotals(decimal? usd = null, long unpricedSpanCount = 0, long estimatedSpanCount = 0)
