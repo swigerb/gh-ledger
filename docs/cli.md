@@ -131,14 +131,15 @@ copilot mcp add ledger -- ~/.local/share/gh/extensions/gh-ledger/gh-ledger mcp
 
 That adds `ledger` to `~/.copilot/mcp-config.json`, which VS Code's Copilot agent harness also reads. The GitHub Copilot app runs the same agent runtime; if it doesn't list the server, add it in the app's MCP settings with the same command. For VS Code's Local agent harness, add the server to `mcp.json` under `servers`, with the binary's path as `"command"` and `["mcp"]` as `"args"`.
 
-The server has four tools. Each uses the current repository and branch unless you pass `repository` and `branch`:
+The server has five tools. All but `get_cache_efficiency` use the current repository and branch unless you pass `repository` and `branch`:
 
-- `get_branch_ledger`: the branch's spend, top model, budget, and circuit-breaker state.
+- `get_branch_ledger`: the branch's spend, top model, budget, circuit-breaker state, and prompt-cache hit ratio.
 - `get_top_expensive_prompts`: the branch's most expensive prompt chains, with output tokens and failed tool calls; `limit` (1 to 20, default 5) and `orderBy` (`cost`, `outputTokens`, or `failedToolCalls`).
-- `get_agent_breakdown`: the branch's spend by agent.
+- `get_agent_breakdown`: the branch's spend and prompt-cache hit ratio by agent.
+- `get_cache_efficiency`: prompt-cache efficiency in the current repository, or in `repository`, like `status --cache`. `by` groups rows by `model` (the default), `branch`, `pr`, or `agent`; `branch` and `pullRequest` keep one branch or pull request; `since` takes the same periods as `--since`; and `limit` (1 to 50, default 10) keeps the rows with the most input.
 - `set_branch_budget`: sets the branch's budget in AI credits (`aiCredits`).
 
-The first three are read-only. `set_branch_budget` changes only the budget, so Copilot asks before running it; in prompt mode, allow it with `--allow-tool 'ledger(set_branch_budget)'`. While the breaker is open for the branch or the session, or the branch is over budget, every result starts with a `WARNING:` line. No tool can reset the breaker.
+The first four are read-only. `set_branch_budget` changes only the budget, so Copilot asks before running it; in prompt mode, allow it with `--allow-tool 'ledger(set_branch_budget)'`. While the breaker is open for the branch or the session, or the branch is over budget, every result starts with a `WARNING:` line; for `get_cache_efficiency`, the branch is the current one. No tool can reset the breaker.
 
 ## Rates
 

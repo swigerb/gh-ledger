@@ -22,6 +22,7 @@ public sealed class LedgerMcpServerTests
         DateTimeOffset.Parse("2026-11-21T12:00:00Z", CultureInfo.InvariantCulture);
     private const string T5 = "55555555555555555555555555555555";
     private const string T6 = "66666666666666666666666666666666";
+    private const string T7 = "77777777777777777777777777777777";
     private const string Hash =
         "c3d1fe831856c77818bb8c1242d32d6efa6c37366eb902e56c5fd0054c1dcbc3/918a44e755cc5eee09b08d214831e8339a645158ef1f831a0fa02bd43999700f";
     private const string BranchSchema =
@@ -61,6 +62,21 @@ public sealed class LedgerMcpServerTests
           "additionalProperties": false
         }
         """;
+    private const string CacheSchema =
+        """
+        {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Defaults to the current repository." },
+            "branch": { "type": "string", "minLength": 1, "description": "Only this branch, or (none)." },
+            "pullRequest": { "type": "integer", "minimum": 1, "description": "Only this pull request number." },
+            "since": { "type": "string", "default": "30d", "description": "Period: today, all, Nd (1 to 3650 days), or yyyy-MM-dd." },
+            "by": { "type": "string", "enum": ["model", "branch", "pr", "agent"], "default": "model", "description": "Group rows by model, branch, pull request, or agent." },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Number of rows, most input first." }
+          },
+          "additionalProperties": false
+        }
+        """;
     private const string Branch =
         """
         {
@@ -72,6 +88,9 @@ public sealed class LedgerMcpServerTests
           "outputTokens": 362000,
           "cacheReadInputTokens": 400000,
           "cacheWriteInputTokens": 0,
+          "uncachedInputTokens": 600000,
+          "cacheReportedSpans": 1,
+          "cacheHitRatio": 0.4,
           "aiCredits": 176.5,
           "aiCreditsUsd": 1.765,
           "foundryByokUsd": 0,
@@ -127,6 +146,15 @@ public sealed class LedgerMcpServerTests
                 "Agent breakdown",
                 "Spend on one Git branch split by agent (gen_ai.agent.name). Uses the current repository and branch unless you pass both.",
                 BranchSchema,
+                readOnly: true,
+                destructive: null,
+                idempotent: null),
+            tool => AssertTool(
+                tool,
+                "get_cache_efficiency",
+                "Cache efficiency",
+                "Prompt-cache efficiency in one repository, grouped by model, branch, pull request, or agent: the cache hit ratio, input read from and written to the cache, uncached input, and the largest prompt. Spans that reported no cache counters count as unknown, never as misses. Uses the current repository unless you pass one.",
+                CacheSchema,
                 readOnly: true,
                 destructive: null,
                 idempotent: null),
@@ -251,7 +279,7 @@ public sealed class LedgerMcpServerTests
                 "get_branch_ledger",
                 """{"repository":"contoso/api","branch":"main"}"""),
             """
-            {"repository":"contoso/api","branch":"main","spans":1,"unpricedSpans":0,"inputTokens":100000,"outputTokens":10000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0.315,"localSavedUsd":0,"billedAiCredits":31.5,"topModel":"gpt-6.1-sol","budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            {"repository":"contoso/api","branch":"main","spans":1,"unpricedSpans":0,"inputTokens":100000,"outputTokens":10000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0.315,"localSavedUsd":0,"billedAiCredits":31.5,"topModel":"gpt-6.1-sol","budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
             """);
         await AssertResultAsync(
             await CallAsync(
@@ -259,7 +287,7 @@ public sealed class LedgerMcpServerTests
                 "get_branch_ledger",
                 """{"repository":"swigerb/copilot-ledger","branch":"nope"}"""),
             """
-            {"repository":"swigerb/copilot-ledger","branch":"nope","spans":0,"unpricedSpans":0,"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":0,"topModel":null,"budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            {"repository":"swigerb/copilot-ledger","branch":"nope","spans":0,"unpricedSpans":0,"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":0,"topModel":null,"budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
             """);
     }
 
@@ -299,7 +327,7 @@ public sealed class LedgerMcpServerTests
         await AssertResultAsync(
             await CallAsync(harness, "get_agent_breakdown", "{}"),
             """
-            {"repository":"swigerb/copilot-ledger","branch":"feature/ledger","agents":[{"agent":"(none)","spans":2,"unpricedSpans":0,"inputTokens":110000,"outputTokens":250000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"aiCredits":120.5,"aiCreditsUsd":1.205,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":120.5},{"agent":"ledger-builder","spans":2,"unpricedSpans":0,"inputTokens":1400000,"outputTokens":112000,"cacheReadInputTokens":400000,"cacheWriteInputTokens":0,"aiCredits":56,"aiCreditsUsd":0.56,"foundryByokUsd":0,"localSavedUsd":0.23,"billedAiCredits":56}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            {"repository":"swigerb/copilot-ledger","branch":"feature/ledger","agents":[{"agent":"(none)","spans":2,"unpricedSpans":0,"inputTokens":110000,"outputTokens":250000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":120.5,"aiCreditsUsd":1.205,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":120.5},{"agent":"ledger-builder","spans":2,"unpricedSpans":0,"inputTokens":1400000,"outputTokens":112000,"cacheReadInputTokens":400000,"cacheWriteInputTokens":0,"uncachedInputTokens":600000,"cacheReportedSpans":1,"cacheHitRatio":0.4,"aiCredits":56,"aiCreditsUsd":0.56,"foundryByokUsd":0,"localSavedUsd":0.23,"billedAiCredits":56}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
             """);
     }
 
@@ -372,6 +400,19 @@ public sealed class LedgerMcpServerTests
         { "set_branch_budget", """{"aiCredits":0.001}""", "aiCredits must be a number greater than 0 and at most 1000000, with at most 2 decimal places." },
         { "set_branch_budget", """{"aiCredits":"5"}""", "aiCredits must be a number greater than 0 and at most 1000000, with at most 2 decimal places." },
         { "set_branch_budget", """{"aiCredits":5,"repository":"a/b"}""", "Pass repository and branch together, or neither." },
+        { "get_branch_ledger", """{"since":"all"}""", "Unknown argument: since." },
+        { "get_cache_efficiency", """{"orderBy":"cost"}""", "Unknown argument: orderBy." },
+        { "get_cache_efficiency", """{"repository":""}""", "repository must be a non-empty string." },
+        { "get_cache_efficiency", """{"branch":null}""", "branch must be a non-empty string." },
+        { "get_cache_efficiency", """{"pullRequest":0}""", "pullRequest must be an integer of at least 1." },
+        { "get_cache_efficiency", """{"pullRequest":"7"}""", "pullRequest must be an integer of at least 1." },
+        { "get_cache_efficiency", """{"pullRequest":7.5}""", "pullRequest must be an integer of at least 1." },
+        { "get_cache_efficiency", """{"since":"0d"}""", "since must be today, all, <N>d (1-3650), or yyyy-MM-dd." },
+        { "get_cache_efficiency", """{"since":30}""", "since must be today, all, <N>d (1-3650), or yyyy-MM-dd." },
+        { "get_cache_efficiency", """{"by":"Model"}""", "by must be model, branch, pr, or agent." },
+        { "get_cache_efficiency", """{"by":"channel"}""", "by must be model, branch, pr, or agent." },
+        { "get_cache_efficiency", """{"limit":0}""", "limit must be an integer from 1 to 50." },
+        { "get_cache_efficiency", """{"limit":51}""", "limit must be an integer from 1 to 50." },
     };
 
     [Theory]
@@ -504,7 +545,7 @@ public sealed class LedgerMcpServerTests
                     Version = "1.0",
                 },
             });
-        Assert.Equal(4, (await client.ListToolsAsync()).Count);
+        Assert.Equal(5, (await client.ListToolsAsync()).Count);
         Implementation? serverInfo = client.ServerInfo;
         Assert.NotNull(serverInfo);
         Assert.Equal(GhLedgerCli.Version, serverInfo.Version);
@@ -545,6 +586,175 @@ public sealed class LedgerMcpServerTests
         Assert.StartsWith(
             $"The ledger at {databasePath} is unavailable: ",
             Text(result));
+    }
+
+    [Fact]
+    public async Task MC13_CacheEfficiency()
+    {
+        using TempDirectory temp = new();
+        GitFixture.Create(temp.Path);
+        await SeedAsync(temp.Path);
+        await SeedPullRequestAsync(temp.Path);
+        await using McpTestHarness harness = await StartAsync(
+            Context(temp.Path, []));
+        await AssertResultAsync(
+            await CallAsync(harness, "get_cache_efficiency", "{}"),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":null,"pullRequest":null,"period":"last 30 days","from":"2026-10-23T00:00:00.0000000+00:00","by":"model","limit":10,"rows":[{"model":"claude-opus-5.5","spans":2,"cacheReportedSpans":2,"cacheUnreportedSpans":0,"inputTokens":1250000,"outputTokens":51000,"maxInputTokens":1200000,"averageInputTokensPerTurn":625000,"reportedInputTokens":1250000,"reportedCacheReadInputTokens":840000,"reportedCacheWriteInputTokens":100000,"uncachedInputTokens":310000,"estimatedUncachedInputTokens":310000,"cacheHitRatio":0.672},{"model":"mai-code-2","spans":2,"cacheReportedSpans":1,"cacheUnreportedSpans":1,"inputTokens":1010000,"outputTokens":300000,"maxInputTokens":1000000,"averageInputTokensPerTurn":505000,"reportedInputTokens":1000000,"reportedCacheReadInputTokens":400000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":600000,"estimatedUncachedInputTokens":610000,"cacheHitRatio":0.4},{"model":"qwen3.8-27b","spans":1,"cacheReportedSpans":0,"cacheUnreportedSpans":1,"inputTokens":400000,"outputTokens":12000,"maxInputTokens":400000,"averageInputTokensPerTurn":400000,"reportedInputTokens":0,"reportedCacheReadInputTokens":0,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":null,"estimatedUncachedInputTokens":400000,"cacheHitRatio":null},{"model":"claude-sonnet-5.5","spans":1,"cacheReportedSpans":0,"cacheUnreportedSpans":1,"inputTokens":100000,"outputTokens":50000,"maxInputTokens":100000,"averageInputTokensPerTurn":100000,"reportedInputTokens":0,"reportedCacheReadInputTokens":0,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":null,"estimatedUncachedInputTokens":100000,"cacheHitRatio":null}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+            await CallAsync(harness, "get_cache_efficiency", """{"by":"pr"}"""),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":null,"pullRequest":null,"period":"last 30 days","from":"2026-10-23T00:00:00.0000000+00:00","by":"pr","limit":10,"rows":[{"repository":"swigerb/copilot-ledger","pullRequest":null,"branch":"feature/ledger","spans":4,"cacheReportedSpans":1,"cacheUnreportedSpans":3,"inputTokens":1510000,"outputTokens":362000,"maxInputTokens":1000000,"averageInputTokensPerTurn":377500,"reportedInputTokens":1000000,"reportedCacheReadInputTokens":400000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":600000,"estimatedUncachedInputTokens":1110000,"cacheHitRatio":0.4},{"repository":"swigerb/copilot-ledger","pullRequest":null,"branch":"main","spans":1,"cacheReportedSpans":1,"cacheUnreportedSpans":0,"inputTokens":1200000,"outputTokens":50000,"maxInputTokens":1200000,"averageInputTokensPerTurn":1200000,"reportedInputTokens":1200000,"reportedCacheReadInputTokens":800000,"reportedCacheWriteInputTokens":100000,"uncachedInputTokens":300000,"estimatedUncachedInputTokens":300000,"cacheHitRatio":0.6666666666666666666666666667},{"repository":"swigerb/copilot-ledger","pullRequest":7,"branch":null,"spans":1,"cacheReportedSpans":1,"cacheUnreportedSpans":0,"inputTokens":50000,"outputTokens":1000,"maxInputTokens":50000,"averageInputTokensPerTurn":50000,"reportedInputTokens":50000,"reportedCacheReadInputTokens":40000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":10000,"estimatedUncachedInputTokens":10000,"cacheHitRatio":0.8}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+            await CallAsync(
+                harness,
+                "get_cache_efficiency",
+                """{"repository":"contoso/api","by":"branch","since":"all","limit":1}"""),
+            """
+            {"repository":"contoso/api","branch":null,"pullRequest":null,"period":"all time","from":null,"by":"branch","limit":1,"rows":[{"repository":"contoso/api","branch":"main","spans":1,"cacheReportedSpans":0,"cacheUnreportedSpans":1,"inputTokens":100000,"outputTokens":10000,"maxInputTokens":100000,"averageInputTokensPerTurn":100000,"reportedInputTokens":0,"reportedCacheReadInputTokens":0,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":null,"estimatedUncachedInputTokens":100000,"cacheHitRatio":null}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+            await CallAsync(
+                harness,
+                "get_cache_efficiency",
+                """{"branch":"feature/ledger","by":"agent","since":"today"}"""),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":"feature/ledger","pullRequest":null,"period":"today","from":"2026-11-21T00:00:00.0000000+00:00","by":"agent","limit":10,"rows":[{"agent":"ledger-builder","spans":2,"cacheReportedSpans":1,"cacheUnreportedSpans":1,"inputTokens":1400000,"outputTokens":112000,"maxInputTokens":1000000,"averageInputTokensPerTurn":700000,"reportedInputTokens":1000000,"reportedCacheReadInputTokens":400000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":600000,"estimatedUncachedInputTokens":1000000,"cacheHitRatio":0.4},{"agent":"(none)","spans":3,"cacheReportedSpans":1,"cacheUnreportedSpans":2,"inputTokens":160000,"outputTokens":251000,"maxInputTokens":100000,"averageInputTokensPerTurn":53333.333333333333333333333333,"reportedInputTokens":50000,"reportedCacheReadInputTokens":40000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":10000,"estimatedUncachedInputTokens":120000,"cacheHitRatio":0.8}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+            await CallAsync(
+                harness,
+                "get_cache_efficiency",
+                """{"pullRequest":7,"since":"2026-11-21"}"""),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":null,"pullRequest":7,"period":"since 2026-11-21","from":"2026-11-21T00:00:00.0000000+00:00","by":"model","limit":10,"rows":[{"model":"claude-opus-5.5","spans":1,"cacheReportedSpans":1,"cacheUnreportedSpans":0,"inputTokens":50000,"outputTokens":1000,"maxInputTokens":50000,"averageInputTokensPerTurn":50000,"reportedInputTokens":50000,"reportedCacheReadInputTokens":40000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":10000,"estimatedUncachedInputTokens":10000,"cacheHitRatio":0.8}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+    }
+
+    [Fact]
+    public async Task MC14_CacheEfficiencyScopeAndWarnings()
+    {
+        using TempDirectory temp = new();
+        GitFixture.Create(temp.Path);
+        await SeedAsync(temp.Path);
+        SqliteLedgerStore store = Store(temp.Path);
+        await store.InitializeAsync();
+        await store.RecordBreakerTripAsync(new NewBreakerTrip
+        {
+            Rule = BreakerRule.RetryChurn,
+            TraceId = T5,
+            ConversationId = "conv-5",
+            Repository = "swigerb/copilot-ledger",
+            Branch = "feature/ledger",
+            RepositoryRoot = Path.Combine(temp.Path, "repo"),
+            TrippedAt = DateTimeOffset.Parse(
+                "2026-11-21T15:00:05Z",
+                CultureInfo.InvariantCulture),
+            Detail = "5 failed tool calls in a row",
+            FailureCount = 5,
+        });
+        await store.RecordBreakerTripAsync(new NewBreakerTrip
+        {
+            Rule = BreakerRule.RetryChurn,
+            TraceId = new string('a', 32),
+            ConversationId = "conv-other",
+            Repository = "contoso/api",
+            Branch = "main",
+            TrippedAt = DateTimeOffset.Parse(
+                "2026-11-21T09:00:00Z",
+                CultureInfo.InvariantCulture),
+            Detail = "7 failed tool calls in a row",
+            FailureCount = 7,
+        });
+        await store.SetBranchBudgetAsync(
+            "swigerb/copilot-ledger",
+            "feature/ledger",
+            150m);
+        const string Trip =
+            """{"id":1,"rule":"retry_churn","repository":"swigerb/copilot-ledger","branch":"feature/ledger","traceId":"55555555555555555555555555555555","conversationId":"conv-5","currentSession":CURRENT,"trippedAt":"2026-11-21T15:00:05.0000000+00:00","detail":"5 failed tool calls in a row","resetCommand":"gh-ledger breaker reset --id 1"}""";
+        const string TripWarning =
+            "WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1";
+        const string BudgetWarning =
+            "WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget.";
+
+        await using (McpTestHarness current = await StartAsync(
+            Context(temp.Path, [])))
+        {
+            JsonObject expected = JsonNode.Parse(
+                """
+                {"repository":"contoso/api","branch":null,"pullRequest":null,"period":"all time","from":null,"by":"model","limit":10,"rows":[{"model":"gpt-6.1-sol","spans":1,"cacheReportedSpans":0,"cacheUnreportedSpans":1,"inputTokens":100000,"outputTokens":10000,"maxInputTokens":100000,"averageInputTokensPerTurn":100000,"reportedInputTokens":0,"reportedCacheReadInputTokens":0,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":null,"estimatedUncachedInputTokens":100000,"cacheHitRatio":null}]}
+                """)!.AsObject();
+            expected["circuitBreaker"] = JsonNode.Parse(
+                $$"""{"state":"open","openTrips":[{{Trip.Replace("CURRENT", "false", StringComparison.Ordinal)}}]}""");
+            expected["warnings"] = new JsonArray(TripWarning, BudgetWarning);
+            await AssertResultAsync(
+                await CallAsync(
+                    current,
+                    "get_cache_efficiency",
+                    """{"repository":"contoso/api","since":"all"}"""),
+                expected);
+        }
+
+        Dictionary<string, string> env = [];
+        LedgerMcpContext outside = Context(temp.Path, env) with
+        {
+            WorkingDirectory = temp.Path,
+        };
+        await using (McpTestHarness missing = await StartAsync(outside))
+        {
+            CallToolResult result = await CallAsync(
+                missing,
+                "get_cache_efficiency",
+                "{}");
+            Assert.True(result.IsError);
+            Assert.Equal(
+                $"No Git repository at {temp.Path}. Pass repository.",
+                Text(result));
+            Assert.Null(result.StructuredContent);
+        }
+
+        env["COPILOT_AGENT_SESSION_ID"] = "conv-5";
+        await using McpTestHarness session = await StartAsync(outside);
+        JsonObject expectedSession = JsonNode.Parse(
+            """
+            {"repository":"swigerb/copilot-ledger","branch":null,"pullRequest":null,"period":"last 30 days","from":"2026-10-23T00:00:00.0000000+00:00","by":"model","limit":1,"rows":[{"model":"claude-opus-5.5","spans":1,"cacheReportedSpans":1,"cacheUnreportedSpans":0,"inputTokens":1200000,"outputTokens":50000,"maxInputTokens":1200000,"averageInputTokensPerTurn":1200000,"reportedInputTokens":1200000,"reportedCacheReadInputTokens":800000,"reportedCacheWriteInputTokens":100000,"uncachedInputTokens":300000,"estimatedUncachedInputTokens":300000,"cacheHitRatio":0.6666666666666666666666666667}]}
+            """)!.AsObject();
+        expectedSession["circuitBreaker"] = JsonNode.Parse(
+            $$"""{"state":"open","openTrips":[{{Trip.Replace("CURRENT", "true", StringComparison.Ordinal)}}]}""");
+        expectedSession["warnings"] = new JsonArray(TripWarning);
+        await AssertResultAsync(
+            await CallAsync(
+                session,
+                "get_cache_efficiency",
+                """{"repository":"swigerb/copilot-ledger","limit":1}"""),
+            expectedSession);
+    }
+
+    private static async Task SeedPullRequestAsync(string root)
+    {
+        SqliteLedgerStore store = Store(root);
+        await store.InitializeAsync();
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            startTime: DateTimeOffset.Parse(
+                "2026-11-21T15:30:00Z",
+                CultureInfo.InvariantCulture),
+            requestModel: "claude-opus-5.5",
+            conversationId: "conv-7",
+            inputTokens: 50_000,
+            outputTokens: 1_000,
+            cacheReadInputTokens: 40_000) with
+        {
+            TraceId = T7,
+            SpanId = "7777777777777777",
+        };
+        await store.RecordAsync([
+            new LedgerEntry(
+                span,
+                JsonRateCardCalculator.LoadEmbedded().Calculate(span),
+                GitFixture.Feature(root) with { PullRequestNumber = 7 }),
+        ]);
     }
 
     private static async Task<McpTestHarness> StartAsync(

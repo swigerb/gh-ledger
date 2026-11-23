@@ -52,9 +52,25 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
           "additionalProperties": false
         }
         """;
+    private const string CacheSchemaJson =
+        """
+        {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Defaults to the current repository." },
+            "branch": { "type": "string", "minLength": 1, "description": "Only this branch, or (none)." },
+            "pullRequest": { "type": "integer", "minimum": 1, "description": "Only this pull request number." },
+            "since": { "type": "string", "default": "30d", "description": "Period: today, all, Nd (1 to 3650 days), or yyyy-MM-dd." },
+            "by": { "type": "string", "enum": ["model", "branch", "pr", "agent"], "default": "model", "description": "Group rows by model, branch, pull request, or agent." },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Number of rows, most input first." }
+          },
+          "additionalProperties": false
+        }
+        """;
     private static readonly JsonElement BranchSchema = ParseSchema(BranchSchemaJson);
     private static readonly JsonElement PromptSchema = ParseSchema(PromptSchemaJson);
     private static readonly JsonElement BudgetSchema = ParseSchema(BudgetSchemaJson);
+    private static readonly JsonElement CacheSchema = ParseSchema(CacheSchemaJson);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -99,6 +115,18 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         },
         new()
         {
+            Name = "get_cache_efficiency",
+            Title = "Cache efficiency",
+            Description = "Prompt-cache efficiency in one repository, grouped by model, branch, pull request, or agent: the cache hit ratio, input read from and written to the cache, uncached input, and the largest prompt. Spans that reported no cache counters count as unknown, never as misses. Uses the current repository unless you pass one.",
+            InputSchema = CacheSchema.Clone(),
+            Annotations = new ToolAnnotations
+            {
+                ReadOnlyHint = true,
+                OpenWorldHint = false,
+            },
+        },
+        new()
+        {
             Name = "set_branch_budget",
             Title = "Set branch budget",
             Description = "Sets a soft AI-credit budget for one Git branch. CopilotLedger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
@@ -128,6 +156,8 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             "get_branch_ledger" or "get_agent_breakdown" => ["repository", "branch"],
             "get_top_expensive_prompts" =>
                 ["repository", "branch", "limit", "orderBy"],
+            "get_cache_efficiency" =>
+                ["repository", "branch", "pullRequest", "since", "by", "limit"],
             "set_branch_budget" => ["repository", "branch", "aiCredits"],
             _ => throw new McpProtocolException(
                 $"Unknown tool: {name}",
@@ -135,16 +165,38 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         };
         IDictionary<string, JsonElement> arguments =
             request.Arguments ?? new Dictionary<string, JsonElement>();
-        CallToolResult? invalid = Validate(name, allowed, arguments, out ToolArguments values);
+        CallToolResult? invalid = Validate(
+            name,
+            allowed,
+            arguments,
+            _context.TimeProvider,
+            out ToolArguments values);
         if (invalid is not null)
         {
             return invalid;
         }
 
-        ScopeResult scope = ResolveScope(values.Repository, values.Branch);
-        if (scope.Error is not null)
+        // get_cache_efficiency reports one repository, the current one by default, and warns about the current branch.
+        GitWorkspaceContext? current = null;
+        ScopeResult scope;
+        if (name == "get_cache_efficiency")
         {
-            return Error(scope.Error);
+            (string directory, current) = ResolveCurrent();
+            string? repository = values.Repository ?? current?.RepositorySlug ?? current?.RepositoryRoot;
+            if (repository is null)
+            {
+                return Error($"No Git repository at {directory}. Pass repository.");
+            }
+
+            scope = new ScopeResult(repository, values.Branch, null);
+        }
+        else
+        {
+            scope = ResolveScope(values.Repository, values.Branch);
+            if (scope.Error is not null)
+            {
+                return Error(scope.Error);
+            }
         }
 
         try
@@ -168,6 +220,12 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                     store,
                     scope.Repository!,
                     scope.Branch!,
+                    cancellationToken),
+                "get_cache_efficiency" => await CacheEfficiencyAsync(
+                    store,
+                    scope.Repository!,
+                    current,
+                    values,
                     cancellationToken),
                 "set_branch_budget" => await SetBudgetAsync(
                     store,
@@ -193,6 +251,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         string name,
         IReadOnlyCollection<string> allowed,
         IDictionary<string, JsonElement> arguments,
+        TimeProvider timeProvider,
         out ToolArguments values)
     {
         values = ToolArguments.Empty;
@@ -229,18 +288,21 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             branch = branchElement.GetString();
         }
 
-        if ((repository is null) != (branch is null))
+        bool cacheTool = name == "get_cache_efficiency";
+        if (!cacheTool && (repository is null) != (branch is null))
         {
             return Error("Pass repository and branch together, or neither.");
         }
 
-        int limit = 5;
+        int maximum = cacheTool ? 50 : 20;
+        int limit = cacheTool ? 10 : 5;
         if (arguments.TryGetValue("limit", out JsonElement limitElement)
             && (limitElement.ValueKind != JsonValueKind.Number
                 || !limitElement.TryGetInt32(out limit)
-                || limit is < 1 or > 20))
+                || limit < 1
+                || limit > maximum))
         {
-            return Error("limit must be an integer from 1 to 20.");
+            return Error($"limit must be an integer from 1 to {maximum}.");
         }
 
         string orderBy = "cost";
@@ -278,7 +340,51 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 "aiCredits must be a number greater than 0 and at most 1000000, with at most 2 decimal places.");
         }
 
-        values = new ToolArguments(repository, branch, limit, orderBy, aiCredits);
+        int? pullRequest = null;
+        if (arguments.TryGetValue("pullRequest", out JsonElement pullRequestElement))
+        {
+            if (pullRequestElement.ValueKind != JsonValueKind.Number
+                || !pullRequestElement.TryGetInt32(out int number)
+                || number < 1)
+            {
+                return Error("pullRequest must be an integer of at least 1.");
+            }
+
+            pullRequest = number;
+        }
+
+        LedgerPeriod? period = null;
+        if (cacheTool)
+        {
+            string since = "30d";
+            if (arguments.TryGetValue("since", out JsonElement sinceElement))
+            {
+                since = sinceElement.ValueKind == JsonValueKind.String
+                    ? sinceElement.GetString()!
+                    : string.Empty;
+            }
+
+            if (!LedgerPeriod.TryParse(since, timeProvider, out period))
+            {
+                return Error("since must be today, all, <N>d (1-3650), or yyyy-MM-dd.");
+            }
+        }
+
+        string by = "model";
+        if (arguments.TryGetValue("by", out JsonElement byElement))
+        {
+            string? requested = byElement.ValueKind == JsonValueKind.String
+                ? byElement.GetString()
+                : null;
+            if (requested is not ("model" or "branch" or "pr" or "agent"))
+            {
+                return Error("by must be model, branch, pr, or agent.");
+            }
+
+            by = requested;
+        }
+
+        values = new ToolArguments(repository, branch, limit, orderBy, aiCredits, pullRequest, period, by);
         return null;
     }
 
@@ -289,6 +395,22 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             return new ScopeResult(repository, branch, null);
         }
 
+        (string directory, GitWorkspaceContext? git) = ResolveCurrent();
+        return git is null
+            ? new ScopeResult(
+                null,
+                null,
+                $"No Git repository at {directory}. Pass repository and branch.")
+            : new ScopeResult(
+                git.RepositorySlug ?? git.RepositoryRoot,
+                git.BranchName ?? "(none)",
+                null);
+    }
+
+    // The session's directory, COPILOT_SESSION_CWD when it's a full path to a directory or else the server's, and its Git
+    // context, null outside a repository.
+    private (string Directory, GitWorkspaceContext? Git) ResolveCurrent()
+    {
         string sessionDirectory =
             _context.GetEnvironmentVariable("COPILOT_SESSION_CWD") ?? string.Empty;
         string directory =
@@ -308,15 +430,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         {
         }
 
-        return git is null
-            ? new ScopeResult(
-                null,
-                null,
-                $"No Git repository at {directory}. Pass repository and branch.")
-            : new ScopeResult(
-                git.RepositorySlug ?? git.RepositoryRoot,
-                git.BranchName ?? "(none)",
-                null);
+        return (directory, git);
     }
 
     private async Task<SqliteLedgerStore> OpenStoreAsync(
@@ -370,6 +484,9 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             ["outputTokens"] = total.OutputTokens,
             ["cacheReadInputTokens"] = total.CacheReadInputTokens,
             ["cacheWriteInputTokens"] = total.CacheWriteInputTokens,
+            ["uncachedInputTokens"] = Uncached(total),
+            ["cacheReportedSpans"] = total.CacheReportedSpanCount,
+            ["cacheHitRatio"] = Ratio(total.CacheHitRatio),
             ["aiCredits"] = Money(total.AiCredits),
             ["aiCreditsUsd"] = Money(total.AiCreditsUsd),
             ["foundryByokUsd"] = Money(total.FoundryByokUsd),
@@ -491,6 +608,9 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 ["outputTokens"] = row.OutputTokens,
                 ["cacheReadInputTokens"] = row.CacheReadInputTokens,
                 ["cacheWriteInputTokens"] = row.CacheWriteInputTokens,
+                ["uncachedInputTokens"] = Uncached(row),
+                ["cacheReportedSpans"] = row.CacheReportedSpanCount,
+                ["cacheHitRatio"] = Ratio(row.CacheHitRatio),
                 ["aiCredits"] = Money(row.AiCredits),
                 ["aiCreditsUsd"] = Money(row.AiCreditsUsd),
                 ["foundryByokUsd"] = Money(row.FoundryByokUsd),
@@ -505,6 +625,88 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             ["repository"] = repository,
             ["branch"] = branch,
             ["agents"] = agents,
+            ["circuitBreaker"] = warnings.CircuitBreaker,
+            ["warnings"] = new JsonArray(
+                warnings.Warnings.Select(message => JsonValue.Create(message)).ToArray()),
+        };
+    }
+
+    // current is the session's Git context, whose branch the warnings describe; without one, they come only from trips of
+    // the current Copilot session.
+    private async Task<JsonObject> CacheEfficiencyAsync(
+        SqliteLedgerStore store,
+        string repository,
+        GitWorkspaceContext? current,
+        ToolArguments values,
+        CancellationToken cancellationToken)
+    {
+        LedgerGrouping grouping = values.By switch
+        {
+            "branch" => LedgerGrouping.Branch,
+            "pr" => LedgerGrouping.PullRequest,
+            "agent" => LedgerGrouping.Agent,
+            _ => LedgerGrouping.Model,
+        };
+        IReadOnlyList<CacheEfficiencyRow> rows = await store.GetCacheEfficiencyAsync(
+            grouping,
+            new LedgerFilter
+            {
+                From = values.Period!.From,
+                Repository = repository,
+                Branch = values.Branch,
+                PullRequestNumber = values.PullRequest,
+            },
+            cancellationToken);
+        WarningResult warnings = await WarningsAsync(
+            store,
+            current is null ? null : current.RepositorySlug ?? current.RepositoryRoot,
+            current is null ? null : current.BranchName ?? "(none)",
+            cancellationToken);
+        JsonArray resultRows = [];
+        foreach (CacheEfficiencyRow row in rows.Take(values.Limit))
+        {
+            JsonObject item = grouping switch
+            {
+                LedgerGrouping.Model => new JsonObject { ["model"] = row.Model },
+                LedgerGrouping.Agent => new JsonObject { ["agent"] = row.Agent },
+                LedgerGrouping.Branch => new JsonObject
+                {
+                    ["repository"] = row.Repository,
+                    ["branch"] = row.Branch,
+                },
+                _ => new JsonObject
+                {
+                    ["repository"] = row.Repository,
+                    ["pullRequest"] = row.PullRequestNumber,
+                    ["branch"] = row.Branch,
+                },
+            };
+            item["spans"] = row.SpanCount;
+            item["cacheReportedSpans"] = row.CacheReportedSpanCount;
+            item["cacheUnreportedSpans"] = row.CacheUnreportedSpanCount;
+            item["inputTokens"] = row.InputTokens;
+            item["outputTokens"] = row.OutputTokens;
+            item["maxInputTokens"] = row.MaxInputTokens;
+            item["averageInputTokensPerTurn"] = Ratio(row.AverageInputTokensPerTurn);
+            item["reportedInputTokens"] = row.ReportedInputTokens;
+            item["reportedCacheReadInputTokens"] = row.ReportedCacheReadInputTokens;
+            item["reportedCacheWriteInputTokens"] = row.ReportedCacheWriteInputTokens;
+            item["uncachedInputTokens"] = row.UncachedInputTokens;
+            item["estimatedUncachedInputTokens"] = row.EstimatedUncachedInputTokens;
+            item["cacheHitRatio"] = Ratio(row.CacheHitRatio);
+            resultRows.Add(item);
+        }
+
+        return new JsonObject
+        {
+            ["repository"] = repository,
+            ["branch"] = values.Branch,
+            ["pullRequest"] = values.PullRequest,
+            ["period"] = values.Period.Label,
+            ["from"] = values.Period.From is DateTimeOffset from ? FormatTime(from) : null,
+            ["by"] = values.By,
+            ["limit"] = values.Limit,
+            ["rows"] = resultRows,
             ["circuitBreaker"] = warnings.CircuitBreaker,
             ["warnings"] = new JsonArray(
                 warnings.Warnings.Select(message => JsonValue.Create(message)).ToArray()),
@@ -539,10 +741,11 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         };
     }
 
+    // repository and branch are the current branch; when they're null, warnings come only from the current session's trips.
     private async Task<WarningResult> WarningsAsync(
         SqliteLedgerStore store,
-        string repository,
-        string branch,
+        string? repository,
+        string? branch,
         CancellationToken cancellationToken)
     {
         string? sessionId = _context.GetEnvironmentVariable("COPILOT_AGENT_SESSION_ID");
@@ -557,7 +760,8 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 cancellationToken);
         BreakerTrip[] trips = allTrips
             .Where(trip =>
-                (string.Equals(trip.Repository, repository, StringComparison.Ordinal)
+                (repository is not null
+                    && string.Equals(trip.Repository, repository, StringComparison.Ordinal)
                     && string.Equals(trip.Branch, branch, StringComparison.Ordinal))
                 || (sessionId is not null
                     && string.Equals(
@@ -565,8 +769,9 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                         sessionId,
                         StringComparison.Ordinal)))
             .ToArray();
-        IReadOnlyList<BranchBudgetRow> budgets =
-            await store.GetBranchBudgetsAsync(
+        IReadOnlyList<BranchBudgetRow> budgets = repository is null || branch is null
+            ? []
+            : await store.GetBranchBudgetsAsync(
                 repository,
                 branch,
                 cancellationToken);
@@ -681,6 +886,16 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         JsonNode.Parse(
             value.ToString("0.############", CultureInfo.InvariantCulture))!;
 
+    // value with every digit decimal division gave it, or null.
+    private static JsonNode? Ratio(decimal? value) =>
+        value is null
+            ? null
+            : JsonNode.Parse(value.Value.ToString(CultureInfo.InvariantCulture));
+
+    // Observed uncached input; null when no span reported cache usage.
+    private static long? Uncached(LedgerRollupRow row) =>
+        row.CacheReportedSpanCount == 0 ? null : row.ReportedUncachedInputTokens;
+
     private static string Credits(decimal credits) =>
         decimal.Round(credits, 2, MidpointRounding.AwayFromZero)
             .ToString("N2", CultureInfo.InvariantCulture);
@@ -693,10 +908,13 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         string? Branch,
         int Limit,
         string OrderBy,
-        decimal AiCredits)
+        decimal AiCredits,
+        int? PullRequest,
+        LedgerPeriod? Period,
+        string By)
     {
         public static ToolArguments Empty { get; } =
-            new(null, null, 5, "cost", decimal.Zero);
+            new(null, null, 5, "cost", decimal.Zero, null, null, "model");
     }
 
     private sealed record ScopeResult(
