@@ -301,7 +301,7 @@ An overlay changes the API-equivalent prices of requests recorded from then on. 
 
 - The file is a complete rates document with `"schemaVersion": 2`, like the built-in rates, not an overlay. It needs every section, and neither your overlay nor downloaded rates apply to it. A release's `rates.v2.json` is a good start.
 - Only the API-equivalent amounts change. AI credits, GitHub USD, BYOK USD, local savings, budgets, and the circuit breaker keep their recorded values, and nothing is written to the ledger.
-- Each request is priced as CopilotLedger would price it with that file when recording it: as of the request's start time, and a local request as the file's local baseline. Requests recorded before gh-ledger had API list prices are priced too.
+- Each request keeps the billing channel and model id it was recorded with, which the rates in use then decided, your overlay's hosts and aliases included. The file's host lists and its GitHub and Foundry BYOK aliases don't resolve them again. The file's API list prices price that model id, by id or alias, as of the request's start time; when no section of the file has the model id, they price its request model instead (see [API-equivalent prices](#api-equivalent-prices)). A local request is priced as the file's local baseline. Requests recorded before gh-ledger had API list prices are priced too.
 - Reports name the file in a `Pricing:` line, and their JSON adds `pricingSource` with its `path`, `ratesVersion`, and `apiRateCardSha256`. A receipt names the file without its folder.
 - `gh ledger rates validate --pricing <path>` checks a file with the same rules and messages.
 
