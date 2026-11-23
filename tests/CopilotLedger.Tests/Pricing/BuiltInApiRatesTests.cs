@@ -178,7 +178,8 @@ public sealed class BuiltInApiRatesTests
             inputTokens: 1_000,
             outputTokens: 100));
 
-        Assert.Equal(PricingStatus.UnknownModel, result.Status);
+        Assert.Equal(PricingStatus.Priced, result.Status);
+        Assert.Equal(model, result.ModelId);
         Assert.Equal(ApiEquivalentStatus.Priced, result.ApiEquivalent.Status);
         Assert.Equal(model, result.ApiEquivalent.RateCardModelId);
     }

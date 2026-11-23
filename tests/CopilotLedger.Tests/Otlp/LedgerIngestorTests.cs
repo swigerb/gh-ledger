@@ -487,6 +487,33 @@ public sealed class LedgerIngestorTests
         Assert.Equal(0.00075m, total.AiCreditsUsd);
     }
 
+    // Issue #67: Copilot CLI 1.0.114 reports a Claude Haiku 4.5 request with Anthropic's dated id as its response
+    // model. The request is billed, so budgets and the circuit breaker count it.
+    [Fact]
+    public async Task IG12_DatedClaudeResponseModel_IsBilled()
+    {
+        using TempDirectory temp = new();
+        Harness harness = await Harness.CreateAsync(temp);
+        OtlpSpan span = IgSpan("0000000000000001",
+            Str("gen_ai.provider.name", "github"),
+            Str("server.address", "api.githubcopilot.com"),
+            Str("gen_ai.request.model", "claude-haiku-4.5"),
+            Str("gen_ai.response.model", "claude-haiku-4-5-20251001"),
+            Int("gen_ai.usage.input_tokens", 120_000),
+            Int("gen_ai.usage.cache_read.input_tokens", 100_000),
+            Int("gen_ai.usage.output_tokens", 2_000));
+
+        IngestResult result = await harness.Ingestor.IngestAsync(Request(CopilotResource, span));
+
+        AssertResult(result, 1, 0, null, 1, 1);
+        LedgerRollupRow model = Assert.Single(await harness.Store.GetRollupAsync(
+            LedgerGrouping.Model,
+            LedgerFilter.All));
+        AssertRollup(model, "claude-haiku-4.5", 1, 4m, 0.04m);
+        Assert.Equal(0, model.UnpricedSpanCount);
+        Assert.Equal(0.04m, model.ApiEquivalentUsd);
+    }
+
     private static OtlpSpan IgSpan(string spanId, params OtlpAttribute[] attributes) =>
         Span(
             spanId: spanId,

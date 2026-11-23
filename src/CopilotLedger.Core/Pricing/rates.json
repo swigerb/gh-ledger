@@ -15,6 +15,7 @@
     "Promotional windows end at 00:00:00Z on the date the pricing page gives: gemini-4-argon and gemini-4-carbon on 2026-12-01, mai-code-2-flash on 2027-05-17, and gemini-3.8-flash on 2027-01-01 (the page says through December 31, 2026).",
     "gemini-4-argon and gemini-3.8-flash have no published price after their promotions, so later requests are recorded as no_rate_for_date until a price is added.",
     "Model ids are the ids Copilot reports. gpt-5.4-nano, claude-sonnet-4, claude-opus-4.8, claude-fable-5, claude-fable-5.1, claude-fable-5.2, gemini-4-neon, grok-4.5, and kimi-k3 are derived from the pricing page's display names. Claude Opus 4.8 (fast mode) is omitted because its id is unknown.",
+    "githubAiCredits aliases add the vendors' own API ids and dated snapshot ids, the same as apiEquivalent's, because Copilot can report them: Copilot CLI 1.0.114 reports claude-haiku-4.5's response model as claude-haiku-4-5-20251001.",
     "foundryByok.models is empty because Azure prices vary by region, deployment type, and agreement; add yours in ~/.copilot-ledger/rates.json (see docs/configuration.md).",
     "Local spans bill 0 USD; savings price the same tokens at the GitHub rates of localOffload.baselineModel. localOffload.models maps local runtime ids to one canonical model.",
     "apiEquivalent holds each vendor's public API list prices (standard processing, global endpoint; not batch, flex, priority, fast mode, or regional prices), retrieved on 2026-11-23 from each model's sourceUrl. They are a comparison and are never billed.",
@@ -29,7 +30,7 @@
     "models": [
       {
         "id": "claude-opus-5.5",
-        "aliases": [],
+        "aliases": ["claude-opus-5-5"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -42,7 +43,7 @@
       },
       {
         "id": "claude-sonnet-5.5",
-        "aliases": [],
+        "aliases": ["claude-sonnet-5-5"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -116,7 +117,7 @@
       },
       {
         "id": "gpt-5.4-nano",
-        "aliases": [],
+        "aliases": ["gpt-5.4-nano-2026-03-17"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -227,7 +228,7 @@
       },
       {
         "id": "claude-haiku-4.5",
-        "aliases": [],
+        "aliases": ["claude-haiku-4-5", "claude-haiku-4-5-20251001"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -240,7 +241,7 @@
       },
       {
         "id": "claude-haiku-5.5",
-        "aliases": [],
+        "aliases": ["claude-haiku-5-5"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -254,7 +255,7 @@
       },
       {
         "id": "claude-sonnet-4",
-        "aliases": [],
+        "aliases": ["claude-sonnet-4-20250514"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -267,7 +268,7 @@
       },
       {
         "id": "claude-sonnet-4.6",
-        "aliases": [],
+        "aliases": ["claude-sonnet-4-6"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -280,7 +281,7 @@
       },
       {
         "id": "claude-opus-4.8",
-        "aliases": [],
+        "aliases": ["claude-opus-4-8"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -319,7 +320,7 @@
       },
       {
         "id": "claude-fable-5.1",
-        "aliases": [],
+        "aliases": ["claude-fable-5-1"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -332,7 +333,7 @@
       },
       {
         "id": "claude-fable-5.2",
-        "aliases": [],
+        "aliases": ["claude-fable-5-2"],
         "windows": [
           {
             "effectiveFrom": null,

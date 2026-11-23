@@ -122,10 +122,13 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
     {
         ArgumentNullException.ThrowIfNull(span);
 
+        // The reported model is the response model, or the request model when there's no response model. A priced
+        // channel that has no model for it tries the request model too (see FindModel).
         string? model = NormalizeModel(
             !string.IsNullOrWhiteSpace(span.ResponseModel)
                 ? span.ResponseModel
                 : span.RequestModel);
+        string? requestModel = NormalizeModel(span.RequestModel);
 
         if (!GenAiOperationNames.IsInference(span.OperationName))
         {
@@ -189,7 +192,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
                     uncachedInputTokens: uncached);
             }
 
-            ModelRateCard? card = FindModel(_foundryModels, model);
+            ModelRateCard? card = FindModel(_foundryModels, model, requestModel);
             if (card is null)
             {
                 return Result(
@@ -236,7 +239,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
                     uncachedInputTokens: uncached);
             }
 
-            ModelRateCard? card = FindModel(_githubModels, model);
+            ModelRateCard? card = FindModel(_githubModels, model, requestModel);
             if (card is null)
             {
                 return Result(
@@ -1039,6 +1042,12 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         models.FirstOrDefault(card =>
             card.ModelId.Equals(model, StringComparison.Ordinal) ||
             card.Aliases.Contains(model, StringComparer.Ordinal));
+
+    // The model in models for a request: the one its reported model names, or else the one its request model names.
+    // So a response model that models doesn't have, such as a vendor's dated id, never hides a request model that it
+    // has, and one that it has is never replaced. Null when models has neither.
+    private static ModelRateCard? FindModel(IEnumerable<ModelRateCard> models, string model, string? requestModel) =>
+        FindModel(models, model) ?? (requestModel is null ? null : FindModel(models, requestModel));
 
     private static PricedSelection? Select(ModelRateCard card, DateTimeOffset instant, long inputTokens)
     {

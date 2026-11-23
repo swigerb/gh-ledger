@@ -37,14 +37,27 @@ The built-in prices are GitHub's rates for every text model on [Models and prici
 - Claude Opus 4.8 (fast mode) isn't built in, because the model name Copilot reports for it isn't known yet. If you use it, add it under `githubAiCredits.models` with the model name Copilot reports.
 - GitHub hasn't published the prices that follow the promotions for Gemini 4 Argon (ending 2026-12-01) and Gemini 3.8 Flash (ending after 2026-12-31). Later requests for them are recorded with status `no_rate_for_date` until you add a price window or a CopilotLedger update adds the price.
 
+### Which model prices a request
+
+A request can report two model names: the model that answered it (`gen_ai.response.model`) and the model it asked for (`gen_ai.request.model`). They're usually the same, but Copilot CLI 1.0.114, for example, reports a Claude Haiku 4.5 request with Anthropic's dated id, `claude-haiku-4-5-20251001`, as the response model and `claude-haiku-4.5` as the request model.
+
+A model name matches a model's `id` or one of its `aliases`, case-insensitively and with spaces treated as `-`. A GitHub or Foundry BYOK request is priced as the first of these that the channel's models have:
+
+1. The response model.
+2. The request model.
+
+The request is recorded with that model's `id`, and its API-equivalent cost is for the same model. So a response model that the channel has is used even when the request asked for another model, and one that the channel doesn't have never hides a request model that it has. When the channel has neither, the request is unpriced, as `unknown_model` on GitHub or `byok_unpriced` on Foundry BYOK, and it's recorded with its response model, or with its request model when it reports no response model. A local request matches local models only by its response model, or by its request model when it reports no response model; either way, its savings don't depend on the model.
+
+The built-in GitHub models have the vendors' API ids and dated snapshot ids as aliases, the same ones as their API list prices. If your overlay adds one of these names as a GitHub model or alias, for example to price `claude-haiku-4-5-20251001` before CopilotLedger did, remove it: a name that a built-in model of the same section already uses makes the overlay invalid.
+
 ### Pricing statuses
 
 | Status | Meaning | Fix |
 |---|---|---|
 | `priced` | Priced from a rate card | — |
 | `local_offload` | Local model: $0.00 billed, savings estimated | — |
-| `byok_unpriced` | Foundry BYOK endpoint, but no price for the model | Add the model under `foundryByok.models` |
-| `unknown_model` | No model on the request, or the model isn't in the price list | Add the model, or an alias for it, under `githubAiCredits.models` or `foundryByok.models` |
+| `byok_unpriced` | Foundry BYOK endpoint, but no price for its response model or its request model | Add the model under `foundryByok.models` |
+| `unknown_model` | No model on the request, or neither its response model nor its request model is in the price list | Add the model, or an alias for it, under `githubAiCredits.models` or `foundryByok.models` |
 | `no_rate_for_date` | The model has no price for the request's date | Add a price window that covers the date |
 | `unrecognized_endpoint` | The endpoint isn't GitHub, Foundry, or local | Add its host to the matching `hostSuffixes` or `additionalHosts` list |
 | `invalid_usage` | Token counts are inconsistent, for example more cached tokens than input tokens | Report it; it usually means a telemetry exporter bug |
@@ -81,7 +94,7 @@ Until you add prices, BYOK requests are still counted and attributed to reposito
 
 ## Newer rates between releases: `gh ledger rates update`
 
-Each gh-ledger release attaches the rates it was built with as `rates.v2.json`. It also attaches them as `rates.json`, with `schemaVersion` 1 and without API list prices, for gh-ledger 0.4.1 and earlier, which read only `schemaVersion` 1. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.v2.json`, through your system proxy, and checks it with the same rules as the built-in rates. If the latest release has no `rates.v2.json`, it downloads that release's `rates.json` instead.
+Each gh-ledger release attaches the rates it was built with as `rates.v2.json`. It also attaches them as `rates.json`, with `schemaVersion` 1 and without API list prices, for gh-ledger 0.4.1 and earlier, which read only `schemaVersion` 1. Its GitHub models keep their aliases, so after `gh ledger rates update`, those versions also price a request whose response model is a vendor's id, such as `claude-haiku-4-5-20251001`, although they never try the request model. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.v2.json`, through your system proxy, and checks it with the same rules as the built-in rates. If the latest release has no `rates.v2.json`, it downloads that release's `rates.json` instead.
 
 Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. A newer download with `schemaVersion` 1 isn't saved either, because it has no API list prices, and `rates update` reports an error. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
 
