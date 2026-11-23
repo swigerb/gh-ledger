@@ -70,6 +70,7 @@ public sealed class LedgerIngestor : ILedgerIngestor
                     calculation = _calculator.Calculate(attributed);
                     _ = PicoUsd.FromUsd(calculation.UsdCost);
                     _ = PicoUsd.FromUsd(calculation.EstimatedCloudSavedUsd);
+                    _ = PicoUsd.FromUsd(calculation.ApiEquivalent.UsdCost ?? 0m);
                 }
                 catch (Exception ex) when (
                     ex is OverflowException or ArgumentOutOfRangeException)

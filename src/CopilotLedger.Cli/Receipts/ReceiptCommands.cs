@@ -25,6 +25,9 @@ internal static class ReceiptCommands
         AiCreditsUsd = 0m,
         FoundryByokUsd = 0m,
         LocalSavedUsd = 0m,
+        ApiEquivalentUsd = 0m,
+        ApiEquivalentUnpricedSpanCount = 0,
+        ApiEquivalentEstimatedSpanCount = 0,
     };
 
     public static Command Create(CliContext context)

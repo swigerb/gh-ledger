@@ -441,6 +441,52 @@ public sealed class LedgerIngestorTests
         Assert.False(await reader.ReadAsync());
     }
 
+    // An API-equivalent cost beyond the pico-USD range rejects its span like a billed one does, even when nothing billed it.
+    [Fact]
+    public async Task IG11_ApiEquivalentCostOutOfRange_RejectsOnlyItsSpan()
+    {
+        using TempDirectory temp = new();
+        string overlay = Path.Combine(temp.Path, "ig11-rates.json");
+        File.WriteAllText(
+            overlay,
+            """
+            {
+              "schemaVersion": 2,
+              "ratesVersion": "ig11",
+              "apiEquivalent": {
+                "models": [
+                  { "id": "ig11-huge", "windows": [ { "tiers": [ { "name": "default", "inputPer1M": 1000000, "outputPer1M": 1000000 } ] } ] }
+                ]
+              }
+            }
+            """);
+        Harness harness = await Harness.CreateAsync(
+            temp,
+            JsonRateCardCalculator.LoadEmbeddedWithOverlay(overlay));
+        OtlpSpan huge = IgSpan("0000000000000001",
+            Str("gen_ai.request.model", "ig11-huge"),
+            Int("gen_ai.usage.input_tokens", 10_000_000));
+        OtlpSpan large = IgSpan("0000000000000003",
+            Str("gen_ai.request.model", "ig11-huge"),
+            Int("gen_ai.usage.input_tokens", 9_000_000));
+        OtlpSpan valid = IgSpan("0000000000000002",
+            Str("gen_ai.request.model", "mai-code-2"),
+            Int("gen_ai.usage.input_tokens", 1000),
+            Int("gen_ai.usage.output_tokens", 100));
+
+        IngestResult result = await harness.Ingestor.IngestAsync(
+            Request(CopilotResource, huge, large, valid));
+
+        AssertResult(result, 3, 1, "cost out of range", 2, 2);
+        LedgerRollupRow total = Assert.Single(await harness.Store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            LedgerFilter.All));
+        Assert.Equal(2, total.SpanCount);
+        Assert.Equal(9_000_000m, total.ApiEquivalentUsd);
+        Assert.Equal(1, total.ApiEquivalentUnpricedSpanCount);
+        Assert.Equal(0.00075m, total.AiCreditsUsd);
+    }
+
     private static OtlpSpan IgSpan(string spanId, params OtlpAttribute[] attributes) =>
         Span(
             spanId: spanId,

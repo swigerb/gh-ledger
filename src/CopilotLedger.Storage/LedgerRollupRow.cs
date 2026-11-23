@@ -24,6 +24,9 @@ public sealed record LedgerRollupRow
     public required decimal AiCreditsUsd { get; init; }
     public required decimal FoundryByokUsd { get; init; }
     public required decimal LocalSavedUsd { get; init; }
+    public required decimal? ApiEquivalentUsd { get; init; }               // at API list prices; null when spans exist but none is priced
+    public required long ApiEquivalentUnpricedSpanCount { get; init; }     // spans without an API-equivalent price, legacy rows included
+    public required long ApiEquivalentEstimatedSpanCount { get; init; }    // priced spans that reported no cache counters
     public long CacheUnreportedSpanCount => SpanCount - CacheReportedSpanCount;
     public decimal? CacheHitRatio => CacheMetrics.HitRatio(ReportedCacheReadInputTokens, ReportedInputTokens);
 }

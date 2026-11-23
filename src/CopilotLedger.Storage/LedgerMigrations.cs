@@ -150,5 +150,17 @@ internal static class LedgerMigrations
               FROM below
              WHERE below.trace_id = spans.trace_id AND below.span_id = spans.span_id;
             """),
+
+        // The API-equivalent (retail) lens. Rows recorded before version 5 keep NULL in every new column until
+        // gh ledger rates backfill-api-equivalent prices them; api_equivalent_status IS NULL marks such a legacy row.
+        (5, """
+            ALTER TABLE spans ADD COLUMN api_equivalent_usd_pico INTEGER
+                CHECK (api_equivalent_usd_pico IS NULL OR api_equivalent_usd_pico >= 0);
+            ALTER TABLE spans ADD COLUMN api_equivalent_status TEXT
+                CHECK (api_equivalent_status IS NULL OR api_equivalent_status IN ('priced', 'unpriced', 'not_applicable'));
+            ALTER TABLE spans ADD COLUMN api_rate_card_model_id TEXT;
+            ALTER TABLE spans ADD COLUMN api_rates_version TEXT;
+            ALTER TABLE spans ADD COLUMN api_rate_card_sha256 TEXT;
+            """),
     ];
 }

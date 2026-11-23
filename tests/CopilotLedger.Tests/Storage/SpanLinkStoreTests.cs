@@ -22,6 +22,11 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                ALTER TABLE spans DROP COLUMN api_equivalent_usd_pico;
+                ALTER TABLE spans DROP COLUMN api_equivalent_status;
+                ALTER TABLE spans DROP COLUMN api_rate_card_model_id;
+                ALTER TABLE spans DROP COLUMN api_rates_version;
+                ALTER TABLE spans DROP COLUMN api_rate_card_sha256;
                 DROP INDEX ix_spans_conversation_start;
                 ALTER TABLE spans DROP COLUMN cache_read_state;
                 ALTER TABLE spans DROP COLUMN cache_write_state;
@@ -40,7 +45,7 @@ public sealed class SpanLinkStoreTests
         SqliteConnection.ClearAllPools();
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(5L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(
             "span_links",
             await ScalarAsync(
@@ -365,6 +370,11 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                ALTER TABLE spans DROP COLUMN api_equivalent_usd_pico;
+                ALTER TABLE spans DROP COLUMN api_equivalent_status;
+                ALTER TABLE spans DROP COLUMN api_rate_card_model_id;
+                ALTER TABLE spans DROP COLUMN api_rates_version;
+                ALTER TABLE spans DROP COLUMN api_rate_card_sha256;
                 DROP INDEX ix_spans_conversation_start;
                 ALTER TABLE spans DROP COLUMN cache_read_state;
                 ALTER TABLE spans DROP COLUMN cache_write_state;
@@ -386,7 +396,7 @@ public sealed class SpanLinkStoreTests
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(5L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM spans;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM span_links;"));
         Assert.Equal(
@@ -483,7 +493,7 @@ public sealed class SpanLinkStoreTests
         await StoreAsync(temp);
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
-            await ExecuteAsync(connection, "PRAGMA user_version = 3;");
+            await ExecuteAsync(connection, "PRAGMA user_version = 4;");
         }
 
         await using SqliteConnection holder = await OpenAsync(DatabasePath(temp));
@@ -496,7 +506,7 @@ public sealed class SpanLinkStoreTests
         await using (SqliteCommand version = holder.CreateCommand())
         {
             version.Transaction = held;
-            version.CommandText = "PRAGMA user_version = 4;";
+            version.CommandText = "PRAGMA user_version = 5;";
             await version.ExecuteNonQueryAsync();
         }
 
@@ -504,13 +514,13 @@ public sealed class SpanLinkStoreTests
         await init;
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(5L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM breaker_settings;"));
         Assert.Equal(
             1L,
             await ScalarAsync(
                 check,
-                "SELECT COUNT(*) FROM pragma_table_info('span_links') WHERE name = 'tool_name';"));
+                "SELECT COUNT(*) FROM pragma_table_info('spans') WHERE name = 'api_equivalent_status';"));
     }
 
     [Fact]
@@ -539,6 +549,11 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                ALTER TABLE spans DROP COLUMN api_equivalent_usd_pico;
+                ALTER TABLE spans DROP COLUMN api_equivalent_status;
+                ALTER TABLE spans DROP COLUMN api_rate_card_model_id;
+                ALTER TABLE spans DROP COLUMN api_rates_version;
+                ALTER TABLE spans DROP COLUMN api_rate_card_sha256;
                 DROP INDEX ix_spans_conversation_start;
                 ALTER TABLE spans DROP COLUMN cache_read_state;
                 ALTER TABLE spans DROP COLUMN cache_write_state;
@@ -553,7 +568,7 @@ public sealed class SpanLinkStoreTests
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(5L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(
             "ix_spans_conversation_start",
             await ScalarAsync(

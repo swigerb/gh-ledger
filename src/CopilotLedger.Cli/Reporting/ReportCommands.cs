@@ -1286,6 +1286,11 @@ internal static class ReportCommands
             AiCreditsUsd = rows.Sum(row => row.AiCreditsUsd),
             FoundryByokUsd = rows.Sum(row => row.FoundryByokUsd),
             LocalSavedUsd = rows.Sum(row => row.LocalSavedUsd),
+            ApiEquivalentUsd = rows.Count > 0 && rows.All(row => row.ApiEquivalentUsd is null)
+                ? null
+                : rows.Sum(row => row.ApiEquivalentUsd ?? 0m),
+            ApiEquivalentUnpricedSpanCount = rows.Sum(row => row.ApiEquivalentUnpricedSpanCount),
+            ApiEquivalentEstimatedSpanCount = rows.Sum(row => row.ApiEquivalentEstimatedSpanCount),
         };
 
     private static string[] MoneyCells(LedgerRollupRow row) =>
