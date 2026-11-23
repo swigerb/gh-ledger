@@ -5,17 +5,17 @@
 | Architect | `ledger-architect` |
 | Builder | `ledger-builder` (MAI Code 2) |
 | Target | .NET 10 (`net10.0`), SDK 10.0.x, zero Docker |
-| Plan written | 2026-11-23, against merged Sprint 6 (`main` at `3aaf971`); Tasks 12 and 13 added the same day, after Task 5, for #67 |
+| Plan written | 2026-11-23, against merged Sprint 6 (`main` at `3aaf971`); Tasks 12 and 13 added the same day, after Task 5, for #67, and Task 14 after Task 13, from Sprint 7's review |
 | Requirements | Issue [#61](https://github.com/swigerb/gh-ledger/issues/61), "Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings"; issue [#67](https://github.com/swigerb/gh-ledger/issues/67), "Claude spans from Copilot CLI 1.0.114 bill as UnknownModel (dated response model id)", added by the coordinating session |
 | Status | Current sprint. Sprint 6 is complete and archived at `.github/plans/archive/sprint-6.md`. |
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–13 are sequential, and each builds on the ones before it. Tasks 12 and 13 come from the coordinating session's scope addition of issue #67 (see "Starting point"); they were added after Task 5 was committed, and Tasks 1–11 didn't change.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–14 are sequential, and each builds on the ones before it. Tasks 12 and 13 come from the coordinating session's scope addition of issue #67 (see "Starting point"); they were added after Task 5 was committed, and Tasks 1–11 didn't change. Task 14, a docs fix from Sprint 7's review, was added after Task 13 was committed.
 
-This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-6.md`, then each task as its own commit, `Sprint 7 Task N: <Title>`, on branch `swigerb-sprint-7-dual-lens-costing-engine`, and opens one pull request titled exactly "Sprint 7: Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings", with `Closes #61` and `Fixes #67`. The plan change that added Tasks 12 and 13 is its own commit, before Task 6. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
+This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-6.md`, then each task as its own commit, `Sprint 7 Task N: <Title>`, on branch `swigerb-sprint-7-dual-lens-costing-engine`, and opens one pull request titled exactly "Sprint 7: Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings", with `Closes #61` and `Fixes #67`. The plan change that added Tasks 12 and 13 is its own commit, before Task 6, and so is the one that added Task 14, before Task 14. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
-All of this plan's code, tests, data, workflow changes, and docs are **copy exactly**. The architect built every task in a scratch repository made from `git archive 3aaf971`, outside this repository's worktree. Each task compiled with `TreatWarningsAsErrors` and passed the whole suite: 831, 864, 934, 939, 949, 955, 963, 968, 970, 982, 986, 1005, and 1018 tests after Tasks 1–13. The architect then applied this plan's blocks with a script, task by task and in order, to a fresh `git archive 3aaf971` with Windows line endings (as a `core.autocrlf=true` checkout has them), built and tested after each task, and got the same counts and, line endings aside, the same files. Copy each block character for character, including every comment line, `using` directive, blank line, line of JSON, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs.
+All of this plan's code, tests, data, workflow changes, and docs are **copy exactly**. The architect built every task in a scratch repository made from `git archive 3aaf971`, outside this repository's worktree. Each task compiled with `TreatWarningsAsErrors` and passed the whole suite: 831, 864, 934, 939, 949, 955, 963, 968, 970, 982, 986, 1005, 1018, and 1018 tests after Tasks 1–14. The architect then applied this plan's blocks with a script, task by task and in order, to a fresh `git archive 3aaf971` with Windows line endings (as a `core.autocrlf=true` checkout has them), built and tested after each task, and got the same counts and, line endings aside, the same files. Copy each block character for character, including every comment line, `using` directive, blank line, line of JSON, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs.
 
 Each task's specification lists its files, summarizes its contracts and algorithms for review, and then gives its code under "Code (copy exactly)". The summaries aren't code to write; the code section is. It has two kinds of blocks:
 
@@ -43,12 +43,14 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 11: API-Equivalent USD over MCP (CopilotLedger.Mcp, docs & tests). `get_branch_ledger`, `get_agent_breakdown`, and `get_top_expensive_prompts` add the three fields, `orderBy` accepts `apiEquivalentUsd`, and no tool takes a file path.
 - [x] Task 12: Resolve Dated Model Ids (CopilotLedger.Core, docs & tests). Fixes #67: a GitHub or Foundry BYOK request whose response model the channel doesn't have, such as Copilot CLI 1.0.114's `claude-haiku-4-5-20251001`, is priced as its request model, and the built-in GitHub models gain the vendor ids and dated snapshot ids that their API list prices already have as aliases.
 - [x] Task 13: API-Equivalent Request-Model Fallback (CopilotLedger.Core, Storage, docs & tests). A request whose recorded model no section of the rates has is priced at API list prices as its request model, as #61 asks for Foundry BYOK requests, and a known model is never replaced. `ApiEquivalentRequest` gains `RequestModel`, which the backfill and what-if pricing read from `request_model`, so they agree with ingestion.
+- [ ] Task 14: Document What-If Pricing Exactly (docs). From Sprint 7's review: `docs/configuration.md` said that `--pricing` prices each request as recording it with the file would. It now says what happens: each request keeps its recorded billing channel and model id, which the file's list prices price, or its request model when no section of the file has that model id, and a local request is priced as the file's local baseline. No code or test changes.
 
 ## Starting point
 
 - Sprint 6 is complete. Its Tasks 1–12 merged in PR #66, squash-merged as `3aaf971` from `c94d590`. On 2026-11-23, at `3aaf971`, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors and `dotnet test CopilotLedger.slnx` passes 804 tests (0 failed, 0 skipped), with SDK 10.0.115 (`global.json` asks for 10.0.100 with `rollForward: latestFeature`). Sprint 6's plan is archived at `.github/plans/archive/sprint-6.md`, with its amendments. The latest release is v0.4.1, at `15003fb` (Sprint 5).
 - Issue #61 is the requirements source. Its "Prescriptive Implementation Plan" and all 15 acceptance criteria are implemented here, with the deviations listed under "Design decisions"; its names are proposals. The coordinating session added these requirements: the migration is version 5, because Sprint 6 took version 4; every list price is re-verified on its vendor's page; spans priced without cache counters are disclosed as estimates; old binaries keep working with the release's rates; and budgets stay on billed credits.
 - **Scope addition: issue #67.** On 2026-11-23, after Tasks 1–5 were committed on the branch (plan `0dc9961`, then `6ca27c3`, `e6fa3d8`, `efae9bf`, `63ab811`, and `5cb4c78`, at 949 tests), the coordinating session added #67 to this sprint, because it's in the rate card and calculator that this sprint owns. Tasks 12 and 13 were appended for it; Tasks 1–11 didn't change. #67's six acceptance criteria are requirements too, and its out-of-scope item stays out: requests already recorded as `unknown_model` keep their billed columns.
+- **Review fix.** Sprint 7's review of Tasks 1–13 (branch head `00e37d7`, 1018 tests) found no blocking or should-fix problems, and it added three notes under "Deferred to later sprints". At the orchestrator's request, Task 14 fixes one optional finding: `docs/configuration.md` overstated how `--pricing` prices a request.
 - Merged behavior this plan depends on (read from the code at `3aaf971`):
   - **Rate card.** The embedded `src/CopilotLedger.Core/Pricing/rates.json` has `schemaVersion` 1, `ratesVersion` `2026-11-20`, 34 `githubAiCredits` models, no `foundryByok` models, and `localOffload.baselineModel` `mai-code-2`. `RateCardReader.ReadRoot` rejects unknown keys and accepts only `schemaVersion` 1. `JsonRateCardCalculator` merges an overlay by model `id` (`MergeModels`), checks identities across the merge, and resolves the local baseline among the GitHub models.
   - **Pricing.** `Calculate` normalizes the response model, or else the request model, and returns `NotBillableOperation` for a non-inference operation and `InvalidUsage` for inconsistent token counts. It then classifies the endpoint in this order: local (loopback, a local host or provider, or a known local model without a host), Foundry BYOK (host suffix or provider), GitHub (no host, or a GitHub host suffix), and otherwise `UnrecognizedEndpoint`. `ModelId` is the canonical id of the card that matched, or else the normalized model. Rates have at most 6 decimal places and are at most 1,000,000, and `AiCreditMath.CostUsd` is `tokens × rate / 1,000,000` in `decimal`, so every cost is a whole number of pico-USD.
@@ -12917,6 +12919,66 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 14 specification: Document What-If Pricing Exactly
+
+This task comes from Sprint 7's review, which found the branch clean; the orchestrator asked to fix one of its optional findings now. It rewrites one bullet of `docs/configuration.md`. No code or test changes, so the suite stays at 1018 tests.
+
+### Files
+
+| File | Change |
+|---|---|
+| `docs/configuration.md` | "Compare with other prices: `--pricing`": the bullet on how each request is priced |
+
+`docs/cli.md` and `docs/guide.md` don't make the claim. They say only that `--pricing` prices the API-equivalent amounts with the file and changes nothing else, which stays true, so they don't change.
+
+### The behavior the bullet describes
+
+The code doesn't change. At `00e37d7`, it does this:
+
+- `RepriceAsync` (Tasks 7 and 13) gives the file's `CalculateApiEquivalent` each span's recorded operation, billing channel, model id, request model, start time, and token counts. It never runs `Calculate` again.
+- So a request keeps the billing channel and model id that the rates in use when it was recorded gave it, the user's overlay included. The file's host lists and its GitHub and Foundry BYOK aliases never classify the request again or map its model id to another model.
+- The file's API list prices price the model id, by id or alias, as of the start time. When no section of the file has the model id, they price the request model instead (D8). A local request is priced as the file's local retail baseline (D5). Requests recorded before schema version 5 are priced too, because what-if pricing never reads a recorded result.
+- So the old sentence, that each request is priced "as CopilotLedger would price it with that file when recording it", holds only when the file's host lists and aliases match those of the rates that recorded the request.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `docs/configuration.md`, replace:
+
+```markdown
+- The file is a complete rates document with `"schemaVersion": 2`, like the built-in rates, not an overlay. It needs every section, and neither your overlay nor downloaded rates apply to it. A release's `rates.v2.json` is a good start.
+- Only the API-equivalent amounts change. AI credits, GitHub USD, BYOK USD, local savings, budgets, and the circuit breaker keep their recorded values, and nothing is written to the ledger.
+- Each request is priced as CopilotLedger would price it with that file when recording it: as of the request's start time, and a local request as the file's local baseline. Requests recorded before gh-ledger had API list prices are priced too.
+- Reports name the file in a `Pricing:` line, and their JSON adds `pricingSource` with its `path`, `ratesVersion`, and `apiRateCardSha256`. A receipt names the file without its folder.
+- `gh ledger rates validate --pricing <path>` checks a file with the same rules and messages.
+```
+
+with:
+
+```markdown
+- The file is a complete rates document with `"schemaVersion": 2`, like the built-in rates, not an overlay. It needs every section, and neither your overlay nor downloaded rates apply to it. A release's `rates.v2.json` is a good start.
+- Only the API-equivalent amounts change. AI credits, GitHub USD, BYOK USD, local savings, budgets, and the circuit breaker keep their recorded values, and nothing is written to the ledger.
+- Each request keeps the billing channel and model id it was recorded with, which the rates in use then decided, your overlay's hosts and aliases included. The file's host lists and its GitHub and Foundry BYOK aliases don't resolve them again. The file's API list prices price that model id, by id or alias, as of the request's start time; when no section of the file has the model id, they price its request model instead (see [API-equivalent prices](#api-equivalent-prices)). A local request is priced as the file's local baseline. Requests recorded before gh-ledger had API list prices are priced too.
+- Reports name the file in a `Pricing:` line, and their JSON adds `pricingSource` with its `path`, `ratesVersion`, and `apiRateCardSha256`. A receipt names the file without its folder.
+- `gh ledger rates validate --pricing <path>` checks a file with the same rules and messages.
+```
+
+### Tests
+
+None. Every test still passes, including `GuideSamplesTests`, and `RateOverlayTests`, which reads the `rates-error-example` in `docs/configuration.md`.
+
+### Acceptance criteria
+
+- The bullet says that each request keeps its recorded billing channel and model id; that the file's host lists and GitHub and Foundry BYOK aliases don't resolve them again; that the file's API list prices price the model id as of the request's start time, or its request model when no section of the file has the model id; that a local request is priced as the file's local baseline; and that requests recorded before gh-ledger had API list prices are priced too.
+- `docs/cli.md`, `docs/guide.md`, and the code don't change.
+- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes **1018** tests, as before.
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
 Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` or fixed start times for time, `FakeCliPlatform`, `CliHarness`, and `FakeHttpHandler` for the CLI, and `McpTestHarness` or in-process pipes for MCP. No test starts a process, runs `git`, uses the network or Docker, or reads `~/.copilot-ledger`. Money is `decimal` (`TheoryData<…, decimal>` or `decimal` arguments, never `[InlineData(double)]`), and expected text is compared exactly, with `ReplaceLineEndings("\n")` only on the expected literal.
@@ -12937,6 +12999,7 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 11 | MC8 (3 more cases), MC15 | MC1, MC2, MC3, MC4, MC5, MC6, MC9; GS7 (guide text) | 986 |
 | 12 | MR1 (6), MR2 (4), MR3 (3), MR4 (2), MR5, MR6, MR7, IG12 | AR4 (6; the vendor ids are now billed) | 1005 |
 | 13 | RF1 (3), RF2 (3), RF3 (5), AB4, WI5 | — | 1018 |
+| 14 | — (docs only) | — | 1018 |
 
 Exact `decimal` values used across tasks, all at `RateFixtures.RetailTestRatesJson`'s fictional prices unless noted:
 
@@ -12960,10 +13023,10 @@ Exact `decimal` values used across tasks, all at `RateFixtures.RetailTestRatesJs
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 13, the orchestrator:
+After Task 14, the orchestrator:
 
 1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1018 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-6.md`, and the files the tasks list.
-2. Pushes `swigerb-sprint-7-dual-lens-costing-engine` and opens one pull request titled exactly "Sprint 7: Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings", whose body says `Closes #61` and `Fixes #67`, lists the thirteen task commits, and states the migration renumbering, deviations D1–D8, and the scope addition of #67 (Tasks 12 and 13) from "Design decisions", each with a one-line rationale.
+2. Pushes `swigerb-sprint-7-dual-lens-costing-engine` and opens one pull request titled exactly "Sprint 7: Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings", whose body says `Closes #61` and `Fixes #67`, lists the fourteen task commits, and states the migration renumbering, deviations D1–D8, the scope addition of #67 (Tasks 12 and 13), and the review's docs fix (Task 14) from "Design decisions" and "Starting point", each with a one-line rationale.
 3. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary.
 4. Asks `ledger-architect` to review the branch.
 
@@ -12980,4 +13043,7 @@ This sprint doesn't bump the version, tag, or release. The first release after i
 - **More dated ids.** Copilot may report other vendors' dated ids. The request-model fallback bills them when the request model is known, and a rates update can add aliases, which reach gh-ledger 0.4.1 and earlier too.
 - **Longer cache lifetimes.** Anthropic's 1-hour and OpenAI's longer cache writes cost more; the ledger doesn't know which lifetime a request used.
 - **A `--pricing` sample in the guide.** `GuideSamplesTests` would need `GuideWorld` to provide a pricing file; the guide describes the option instead.
+- **From Sprint 7's review: the backfill.** Until `gh ledger rates backfill-api-equivalent` runs, every span recorded before schema version 5 counts as unpriced, so upgraded ledgers show `*` everywhere, and no report names the command; a report could when the ledger still has such rows. Its summary says `1 spans have no API-equivalent result` and `Recorded 1 results` for a single span. It holds the ledger's write lock while it runs (`BEGIN IMMEDIATE`), so on a very large ledger the daemon's writes wait and fail after about 30 seconds (the 5-second busy timeout, then `Microsoft.Data.Sqlite`'s retries); batches, or advice to stop the daemon first, would avoid that.
+- **From Sprint 7's review: what the API rate card hash covers.** `api_rate_card_sha256` covers the API list prices and the local retail baseline. Since Task 13 (D8), whether a request is priced as its request model also depends on which ids the card's GitHub, Foundry BYOK, and local sections know (`IsKnown`), which the hash leaves out, so two cards with the same hash can price the same stored request differently. Covering them changes every pinned hash, so it needs its own design, for example with #64's provenance fields.
+- **From Sprint 7's review: what-if fidelity.** `--pricing` prices each span from its recorded billing channel and model id, which the recording rates resolved, and its request model (D5, D8), as `docs/configuration.md` says since Task 14. Running the whole calculation again from the stored `server_address`, `provider_name`, `response_model`, and `request_model` would let a pricing file's own host lists and aliases apply. It would also drop what the user's overlay contributed to the recorded channel and model id, because a pricing file stands alone, so that design has to decide whether the overlay applies.
 - **Carried from Sprint 6:** user turns (`github.copilot.turn_id`), agent definitions (`gen_ai.agent.id`), MCP tools for turns and bloat, a fresh capture of cache attributes, the optional follow-ups of Sprint 6's review, and Sprint 5's carry-overs, as described in `.github/plans/archive/sprint-6.md`.
