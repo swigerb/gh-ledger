@@ -48,6 +48,19 @@ public sealed class CachingGitContextResolverTests
         Assert.Equal(2, inner.Calls);
     }
 
+    [Fact]
+    public void CG4_CachedContext_KeepsItsPullRequestNumber()
+    {
+        ManualTimeProvider time = Time();
+        FakeResolver inner = new(Context("/r") with { PullRequestNumber = 42 });
+        CachingGitContextResolver resolver = new(inner, time);
+
+        Assert.Equal(42, resolver.Resolve("/r")!.PullRequestNumber);
+        time.Advance(TimeSpan.FromSeconds(4));
+        Assert.Equal(42, resolver.Resolve("/r")!.PullRequestNumber);
+        Assert.Equal(1, inner.Calls);
+    }
+
     private static GitWorkspaceContext Context(string root) =>
         new(root, Path.Combine(root, ".git"), "main", null, null, null);
 

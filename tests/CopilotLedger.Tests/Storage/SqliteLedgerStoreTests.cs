@@ -35,7 +35,7 @@ public sealed class SqliteLedgerStoreTests
             await using (SqliteCommand versionCommand = connection.CreateCommand())
             {
                 versionCommand.CommandText = "PRAGMA user_version;";
-                Assert.Equal(3L, await versionCommand.ExecuteScalarAsync());
+                Assert.Equal(4L, await versionCommand.ExecuteScalarAsync());
             }
         }
 
@@ -386,6 +386,167 @@ public sealed class SqliteLedgerStoreTests
         Assert.Equal(0.0000025m, v12.AiCredits);
     }
 
+    [Fact]
+    public async Task S12_RecordAsync_StoresCacheStatesAndPullRequest()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+        JsonRateCardCalculator calculator = JsonRateCardCalculator.LoadEmbedded();
+        NormalizedGenAiSpan reported = TestSpans.Chat(
+            requestModel: "claude-opus-5.5",
+            inputTokens: 1_000,
+            outputTokens: 10,
+            cacheReadInputTokens: 600,
+            cacheWriteState: CacheCounterState.Reported) with
+        {
+            TraceId = new string('a', 32),
+            SpanId = "aaaaaaaaaaaaaaa1",
+        };
+        NormalizedGenAiSpan absent = TestSpans.Chat(
+            requestModel: "mai-code-2",
+            inputTokens: 500,
+            outputTokens: 5) with
+        {
+            TraceId = new string('a', 32),
+            SpanId = "aaaaaaaaaaaaaaa2",
+        };
+        GitWorkspaceContext pullRequest =
+            Git(temp.Path, "swigerb/copilot-ledger", "feature/ledger") with { PullRequestNumber = 42 };
+
+        Assert.Equal(2, await store.RecordAsync(
+        [
+            new LedgerEntry(reported, calculator.Calculate(reported), pullRequest),
+            new LedgerEntry(absent, calculator.Calculate(absent), null),
+        ]));
+
+        await using SqliteConnection connection = new($"Data Source={DatabasePath(temp)}");
+        await connection.OpenAsync();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT span_id, cache_read_state, cache_write_state, pull_request_number, agent_span_id FROM spans ORDER BY span_id;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("aaaaaaaaaaaaaaa1", reader.GetString(0));
+        Assert.Equal("reported", reader.GetString(1));
+        Assert.Equal("reported", reader.GetString(2));
+        Assert.Equal(42L, reader.GetInt64(3));
+        Assert.True(reader.IsDBNull(4));
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("aaaaaaaaaaaaaaa2", reader.GetString(0));
+        Assert.Equal("absent", reader.GetString(1));
+        Assert.Equal("absent", reader.GetString(2));
+        Assert.True(reader.IsDBNull(3));
+        Assert.True(reader.IsDBNull(4));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [Theory]
+    [InlineData(0, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(1, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(2, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(3, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(4, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(5, "Pull request numbers must be positive. (Parameter 'entries')")]
+    [InlineData(6, "Pull request numbers must be positive. (Parameter 'entries')")]
+    public async Task S13_RecordAsync_RejectsInconsistentCacheStatesAndPullRequests(int caseNumber, string message)
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+        IReadOnlyList<LedgerEntry> seed = CreateSeedEntries(temp.Path);
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            requestModel: "mai-code-2",
+            inputTokens: 1_000,
+            outputTokens: 10);
+        span = caseNumber switch
+        {
+            0 => span with { CacheReadState = CacheCounterState.LegacyUnknown },
+            1 => span with { CacheWriteState = CacheCounterState.LegacyUnknown },
+            2 => span with { CacheReadInputTokens = 5 },
+            3 => span with { CacheWriteInputTokens = 5 },
+            4 => span with { CacheReadState = (CacheCounterState)7 },
+            _ => span,
+        };
+        GitWorkspaceContext? git = caseNumber switch
+        {
+            5 => Git(temp.Path, "swigerb/copilot-ledger", "main") with { PullRequestNumber = 0 },
+            6 => Git(temp.Path, "swigerb/copilot-ledger", "main") with { PullRequestNumber = -1 },
+            _ => null,
+        };
+        LedgerEntry invalid = new(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), git);
+
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => store.RecordAsync([seed[0], invalid]));
+
+        Assert.Equal(message, exception.Message);
+        Assert.Empty(await store.GetRollupAsync(LedgerGrouping.Repository, LedgerFilter.All));
+    }
+
+    [Fact]
+    public async Task S14_Rollups_CountCacheCoverage()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await SeededStoreAsync(temp);
+
+        Assert.Collection(
+            await store.GetRollupAsync(LedgerGrouping.Model, LedgerFilter.All),
+            row => AssertCoverage(row, "claude-opus-5.5", 1, 1, 1_200_000, 800_000, 300_000, 0.6666666666666666666666666667m),
+            row => AssertCoverage(row, "mai-code-2", 1, 1, 1_000_000, 400_000, 600_000, 0.4m),
+            row => AssertCoverage(row, "gpt-6.1-sol", 1, 0, 0, 0, 0, null),
+            row => AssertCoverage(row, "qwen3.8-27b", 1, 0, 0, 0, 0, null),
+            row => AssertCoverage(row, "gpt-unknown", 1, 0, 0, 0, 0, null));
+        Assert.Collection(
+            await store.GetRollupAsync(LedgerGrouping.Repository, LedgerFilter.All),
+            row => AssertCoverage(row, "swigerb/copilot-ledger", 3, 2, 2_200_000, 1_200_000, 900_000, 0.5454545454545454545454545455m),
+            row => AssertCoverage(row, "contoso/api", 1, 0, 0, 0, 0, null),
+            row => AssertCoverage(row, "(none)", 1, 0, 0, 0, 0, null));
+    }
+
+    [Fact]
+    public async Task S15_Filters_SelectPullRequestsAndAgents()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+        JsonRateCardCalculator calculator = JsonRateCardCalculator.LoadEmbedded();
+        GitWorkspaceContext feature =
+            Git(temp.Path, "swigerb/copilot-ledger", "feature/ledger") with { PullRequestNumber = 42 };
+        GitWorkspaceContext main = Git(temp.Path, "swigerb/copilot-ledger", "main");
+        NormalizedGenAiSpan p1 = FilterSpan('7', "claude-opus-5.5", "ledger-builder");
+        NormalizedGenAiSpan p2 = FilterSpan('8', "mai-code-2", null);
+        NormalizedGenAiSpan p3 = FilterSpan('9', "mai-code-2", "ledger-builder");
+        await store.RecordAsync(
+        [
+            new LedgerEntry(p1, calculator.Calculate(p1), feature),
+            new LedgerEntry(p2, calculator.Calculate(p2), feature),
+            new LedgerEntry(p3, calculator.Calculate(p3), main),
+        ]);
+
+        Assert.Equal(2, Assert.Single(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { PullRequestNumber = 42 })).SpanCount);
+        Assert.Empty(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { PullRequestNumber = 7 }));
+        Assert.Equal(2, Assert.Single(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { Agent = "ledger-builder" })).SpanCount);
+        Assert.Equal(1, Assert.Single(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { Agent = "(none)" })).SpanCount);
+        Assert.Equal(1, Assert.Single(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { PullRequestNumber = 42, Agent = "ledger-builder" })).SpanCount);
+        Assert.Equal(
+            [new string('7', 32), new string('8', 32)],
+            (await store.GetTopPromptChainsAsync(new LedgerFilter { PullRequestNumber = 42 }, 10))
+                .Select(row => row.TraceId));
+        Assert.Equal(
+            [new string('7', 32), new string('9', 32)],
+            (await store.GetTopPromptChainsAsync(new LedgerFilter { Agent = "ledger-builder" }, 10))
+                .Select(row => row.TraceId));
+        Assert.Equal(2, await store.GetPromptCountAsync(new LedgerFilter { PullRequestNumber = 42 }));
+        Assert.Equal(1, await store.GetPromptCountAsync(new LedgerFilter { Agent = "(none)" }));
+    }
+
     private static async Task<SqliteLedgerStore> SeededStoreAsync(TempDirectory temp)
     {
         SqliteLedgerStore store = await InitializedStoreAsync(temp);
@@ -643,4 +804,37 @@ public sealed class SqliteLedgerStoreTests
         Assert.Equal(byokUsd, row.FoundryByokUsd);
         Assert.Equal(savedUsd, row.LocalSavedUsd);
     }
+
+    // key is the row's Model, or its Repository for a Repository rollup.
+    private static void AssertCoverage(
+        LedgerRollupRow row,
+        string key,
+        long spans,
+        long reported,
+        long reportedInput,
+        long reportedCacheRead,
+        long reportedUncached,
+        decimal? hitRatio)
+    {
+        Assert.Equal(key, row.Model ?? row.Repository);
+        Assert.Equal(spans, row.SpanCount);
+        Assert.Equal(reported, row.CacheReportedSpanCount);
+        Assert.Equal(spans - reported, row.CacheUnreportedSpanCount);
+        Assert.Equal(reportedInput, row.ReportedInputTokens);
+        Assert.Equal(reportedCacheRead, row.ReportedCacheReadInputTokens);
+        Assert.Equal(reportedUncached, row.ReportedUncachedInputTokens);
+        Assert.Equal(hitRatio, row.CacheHitRatio);
+    }
+
+    private static NormalizedGenAiSpan FilterSpan(char trace, string model, string? agent) =>
+        TestSpans.Chat(
+            startTime: Cutover.AddHours(-3),
+            requestModel: model,
+            agentName: agent,
+            inputTokens: 10_000,
+            outputTokens: 1_000) with
+        {
+            TraceId = new string(trace, 32),
+            SpanId = new string(trace, 16),
+        };
 }

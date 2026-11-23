@@ -15,7 +15,8 @@ public sealed class SqliteLedgerStore
             start_time_unix_ms, end_time_unix_ms, input_tokens, output_tokens,
             cache_read_input_tokens, cache_write_input_tokens, billing_channel,
             pricing_status, rates_version, cost_usd_pico, saved_usd_pico,
-            repo_root, repo_slug, branch_name, head_commit_sha, recorded_at_unix_ms
+            repo_root, repo_slug, branch_name, head_commit_sha, recorded_at_unix_ms,
+            cache_read_state, cache_write_state, pull_request_number
         ) VALUES (
             @trace_id, @span_id, @parent_span_id, @operation_name, @conversation_id,
             @agent_name, @provider_name, @request_model, @response_model, @model_id,
@@ -23,8 +24,31 @@ public sealed class SqliteLedgerStore
             @start_time_unix_ms, @end_time_unix_ms, @input_tokens, @output_tokens,
             @cache_read_input_tokens, @cache_write_input_tokens, @billing_channel,
             @pricing_status, @rates_version, @cost_usd_pico, @saved_usd_pico,
-            @repo_root, @repo_slug, @branch_name, @head_commit_sha, @recorded_at_unix_ms
+            @repo_root, @repo_slug, @branch_name, @head_commit_sha, @recorded_at_unix_ms,
+            @cache_read_state, @cache_write_state, @pull_request_number
         ) ON CONFLICT (trace_id, span_id) DO NOTHING;
+        """;
+
+    // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
+    private const string FilterSql = """
+        (@from IS NULL OR start_time_unix_ms >= @from)
+          AND (@to IS NULL OR start_time_unix_ms < @to)
+          AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
+          AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+          AND (@pull_request IS NULL OR pull_request_number = @pull_request)
+          AND (@agent IS NULL OR COALESCE(agent_name, '(none)') = @agent)
+        """;
+
+    // CacheMetrics.IsReported: the span carried at least one cache counter.
+    private const string ReportedSql = "(cache_read_state = 'reported' OR cache_write_state = 'reported')";
+
+    // A span's input tokens that were neither read from nor written to the cache, never below 0.
+    private const string UncachedSql = "MAX(input_tokens - cache_read_input_tokens - cache_write_input_tokens, 0)";
+
+    // A growth sequence: one agent invocation's requests to one model in one repository, branch, and conversation.
+    private const string SequenceSql = """
+        trace_id, agent_span_id, COALESCE(repo_slug, repo_root, '(none)'), COALESCE(branch_name, '(none)'),
+                                 COALESCE(conversation_id, '(none)'), COALESCE(model_id, '(none)')
         """;
 
     private readonly TimeProvider _timeProvider;
@@ -162,10 +186,7 @@ public sealed class SqliteLedgerStore
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = GetRollupSql(grouping);
-        command.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
-        command.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
-        command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
-        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        AddFilterParameters(command, filter);
 
         List<LedgerRollupRow> rows = [];
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -198,12 +219,119 @@ public sealed class SqliteLedgerStore
                     reader.GetInt64(reader.GetOrdinal("cache_read_input_tokens")),
                 CacheWriteInputTokens =
                     reader.GetInt64(reader.GetOrdinal("cache_write_input_tokens")),
+                CacheReportedSpanCount =
+                    reader.GetInt64(reader.GetOrdinal("cache_reported_span_count")),
+                ReportedInputTokens = reader.GetInt64(reader.GetOrdinal("reported_input_tokens")),
+                ReportedCacheReadInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_cache_read_input_tokens")),
+                ReportedUncachedInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_uncached_input_tokens")),
                 AiCredits = AiCreditMath.UsdToAiCredits(aiCreditsUsd),
                 AiCreditsUsd = aiCreditsUsd,
                 FoundryByokUsd =
                     PicoUsd.ToUsd(reader.GetInt64(reader.GetOrdinal("byok_usd_pico"))),
                 LocalSavedUsd =
                     PicoUsd.ToUsd(reader.GetInt64(reader.GetOrdinal("saved_usd_pico"))),
+            });
+        }
+
+        return rows;
+    }
+
+    // Prompt-cache efficiency by group, largest input first, then by the group key. grouping is Repository, Branch, Model,
+    // Agent, or PullRequest, which groups spans by repository and pull request number, and spans without one by repository
+    // and branch. Throws ArgumentOutOfRangeException for ChannelModel.
+    public async Task<IReadOnlyList<CacheEfficiencyRow>> GetCacheEfficiencyAsync(
+        LedgerGrouping grouping,
+        LedgerFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        (string keyColumns, string keyAliases) = grouping switch
+        {
+            LedgerGrouping.Repository =>
+                ("COALESCE(repo_slug, repo_root, '(none)') AS repository",
+                 "repository"),
+            LedgerGrouping.Branch =>
+                ("""
+                 COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                          COALESCE(branch_name, '(none)') AS branch
+                 """,
+                 "repository, branch"),
+            LedgerGrouping.Model =>
+                ("COALESCE(model_id, '(none)') AS model",
+                 "model"),
+            LedgerGrouping.Agent =>
+                ("COALESCE(agent_name, '(none)') AS agent",
+                 "agent"),
+            LedgerGrouping.PullRequest =>
+                ("""
+                 COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                          pull_request_number AS pull_request,
+                          CASE WHEN pull_request_number IS NULL THEN COALESCE(branch_name, '(none)') END AS branch
+                 """,
+                 "repository, pull_request, branch"),
+            _ => throw new ArgumentOutOfRangeException(nameof(grouping), grouping, null),
+        };
+
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {keyColumns},
+                   COUNT(*)                                                                AS span_count,
+                   SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END)                          AS cache_reported_span_count,
+                   SUM(input_tokens)                                                       AS input_tokens,
+                   SUM(output_tokens)                                                      AS output_tokens,
+                   MAX(input_tokens)                                                       AS max_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN input_tokens ELSE 0 END)               AS reported_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_read_input_tokens ELSE 0 END)    AS reported_cache_read_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_write_input_tokens ELSE 0 END)   AS reported_cache_write_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN {UncachedSql} ELSE 0 END)              AS reported_uncached_input_tokens,
+                   SUM({UncachedSql})                                                      AS estimated_uncached_input_tokens
+            FROM spans
+            WHERE {FilterSql}
+            GROUP BY {keyAliases}
+            ORDER BY input_tokens DESC, {keyAliases} ASC;
+            """;
+        AddFilterParameters(command, filter);
+
+        List<CacheEfficiencyRow> rows = [];
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            bool hasRepository = grouping is LedgerGrouping.Repository
+                or LedgerGrouping.Branch
+                or LedgerGrouping.PullRequest;
+            bool hasBranch = grouping is LedgerGrouping.Branch or LedgerGrouping.PullRequest
+                && !reader.IsDBNull(reader.GetOrdinal("branch"));
+            rows.Add(new CacheEfficiencyRow
+            {
+                Repository = hasRepository ? reader.GetString(reader.GetOrdinal("repository")) : null,
+                Branch = hasBranch ? reader.GetString(reader.GetOrdinal("branch")) : null,
+                PullRequestNumber = grouping == LedgerGrouping.PullRequest
+                    && !reader.IsDBNull(reader.GetOrdinal("pull_request"))
+                        ? reader.GetInt32(reader.GetOrdinal("pull_request"))
+                        : null,
+                Model = grouping == LedgerGrouping.Model
+                    ? reader.GetString(reader.GetOrdinal("model"))
+                    : null,
+                Agent = grouping == LedgerGrouping.Agent
+                    ? reader.GetString(reader.GetOrdinal("agent"))
+                    : null,
+                SpanCount = reader.GetInt64(reader.GetOrdinal("span_count")),
+                CacheReportedSpanCount = reader.GetInt64(reader.GetOrdinal("cache_reported_span_count")),
+                InputTokens = reader.GetInt64(reader.GetOrdinal("input_tokens")),
+                OutputTokens = reader.GetInt64(reader.GetOrdinal("output_tokens")),
+                MaxInputTokens = reader.GetInt64(reader.GetOrdinal("max_input_tokens")),
+                ReportedInputTokens = reader.GetInt64(reader.GetOrdinal("reported_input_tokens")),
+                ReportedCacheReadInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_cache_read_input_tokens")),
+                ReportedCacheWriteInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_cache_write_input_tokens")),
+                ReportedUncachedInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_uncached_input_tokens")),
+                EstimatedUncachedInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("estimated_uncached_input_tokens")),
             });
         }
 
@@ -736,8 +864,9 @@ public sealed class SqliteLedgerStore
         return counts;
     }
 
-    // For each trace, copies each invoke_agent link's agent name, conversation id, and Git slug/branch/sha onto spans rows below it,
-    // without crossing a nested invoke_agent. Returns the total rows changed by all UPDATE statements. One transaction.
+    // For each trace, copies each invoke_agent link's span ID, agent name, conversation id, and Git slug/branch/sha onto spans
+    // rows below it, without crossing a nested invoke_agent, so agent_span_id is each row's nearest invoke_agent ancestor.
+    // Returns the total rows changed by all UPDATE statements. One transaction.
     // Throws InvalidOperationException if InitializeAsync hasn't run.
     public async Task<int> BackfillFromAgentSpansAsync(
         IEnumerable<string> traceIds,
@@ -780,9 +909,8 @@ public sealed class SqliteLedgerStore
 
             foreach (AgentLink agent in agents)
             {
-                if (agent.AgentName is not null || agent.ConversationId is not null)
+                await using (SqliteCommand command = connection.CreateCommand())
                 {
-                    await using SqliteCommand command = connection.CreateCommand();
                     command.Transaction = transaction;
                     command.CommandText = """
                         WITH RECURSIVE sub(span_id) AS (
@@ -796,11 +924,13 @@ public sealed class SqliteLedgerStore
                         )
                         UPDATE spans
                            SET agent_name      = COALESCE(agent_name, @agentName),
-                               conversation_id = COALESCE(conversation_id, @conversationId)
+                               conversation_id = COALESCE(conversation_id, @conversationId),
+                               agent_span_id   = COALESCE(agent_span_id, @agentSpanId)
                          WHERE trace_id = @trace
                            AND span_id IN (SELECT span_id FROM sub)
                            AND ((agent_name IS NULL AND @agentName IS NOT NULL)
-                             OR (conversation_id IS NULL AND @conversationId IS NOT NULL));
+                             OR (conversation_id IS NULL AND @conversationId IS NOT NULL)
+                             OR agent_span_id IS NULL);
                         """;
                     command.Parameters.AddWithValue("@trace", trace);
                     command.Parameters.AddWithValue("@agentSpanId", agent.SpanId);
@@ -880,7 +1010,7 @@ public sealed class SqliteLedgerStore
         List<PromptChainData> data = [];
         await using (SqliteCommand query = connection.CreateCommand())
         {
-            query.CommandText = """
+            query.CommandText = $"""
                 SELECT trace_id,
                        MIN(start_time_unix_ms)                                                            AS start_ms,
                        MAX(end_time_unix_ms)                                                              AS end_ms,
@@ -897,18 +1027,12 @@ public sealed class SqliteLedgerStore
                        SUM(CASE WHEN billing_channel = 'foundry_byok' THEN cost_usd_pico ELSE 0 END)      AS byok_usd_pico,
                        SUM(saved_usd_pico)                                                                AS saved_usd_pico
                 FROM spans
-                WHERE (@from IS NULL OR start_time_unix_ms >= @from)
-                  AND (@to IS NULL OR start_time_unix_ms < @to)
-                  AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
-                  AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+                WHERE {FilterSql}
                 GROUP BY trace_id
                 ORDER BY github_usd_pico + byok_usd_pico DESC, saved_usd_pico DESC, start_ms DESC, trace_id ASC
                 LIMIT @limit;
                 """;
-            query.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
-            query.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
-            query.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
-            query.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+            AddFilterParameters(query, filter);
             query.Parameters.AddWithValue("@limit", limit);
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -955,16 +1079,10 @@ public sealed class SqliteLedgerStore
             query.CommandText = $"""
                 SELECT DISTINCT trace_id, agent_name, model_id
                 FROM spans
-                WHERE (@from IS NULL OR start_time_unix_ms >= @from)
-                  AND (@to IS NULL OR start_time_unix_ms < @to)
-                  AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
-                  AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+                WHERE {FilterSql}
                   AND trace_id IN ({traceParameters});
                 """;
-            query.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
-            query.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
-            query.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
-            query.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+            AddFilterParameters(query, filter);
             for (int index = 0; index < data.Count; index++)
             {
                 query.Parameters.AddWithValue($"@t{index}", data[index].TraceId);
@@ -1027,19 +1145,202 @@ public sealed class SqliteLedgerStore
         EnsureInitialized();
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT COUNT(DISTINCT trace_id)
             FROM spans
-            WHERE (@from IS NULL OR start_time_unix_ms >= @from)
-              AND (@to IS NULL OR start_time_unix_ms < @to)
-              AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
-              AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch);
+            WHERE {FilterSql};
             """;
-        command.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
-        command.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
-        command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
-        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        AddFilterParameters(command, filter);
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+    }
+
+    // The selector's inference spans that match filter, by start time, then span ID, then trace ID. invoke_agent spans are
+    // never stored as spans, so they're never listed. A span's input delta compares it with the previous span of its
+    // sequence (SequenceSql); it's null for a sequence's first span and for a span without a known invoke_agent ancestor.
+    // Deltas are computed over all the selector's spans before filter applies.
+    // Throws ArgumentNullException for a null selector or filter.
+    public async Task<IReadOnlyList<TurnTokenRow>> GetTurnBreakdownAsync(
+        TurnSelector selector,
+        LedgerFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        ArgumentNullException.ThrowIfNull(selector);
+        ArgumentNullException.ThrowIfNull(filter);
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"""
+            WITH selected AS (
+                SELECT *,
+                       CASE WHEN agent_span_id IS NULL THEN NULL
+                            ELSE input_tokens - LAG(input_tokens) OVER (
+                                PARTITION BY {SequenceSql}
+                                ORDER BY start_time_unix_ms, span_id)
+                       END AS input_delta
+                FROM spans
+                WHERE (@trace IS NULL OR trace_id = @trace)
+                  AND (@conversation IS NULL OR conversation_id = @conversation)
+            )
+            SELECT trace_id, span_id, parent_span_id, conversation_id, agent_span_id, start_time_unix_ms,
+                   COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                   COALESCE(branch_name, '(none)')          AS branch,
+                   pull_request_number, agent_name,
+                   COALESCE(model_id, '(none)')             AS model,
+                   input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens,
+                   cache_read_state, cache_write_state, input_delta
+            FROM selected
+            WHERE {FilterSql}
+            ORDER BY start_time_unix_ms, span_id, trace_id;
+            """;
+        command.Parameters.AddWithValue("@trace", OrDbNull(selector.TraceId));
+        command.Parameters.AddWithValue("@conversation", OrDbNull(selector.ConversationId));
+        AddFilterParameters(command, filter);
+
+        List<TurnTokenRow> rows = [];
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            CacheCounterState readState = ToCacheCounterState(reader.GetString(15));
+            CacheCounterState writeState = ToCacheCounterState(reader.GetString(16));
+            bool reported = CacheMetrics.IsReported(readState, writeState);
+            rows.Add(new TurnTokenRow
+            {
+                TraceId = reader.GetString(0),
+                SpanId = reader.GetString(1),
+                ParentSpanId = reader.IsDBNull(2) ? null : reader.GetString(2),
+                ConversationId = reader.IsDBNull(3) ? null : reader.GetString(3),
+                AgentSpanId = reader.IsDBNull(4) ? null : reader.GetString(4),
+                StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(5)),
+                Repository = reader.GetString(6),
+                Branch = reader.GetString(7),
+                PullRequestNumber = reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                Agent = reader.IsDBNull(9) ? null : reader.GetString(9),
+                Model = reader.GetString(10),
+                InputTokens = reader.GetInt64(11),
+                OutputTokens = reader.GetInt64(12),
+                CacheReadState = readState,
+                CacheWriteState = writeState,
+                CacheReadInputTokens = reported ? reader.GetInt64(13) : null,
+                CacheWriteInputTokens = reported ? reader.GetInt64(14) : null,
+                InputDeltaFromPreviousTurn = reader.IsDBNull(17) ? null : reader.GetInt64(17),
+            });
+        }
+
+        return rows;
+    }
+
+    // Ranks the prompt chains that match filter, limit of each ranking; see ContextBloatReport. A chain's growth is its
+    // sequence (SequenceSql) with the largest peak input less first input, by start time then span ID, among the spans
+    // with a known invoke_agent ancestor; ties between a chain's sequences go to the lowest agent span ID, then model.
+    // Throws ArgumentOutOfRangeException unless 1 <= limit <= 1000.
+    public async Task<ContextBloatReport> GetContextBloatAsync(
+        LedgerFilter filter,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        if (limit is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        }
+
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        IReadOnlyList<BloatChainRow> complete = await ReadBloatChainsAsync(
+            connection,
+            filter,
+            limit,
+            "=",
+            "reported_uncached_input_tokens",
+            cancellationToken);
+        IReadOnlyList<BloatChainRow> incomplete = await ReadBloatChainsAsync(
+            connection,
+            filter,
+            limit,
+            "<",
+            "estimated_uncached_input_tokens",
+            cancellationToken);
+
+        List<InputGrowthRow> growth = [];
+        await using (SqliteCommand query = connection.CreateCommand())
+        {
+            query.CommandText = $"""
+                WITH turns AS (
+                    SELECT trace_id, agent_span_id, conversation_id, agent_name, start_time_unix_ms, input_tokens,
+                           COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                           COALESCE(branch_name, '(none)')          AS branch,
+                           COALESCE(conversation_id, '(none)')      AS conversation,
+                           COALESCE(model_id, '(none)')             AS model,
+                           FIRST_VALUE(input_tokens) OVER (
+                               PARTITION BY {SequenceSql}
+                               ORDER BY start_time_unix_ms, span_id) AS first_input
+                    FROM spans
+                    WHERE {FilterSql} AND agent_span_id IS NOT NULL
+                ),
+                sequences AS (
+                    SELECT trace_id, agent_span_id, repository, branch, conversation, model,
+                           MAX(conversation_id)    AS conversation_id,
+                           MAX(agent_name)         AS agent,
+                           MIN(start_time_unix_ms) AS start_ms,
+                           COUNT(*)                AS turn_count,
+                           MAX(first_input)        AS first_input,
+                           MAX(input_tokens)       AS peak_input
+                    FROM turns
+                    GROUP BY trace_id, agent_span_id, repository, branch, conversation, model
+                ),
+                ranked AS (
+                    SELECT *,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY trace_id
+                               ORDER BY peak_input - first_input DESC, agent_span_id, model, repository, branch, conversation
+                           ) AS rank_in_trace
+                    FROM sequences
+                )
+                SELECT trace_id, conversation_id, agent_span_id, agent, model, repository, branch,
+                       start_ms, turn_count, first_input, peak_input
+                FROM ranked
+                WHERE rank_in_trace = 1 AND peak_input - first_input > 0
+                ORDER BY peak_input - first_input DESC, trace_id ASC
+                LIMIT @limit;
+                """;
+            AddFilterParameters(query, filter);
+            query.Parameters.AddWithValue("@limit", limit);
+            await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                growth.Add(new InputGrowthRow
+                {
+                    TraceId = reader.GetString(0),
+                    ConversationId = reader.IsDBNull(1) ? null : reader.GetString(1),
+                    AgentSpanId = reader.GetString(2),
+                    Agent = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    Model = reader.GetString(4),
+                    Repository = reader.GetString(5),
+                    Branch = reader.GetString(6),
+                    StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(7)),
+                    TurnCount = reader.GetInt64(8),
+                    FirstInputTokens = reader.GetInt64(9),
+                    PeakInputTokens = reader.GetInt64(10),
+                });
+            }
+        }
+
+        long withoutAgent;
+        await using (SqliteCommand query = connection.CreateCommand())
+        {
+            query.CommandText = $"""
+                SELECT COUNT(*) FROM spans WHERE {FilterSql} AND agent_span_id IS NULL;
+                """;
+            AddFilterParameters(query, filter);
+            withoutAgent = (long)(await query.ExecuteScalarAsync(cancellationToken))!;
+        }
+
+        return new ContextBloatReport
+        {
+            ByUncachedInput = complete,
+            ByEstimatedUncachedInput = incomplete,
+            ByInputGrowth = growth,
+            SpansWithoutAgent = withoutAgent,
+        };
     }
 
     private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
@@ -1078,6 +1379,19 @@ public sealed class SqliteLedgerStore
         command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
         command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
         command.Parameters.AddWithValue("@repo_root", OrDbNull(filter.RepositoryRoot));
+    }
+
+    // The parameters of FilterSql.
+    private static void AddFilterParameters(
+        SqliteCommand command,
+        LedgerFilter filter)
+    {
+        command.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
+        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        command.Parameters.AddWithValue("@pull_request", OrDbNull(filter.PullRequestNumber));
+        command.Parameters.AddWithValue("@agent", OrDbNull(filter.Agent));
     }
 
     private static async Task<IReadOnlyList<BreakerTrip>> ReadTripsAsync(
@@ -1150,6 +1464,63 @@ public sealed class SqliteLedgerStore
         return rows;
     }
 
+    // Chains whose reported span count compares to their span count with comparison ("=" or "<"), ordered by orderBy
+    // (a column alias) descending, then trace ID.
+    private static async Task<IReadOnlyList<BloatChainRow>> ReadBloatChainsAsync(
+        SqliteConnection connection,
+        LedgerFilter filter,
+        int limit,
+        string comparison,
+        string orderBy,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand query = connection.CreateCommand();
+        query.CommandText = $"""
+            SELECT trace_id,
+                   MIN(start_time_unix_ms)                                                 AS start_ms,
+                   MAX(conversation_id)                                                    AS conversation_id,
+                   MAX(COALESCE(repo_slug, repo_root, '(none)'))                           AS repository,
+                   MAX(COALESCE(branch_name, '(none)'))                                    AS branch,
+                   COUNT(*)                                                                AS span_count,
+                   SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END)                          AS cache_reported_span_count,
+                   SUM(input_tokens)                                                       AS input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN input_tokens ELSE 0 END)               AS reported_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_read_input_tokens ELSE 0 END)    AS reported_cache_read_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN {UncachedSql} ELSE 0 END)              AS reported_uncached_input_tokens,
+                   SUM({UncachedSql})                                                      AS estimated_uncached_input_tokens
+            FROM spans
+            WHERE {FilterSql}
+            GROUP BY trace_id
+            HAVING SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END) {comparison} COUNT(*)
+            ORDER BY {orderBy} DESC, trace_id ASC
+            LIMIT @limit;
+            """;
+        AddFilterParameters(query, filter);
+        query.Parameters.AddWithValue("@limit", limit);
+        List<BloatChainRow> rows = [];
+        await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new BloatChainRow
+            {
+                TraceId = reader.GetString(0),
+                StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)),
+                ConversationId = reader.IsDBNull(2) ? null : reader.GetString(2),
+                Repository = reader.GetString(3),
+                Branch = reader.GetString(4),
+                SpanCount = reader.GetInt64(5),
+                CacheReportedSpanCount = reader.GetInt64(6),
+                InputTokens = reader.GetInt64(7),
+                ReportedInputTokens = reader.GetInt64(8),
+                ReportedCacheReadInputTokens = reader.GetInt64(9),
+                ReportedUncachedInputTokens = reader.GetInt64(10),
+                EstimatedUncachedInputTokens = reader.GetInt64(11),
+            });
+        }
+
+        return rows;
+    }
+
     private static void ValidateBranchBudgetKey(string repository, string branch)
     {
         if (string.IsNullOrWhiteSpace(repository) || string.IsNullOrWhiteSpace(branch))
@@ -1179,6 +1550,21 @@ public sealed class SqliteLedgerStore
             throw new ArgumentException(
                 "Entries must be billable and all token counts must be non-negative.",
                 parameterName);
+        }
+
+        if (span.CacheReadState is not (CacheCounterState.Reported or CacheCounterState.Absent)
+            || span.CacheWriteState is not (CacheCounterState.Reported or CacheCounterState.Absent)
+            || (span.CacheReadState == CacheCounterState.Absent && span.CacheReadInputTokens != 0)
+            || (span.CacheWriteState == CacheCounterState.Absent && span.CacheWriteInputTokens != 0))
+        {
+            throw new ArgumentException(
+                "Cache counter states must be Reported or Absent, and an Absent counter must be 0.",
+                parameterName);
+        }
+
+        if (entry.Git?.PullRequestNumber is <= 0)
+        {
+            throw new ArgumentException("Pull request numbers must be positive.", parameterName);
         }
     }
 
@@ -1238,6 +1624,11 @@ public sealed class SqliteLedgerStore
             "@head_commit_sha",
             OrDbNull(entry.Git?.HeadCommitSha));
         command.Parameters.AddWithValue("@recorded_at_unix_ms", recordedAtUnixMs);
+        command.Parameters.AddWithValue("@cache_read_state", ToDatabaseString(span.CacheReadState));
+        command.Parameters.AddWithValue("@cache_write_state", ToDatabaseString(span.CacheWriteState));
+        command.Parameters.AddWithValue(
+            "@pull_request_number",
+            OrDbNull(entry.Git?.PullRequestNumber));
     }
 
     private static string GetRollupSql(LedgerGrouping grouping)
@@ -1276,14 +1667,15 @@ public sealed class SqliteLedgerStore
                    SUM(output_tokens)                                                                AS output_tokens,
                    SUM(cache_read_input_tokens)                                                      AS cache_read_input_tokens,
                    SUM(cache_write_input_tokens)                                                     AS cache_write_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END)                                    AS cache_reported_span_count,
+                   SUM(CASE WHEN {ReportedSql} THEN input_tokens ELSE 0 END)                         AS reported_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_read_input_tokens ELSE 0 END)              AS reported_cache_read_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN {UncachedSql} ELSE 0 END)                        AS reported_uncached_input_tokens,
                    SUM(CASE WHEN billing_channel = 'github_ai_credits' THEN cost_usd_pico ELSE 0 END) AS github_usd_pico,
                    SUM(CASE WHEN billing_channel = 'foundry_byok' THEN cost_usd_pico ELSE 0 END)      AS byok_usd_pico,
                    SUM(saved_usd_pico)                                                               AS saved_usd_pico
             FROM spans
-            WHERE (@from IS NULL OR start_time_unix_ms >= @from)
-              AND (@to IS NULL OR start_time_unix_ms < @to)
-              AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
-              AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+            WHERE {FilterSql}
             GROUP BY {keyAliases}
             ORDER BY github_usd_pico + byok_usd_pico DESC, saved_usd_pico DESC, {keyAliases} ASC;
             """;
@@ -1318,6 +1710,22 @@ public sealed class SqliteLedgerStore
         PricingStatus.InvalidUsage => "invalid_usage",
         PricingStatus.NotBillableOperation => "not_billable_operation",
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+    };
+
+    private static string ToDatabaseString(CacheCounterState state) => state switch
+    {
+        CacheCounterState.Reported => "reported",
+        CacheCounterState.Absent => "absent",
+        CacheCounterState.LegacyUnknown => "legacy_unknown",
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
+    };
+
+    private static CacheCounterState ToCacheCounterState(string value) => value switch
+    {
+        "reported" => CacheCounterState.Reported,
+        "absent" => CacheCounterState.Absent,
+        "legacy_unknown" => CacheCounterState.LegacyUnknown,
+        _ => throw new InvalidDataException($"Unknown cache counter state '{value}'."),
     };
 
     private static object OrDbNull<T>(T? value) where T : struct =>

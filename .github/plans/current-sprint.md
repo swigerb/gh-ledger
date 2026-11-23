@@ -1,670 +1,1146 @@
-# Sprint 5: Audit Fixes, Action Repository, Docs & User Guide
+# Sprint 6: Prompt-Cache Efficiency & Per-Turn Token Breakdown
 
 | | |
 |---|---|
-| Architect | `ledger-architect` (Claude Opus 5.5) |
+| Architect | `ledger-architect` |
 | Builder | `ledger-builder` (MAI Code 2) |
 | Target | .NET 10 (`net10.0`), SDK 10.0.x, zero Docker |
-| Plan written | 2026-11-21, against merged Sprint 4 (`main` at `3a0a514`, released as v0.4.0) |
-| Status | Current sprint. Sprint 4 is complete and archived at `.github/plans/archive/sprint-4.md`. |
+| Plan written | 2026-11-23, against merged Sprint 5 (`main` at `15003fb`, released as v0.4.1) |
+| Requirements | Issue [#62](https://github.com/swigerb/gh-ledger/issues/62), "Prompt-cache efficiency & per-turn token breakdown" |
+| Status | Current sprint. Sprint 5 is complete and archived at `.github/plans/archive/sprint-5.md`. |
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–5 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–12 are sequential, and each builds on the ones before it. Task 12 comes from the architect's review of Tasks 1–11.
 
-Task R is different. It runs in the other repository, swigerb/copilot-ledger-action, in parallel with Tasks 1–4, and it has no checkbox here, so a builder in this repository never picks it up. The orchestrator assigns it to a builder that works in that repository. Task 5 starts only after Task R's pull request merges, because Task 5 points this repository at the merged action.
+This sprint ships as one pull request. The orchestrator commits this plan first, then each task as its own commit, `Sprint 6 Task N: <Title>`, on branch `swigerb-prompt-cache-efficiency-per-turn-tokens`, and opens one pull request, "Sprint 6: Prompt-cache efficiency & per-turn token breakdown", with `Closes #62`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
-Every task ships with its tests, listed under "Test specifications". A gh-ledger task is done only when `dotnet test` runs the whole suite, including its new cases, with 0 failed and 0 skipped. Task R's verification runs the action's PowerShell tests.
+All of this plan's code, tests, and docs are **copy exactly**. The architect built every task in a scratch worktree of `15003fb` outside this repository's worktree. Each task compiled with `TreatWarningsAsErrors` and passed the whole suite: 697, 721, 732, 734, 743, 749, 751, 768, 786, 801, and 804 tests after Tasks 1–11. The architect then applied this plan's blocks, task by task and in order, to a fresh copy of `15003fb`, and got the same files and the same counts. Copy each block character for character, including every comment line, `using` directive, blank line, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs.
 
-Most new code and docs in this plan are marked **copy exactly**. The architect built every task in scratch copies of both repositories: the code compiled with `TreatWarningsAsErrors`, `dotnet test` passed 671 tests after Task 5, and the action's PowerShell tests passed all 18 cases. Copy each block character for character, including every comment line, `using` directive, blank line, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs. Write every new file with `\n` line breaks and one `\n` at the end. An edited file keeps its byte order mark and its ending as they are. Of the files this plan edits, only the test project file has a byte order mark, and it has no line break at its end.
+Each task's specification lists its files, summarizes its contracts and algorithms for review, and then gives its code under "Code (copy exactly)". The summaries aren't code to write; the code section is. It has two kinds of blocks:
 
-Each test case lists every assertion it makes, most of them as code. Write all of them, in the order given. Don't drop one because it looks redundant, and don't turn an exact comparison into `Contains` or `StartsWith`. Never normalize the product's output in a test (no `ReplaceLineEndings`, `Replace("\r\n", …)`, or `Trim` on an actual value); `CliHarness` already turns `\r\n` into `\n` in `Out` and `Error`.
+- **New file `<path>`:** write the block as the whole file, with `\n` line breaks, one `\n` at the end, and no byte order mark.
+- **Edit k of m in `<path>`, replace: … with: …:** make a file's edits in the order given. Each "replace" block occurs exactly once in the file at the moment you make that edit, so search for it as an exact string. None of the files this sprint edits has a byte order mark; keep each file's line endings as they are.
 
-The final section, "Final step: end-to-end check and releases", isn't a builder task. It has no checkbox, and `ledger-builder` never runs it.
+Tests are code too: write every test file and test edit exactly as given, in the order given. Don't drop an assertion because it looks redundant, and don't turn an exact comparison into `Contains` or `StartsWith`. Never normalize the product's output in a test (no `ReplaceLineEndings`, `Replace("\r\n", …)`, or `Trim` on an actual value); `CliHarness` already turns `\r\n` into `\n` in `Out` and `Error`.
+
+If a block doesn't apply, the build fails, or the test count differs from the task's, stop and report it. Don't change the plan's code to make it fit.
+
+The final section, "Final step: the pull request", isn't a builder task. It has no checkbox, and `ledger-builder` never runs it.
 
 ## Tasks
 
-- [x] Task 1: Audit Fixes & Version 0.4.1 (CopilotLedger.Otlp, Core, Cli & tests). The daemon logs why it answers 503, at most once a minute (A1). Test reads and writes of fresh files wait out antivirus locks (A2). Dead members are removed (A5), the fake platform loses its default home directory (A10), and once a trip is recorded, the breaker finishes its flag file even if the request is cancelled (A11). The version becomes 0.4.1.
-- [x] Task 2: Workflow Hardening (CI & Release workflows). Pin every action to a full commit SHA (A7), pass matrix values to `run` scripts through the environment (A6), and make the Release workflow check that a changed `rates.json` comes with a later `ratesVersion` (A4). CI's smoke test also sends a real OTLP trace to the published binary and checks what it recorded.
-- [x] Task 3: User Guide with Tested Samples (docs & tests). Rewrite `docs/guide.md` as short scenarios, each with a goal, the exact commands, and sample output (A8). Add `GuideSamplesTests`, which runs every sample's command against a deterministic example ledger and checks that the output is exactly what the guide shows.
-- [x] Task 4: Documentation Sweep (README & docs). Rewrite `README.md`, `docs/cli.md`, and `docs/releasing.md`, and edit `docs/configuration.md`, so the docs are accurate and concise, say each thing once, and follow one naming rule for `gh ledger` and `gh-ledger`. Covers A3 (the extension's binary path for MCP), A4 (the `ratesVersion` release step), A9 (the data files table), and how to update pinned actions.
-- [x] Task 5: Use the Action Repository (action/, workflows & docs). After Task R merges, delete `action/` and `docs/action.md`, drop CI's action-test step, and point `receipt.yml` at `swigerb/copilot-ledger-action`, pinned to the merged commit.
+- [x] Task 1: Cache Counter States (CopilotLedger.Core, Otlp & tests). New `CacheCounterState` and `CacheMetrics`. `NormalizedGenAiSpan` gains `CacheReadState` and `CacheWriteState`, and `GenAiSpanNormalizer` records whether each cache counter was present, with token values unchanged. `TestSpans.Chat` marks a nonzero counter as reported, so existing fixtures stay valid.
+- [x] Task 2: Pull Request Numbers from Git Config (CopilotLedger.Core & tests). `GitWorkspaceContext` gains an init-only `PullRequestNumber`, which `FileSystemGitContextResolver` reads from an explicit `[branch "<current>"] merge = refs/pull/<n>/head` in the repository's config and from nowhere else. `GitFixture.Create` can write that config.
+- [x] Task 3: Ledger Schema Version 4 (CopilotLedger.Storage & tests). Migration v4 adds the two cache-state columns, `pull_request_number`, `agent_span_id`, and an index on conversation and start time; upgrades legacy rows whose nonzero counters prove they were reported; and fills `agent_span_id` from the span links not yet pruned. `RecordAsync` writes and validates the new columns, and `BackfillFromAgentSpansAsync` records each span's nearest `invoke_agent` ancestor.
+- [x] Task 4: Cache Coverage in Rollups (CopilotLedger.Storage, Cli, Mcp & tests). `LedgerFilter` gains `PullRequestNumber` and `Agent`, which every filtered query honors through one shared SQL fragment. `LedgerRollupRow` gains the sums over spans that reported cache usage, `CacheUnreportedSpanCount`, and an exact `decimal?` `CacheHitRatio`.
+- [x] Task 5: Cache-Efficiency Query (CopilotLedger.Storage & tests). New `CacheEfficiencyRow`, `LedgerGrouping.PullRequest`, and `SqliteLedgerStore.GetCacheEfficiencyAsync`, which groups spans by model, agent, repository, branch, or pull request.
+- [x] Task 6: Turn Breakdown and Context-Bloat Queries (CopilotLedger.Storage & tests). New `TurnSelector`, `TurnTokenRow`, `BloatChainRow`, `InputGrowthRow`, and `ContextBloatReport`; `GetTurnBreakdownAsync` lists one trace's or conversation's requests with input growth per agent invocation and model, and `GetContextBloatAsync` ranks prompt chains by uncached input, estimated uncached input, and input growth.
+- [x] Task 7: Cache Hit in status, branch, and agents (CopilotLedger.Cli, docs & tests). Plain `status` adds a cache table for its three periods and a `cache` object to each JSON period, and `branch --json` and `agents --json` rows add `cacheReportedSpans`, `cacheUnreportedSpans`, and `cacheHitRatio`. The guide's two `status` samples change to match.
+- [x] Task 8: status --cache (CopilotLedger.Cli & tests). `gh ledger status --cache [--by model|branch|pr|agent] [--repo <key>] [--branch <name>] [--pr <n>] [--since <period>] [--json]`, with `n/a` for unknown values, `*` on partial totals, and a footnote that counts the spans without cache counters.
+- [x] Task 9: status --cache --turns and --bloat (CopilotLedger.Cli & tests). The per-request breakdown of one trace or conversation, and the context-bloat rankings, as tables and JSON, with their option rules.
+- [x] Task 10: MCP get_cache_efficiency (CopilotLedger.Storage, Cli, Mcp, docs & tests). A fifth MCP tool, read-only. `get_branch_ledger` and `get_agent_breakdown` add `uncachedInputTokens`, `cacheReportedSpans`, and `cacheHitRatio`. The `--since` grammar moves to a shared `LedgerPeriod`.
+- [x] Task 11: Docs and the Context-Bloat Walkthrough (docs & tests). `docs/cli.md` documents prompt-cache efficiency, `docs/configuration.md` explains how requests without cache counters are priced and reported, and `docs/guide.md` gains a tested "Find context bloat" walkthrough.
+- [x] Task 12: Document Unreported Cache Misses (docs). Review fix: `docs/cli.md` and `docs/configuration.md` explain that a cache miss that writes nothing to the cache sends no cache counters, so it's left out of `Hit %`, which is then too high for a model whose provider reports cache reads but never cache writes (the bias D1 leaves).
 
-### Parallel task in swigerb/copilot-ledger-action
-
-- Task R: The Action Repository. Fill swigerb/copilot-ledger-action with a Marketplace-ready root `action.yml`, `receipt.ps1`, `tests/receipt.Tests.ps1`, a `README.md` that documents the action, and a CI workflow that runs the tests on `ubuntu-latest` and `windows-latest`. It runs in that repository, in parallel with Tasks 1–4. It has no checkbox, so `ledger-builder` in this repository never picks it up.
-
-A12, the Sprint 1 archive's missing amendments section, isn't a builder task. The architect added it in this plan's pull request, along with the Sprint 4 archive.
 ## Starting point
 
-- Sprint 4 is complete. Tasks 1–5 merged in PRs #41, #42, #43, #45, and #46, all on the first pass and byte-exact with the plan (`main` at `3a0a514`). `dotnet test CopilotLedger.slnx` passes 649 tests (0 failed, 0 skipped), the action's PowerShell tests pass 18 cases, and CI is green on `ubuntu-latest` and `windows-latest` (run 44922053265). Sprint 4's plan is archived at `.github/plans/archive/sprint-4.md`; its amendments section records none.
-- gh-ledger v0.4.0 is released: tag `v0.4.0` at `3a0a514`, published 2026-11-21 by the Release workflow run for the tag push (44938942680), after a manual dry run (44938792097), with all eight assets. So `gh extension install swigerb/gh-ledger` works, `rates update` finds a `rates.json`, and `swigerb/gh-ledger/action@v0.4.0` keeps working, because tags don't move. The docs stop showing it.
-- The architect's audit of `3a0a514` found A1–A12 and no blockers, and the orchestrator accepted all twelve. Tasks 1–4 fix A1–A11; this plan's pull request fixes A12.
-- swigerb/copilot-ledger-action exists. It's public, and its default branch `main` is at `c18a67b` ("Initial commit"), with GitHub's `README.md` stub and an MIT `LICENSE` ("Copyright (c) 2026 Brian Swiger").
-- Merged behavior this plan depends on (read from the code at `3a0a514`):
-  - `OtlpReceiverApp.Build(options, ingestor, configureWebHost)` maps `/v1/traces`, `/v1/metrics`, and `/v1/logs` to `HandleAsync`. When `IngestAsync` throws anything but a cancellation of the request, a bare `catch` answers 503 with `Retry-After: 5` and `The ledger is unavailable; retry later.`, and nothing is logged (A1).
-  - `DaemonHost.RunAsync` writes log lines as `{TimeProvider.GetUtcNow():O} {message}` through its private `WriteLog(writer, context, message)`. It builds the receiver after the ingestor, then runs `EnqueuePendingAsync` and `StartAsync`, then writes `daemon.json` and logs `gh-ledger <version> daemon listening on http://localhost:<port> (pid <pid>); ledger <path>`.
-  - `CircuitBreakerMonitor.EvaluateAsync` calls `CircuitFlagFile.SyncAsync(_store, trip.RepositoryRoot)` without its `cancellationToken`, and nothing says whether that's deliberate (A11). `SyncAsync` deletes its temporary file only when the write or move throws `IOException` or `UnauthorizedAccessException`.
-  - Nothing in `src/` or `tests/` calls `JsonRateCardCalculator.LoadDefault()`, `LedgerPaths.DefaultDatabasePath`, or `LedgerPaths.DefaultRatesOverlayPath` (A5). `LedgerPaths.DataDirectory` is used.
-  - `FakeCliPlatform.HomeDirectory` defaults to `/home/test`, so a macOS or Linux `install` test that forgot to set it would write under a real `/home/test` (A10). Every current test that needs it sets it.
-  - `FileRetry` has `ReadAllTextAsync` and `ReadAllBytesAsync`, which retry an `IOException` every 25 ms for up to 10 seconds. 25 test reads of files the product just wrote call `File.Read*` directly, and `GitFixture.Create` doesn't wait out a lock on the `.git` files it writes (A2).
-  - The version, `0.4.0`, is written in the Cli project's `<Version>`, the `GhLedgerCli` comment and fallback, CI's smoke test, DM1, and `ReportCommandTests.StatusText`.
-  - As the installed extension, `install` prints `gh ledger runs this GitHub CLI extension, so no alias is needed.`, `status` shows `(GitHub CLI extension)`, and `rates update` names `gh ledger` commands. Every other message says `gh-ledger <command>`.
-  - `agents` and `top-prompts` report every repository unless `--repo` is given; only `branch` defaults to the current repository. The current `docs/guide.md` says "Run reports from the repository you want to inspect", which misleads.
-  - `CliHarness` runs commands in-process with `FakeCliPlatform`, and has `RunAsync`, `RunInAsync`, `RunWithHttpAsync`, `StartInProcessDaemonAsync`, `CreateDaemonClient`, `InProcessDaemon`, and `DaemonOutput`. `DaemonCommands.StartAsync` and `StopAsync` measure their timeouts with `context.TimeProvider`, so under a `ManualTimeProvider` that nobody advances they wait until `daemon.json` appears or the daemon's lock is released, however long that takes.
-  - The three workflows use `actions/*@vN` tags. `ci.yml` writes `${{ matrix.rid }}` into a `run` script (A6), and its smoke test starts the published binary's daemon but sends it no telemetry. `receipt.yml` checks out the repository and runs `./action`.
-- Sprint 4's public contracts are fixed. Sprint 5 changes only these existing artifacts, each called out in its task:
-  - Task 1: `OtlpReceiverApp.Build` (one optional parameter) and `HandleAsync`, `DaemonHost`, `CircuitBreakerMonitor`, `CircuitFlagFile.SyncAsync`, `JsonRateCardCalculator` and `LedgerPaths` (removals), the Cli project file and `GhLedgerCli` (version), `.github/workflows/ci.yml` (version), `FileRetry`, `GitFixture`, `FakeCliPlatform`, and the tests its section lists;
-  - Task 2: `.github/workflows/ci.yml`, `release.yml`, and `receipt.yml`;
-  - Task 3: `docs/guide.md`, `FileRetry`, and the test project file;
-  - Task 4: `README.md`, `docs/cli.md`, `docs/configuration.md`, and `docs/releasing.md`;
-  - Task 5: `.github/workflows/ci.yml` and `receipt.yml`, a comment in `ReceiptMarkdown`, and `docs/releasing.md`. It deletes `action/` and `docs/action.md`.
-- Removing `LoadDefault()`, `DefaultDatabasePath`, and `DefaultRatesOverlayPath` removes public API that nothing uses. The orchestrator chose removal over `[Obsolete]`.
-- The test project uses xUnit v2 (`xunit` 2.9.3), and tests use only public APIs, with no `InternalsVisibleTo`.
-## Verified facts (retrieved 2026-11-21)
+- Sprint 5 is complete. Tasks 1–5 merged in PRs #53, #54, #55, #56, and #59, plus the out-of-plan DM6 fix in PR #58 (`main` at `15003fb`). gh-ledger v0.4.1 is released at `15003fb`. On 2026-11-23, at `15003fb`, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors and `dotnet test CopilotLedger.slnx` passes 671 tests (0 failed, 0 skipped), with SDK 10.0.115 (`global.json` asks for 10.0.100 with `rollForward: latestFeature`). Sprint 5's plan is archived at `.github/plans/archive/sprint-5.md`, with its amendments.
+- Issue #62 is the requirements source. Its "Prescriptive Implementation Plan" and acceptance criteria are implemented here, with the deviations listed under "Design decisions"; its names are proposals.
+- Merged behavior this plan depends on (read from the code at `15003fb`):
+  - **Normalizer.** `GenAiSpanNormalizer.TryNormalize` reads `gen_ai.usage.input_tokens`, `output_tokens`, `cache_read.input_tokens`, and `cache_write.input_tokens` (or the legacy `cache_creation.input_tokens` when `cache_write` is absent) through `TryToken` (line 247), which returns 0 for a missing attribute. When cache reads plus cache writes exceed input, it adds them to input (lines 121–127). Only `chat`, `text_completion`, and `generate_content` spans become `NormalizedGenAiSpan`s; every span with an operation name, and every span from a Copilot resource, becomes a `GenAiSpanLink`. So `invoke_agent` and `execute_tool` spans are never rows of `spans`.
+  - **Span contract.** `NormalizedGenAiSpan` has `long CacheReadInputTokens` and `long CacheWriteInputTokens` and nothing that says whether they were reported.
+  - **Pricing.** `JsonRateCardCalculator` prices input less cache reads and cache writes at `inputPer1M`, cache reads at `cachedInputPer1M`, and cache writes at `cacheWritePer1M` (each falling back to `inputPer1M`), and returns `invalid_usage` when a cache counter exceeds what's left of input. This sprint doesn't change pricing.
+  - **Schema.** `LedgerMigrations.All` has versions 1–3. `spans.cache_read_input_tokens` and `cache_write_input_tokens` are `INTEGER NOT NULL` (version 1). `InitializeAsync` runs each pending migration in its own transaction and then sets `user_version`.
+  - **Ingestion and lineage.** `LedgerIngestor.IngestAsync` records a batch's entries, then its span links, then calls `BackfillFromAgentSpansAsync` for every trace in the batch, then the breaker. `BackfillFromAgentSpansAsync` copies each `invoke_agent` link's agent name and conversation ID onto the `spans` rows below it, without crossing a nested `invoke_agent`, and skips an agent link that has neither. `DaemonHost` deletes span links that started more than 7 days ago (`PruneSpanLinksAsync`, lines 90–93 and 165–171), so lineage kept only in `span_links` disappears. Copilot exports spans as they end, so a request's `chat` span usually arrives before its `invoke_agent` ancestor.
+  - **Git.** `GitWorkspaceContext` is a positional record with six parameters, constructed in product code and tests. `FileSystemGitContextResolver.Resolve` reads `HEAD`, the branch's ref, and `<commonDir>/config` without running `git`; `ReadOriginUrl` keeps the first `[remote "origin"] url`. `CachingGitContextResolver` caches each working directory's result for 5 seconds.
+  - **Queries.** `LedgerFilter` has `From`, `To`, `Repository`, and `Branch`. `LedgerGrouping` has `Repository`, `Branch`, `Model`, `Agent`, and `ChannelModel`. `LedgerRollupRow` has token sums and money, and no ratio or coverage. `GetRollupAsync`, both queries of `GetTopPromptChainsAsync`, and `GetPromptCountAsync` each repeat the four filter conditions.
+  - **CLI.** `status` takes only `--json` and shows the daemon, ledger, rates, Copilot's export setting, warnings, and one table of spend for today and the last 7 and 30 days. `branch`, `agents`, and `top-prompts` take `--repo`, `--since` (`SinceOption`, parsed by `Period.TryParse`), and `--json`. JSON rows are written by `LedgerFormat.WriteTotals`, which receipts use too.
+  - **MCP.** `gh ledger mcp` serves four tools, `get_branch_ledger`, `get_top_expensive_prompts`, `get_agent_breakdown`, and `set_branch_budget`, with hand-written schemas and allowed-argument lists, and starts each result's text with a `WARNING:` line for each open breaker trip or exceeded budget.
+  - **Tests.** xUnit v2 (`xunit` 2.9.3); tests use only public APIs, with no `InternalsVisibleTo`. `TestSpans.Chat`, `LedgerSeeds`, `GuideWorld`, `ReceiptSeeds`, `OtlpFixtures`, `CopilotTraces`, and tests that build spans inline give spans nonzero cache counters. `GuideSamplesTests` runs every `docs/guide.md` sample against `GuideWorld`; `ReportCommandTests.StatusText` and the MCP tests (`LedgerMcpServerTests`, through `McpTestHarness`) pin exact output. `GitFixture.Create` writes a repository on branch `feature/ledger` with an `origin` of `https://github.com/swigerb/copilot-ledger.git`.
+  - **CI.** `.github/workflows/ci.yml` builds and tests on `ubuntu-latest` and `windows-latest`, then smoke-tests the published binary: it sends one trace without cache counters and greps the output of `branch --all-repos --since all --json` for `"spans": 1,` and `"aiCredits": 50,`, runs `status`, and checks that the MCP `tools/list` includes `get_branch_ledger`. This sprint keeps all of that passing: new JSON fields come after `localSavedUsd`, so neither grepped property becomes the last one of its object.
 
-### GitHub Marketplace and action metadata
+## Verified facts (retrieved 2026-11-23)
 
-Sources: GitHub Docs, [Publishing actions in GitHub Marketplace](https://docs.github.com/en/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace), [Metadata syntax reference](https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax#branding), and [Managing custom actions](https://docs.github.com/en/actions/how-tos/create-and-publish-actions/manage-custom-actions); a GitHub Marketplace search.
+### OpenTelemetry GenAI semantic conventions
 
-- Marketplace publishes an action without review when its repository is public and has a single action metadata file (`action.yml` or `action.yaml`) at the root. Metadata files in subfolders are allowed but aren't listed. The `name` must be unique: it can't match an action already in Marketplace, a GitHub user or organization (unless that owner publishes it), or a Marketplace category, and GitHub reserves the names of its features.
-- To list a release, the repository owner accepts the GitHub Marketplace Developer Agreement (until then the checkbox is disabled), selects **Publish this Action to the GitHub Marketplace** on the release, and picks a primary category. Publishing requires two-factor authentication. An existing release has the same checkbox when it's edited.
-- `branding.color` is one of `white`, `black`, `yellow`, `blue`, `green`, `orange`, `red`, `purple`, or `gray-dark`. `branding.icon` names a Feather v4.28.0 icon; `dollar-sign` is on the supported list.
-- Searching Marketplace for "CopilotLedger" found no actions, and `https://github.com/marketplace/actions/copilotledger-pr-receipt` and `https://github.com/marketplace/actions/copilot-ledger-pr-receipt` returned 404.
-- GitHub's release management guidance for actions is semantic version tags plus a major version tag, such as `v1`, that the maintainer moves to each compatible release. Users reference the major tag, or a full commit SHA for the most stability.
+Source: `docs/gen-ai/client-inference.md` in [open-telemetry/semantic-conventions-genai](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/client-inference.md) (`main`, where the GenAI conventions now live; status Development).
 
-### Pinning actions
+- `gen_ai.usage.cache_read.input_tokens` is "the number of input tokens served from a provider-managed cache" and `gen_ai.usage.cache_write.input_tokens` "the number of input tokens written to a provider-managed cache". Both have the requirement level **"Recommended: When available and non-zero"**, so an instrumentation that follows the conventions leaves a zero counter out.
+- Notes [23] and [24]: each cache counter's value "SHOULD be included in `gen_ai.usage.input_tokens`". Note [28]: `gen_ai.usage.input_tokens` "SHOULD include cached tokens and input tokens of all modalities". So uncached input is `input_tokens − cache_read − cache_write`, which the ledger already assumes.
+- The conventions no longer define `gen_ai.usage.cache_creation.input_tokens`; the ledger keeps reading it as the legacy name of `cache_write` (`GenAiAttributeNames.LegacyCacheCreationInputTokens`).
 
-Sources: GitHub Docs, [Secure use reference](https://docs.github.com/en/actions/reference/security/secure-use#using-third-party-actions) and [Locking action dependencies in a repository's workflows](https://docs.github.com/en/actions/how-tos/secure-your-work/lock-workflow-dependencies); `gh release view` and `gh api repos/<owner>/<repo>/commits/<tag>` with gh 2.103.3.
+### GitHub Copilot's OpenTelemetry reference
 
-- Pinning an action to a full-length commit SHA means a backdoor would need a SHA-1 collision. A tag "can be moved or deleted if a bad actor gains access to the repository storing the action".
-- The same page now calls a workflow dependency lockfile "the strongest protection available", which "supersedes SHA pinning for repositories that adopt it". The lockfile is generated by the `github/gh-actions-lock` gh extension, which also rewrites `uses:` lines, and GitHub recommends letting Dependabot keep it current. This plan pins SHAs, as the orchestrator decided; lockfiles are deferred.
-- The latest release of each action this repository uses, and the commit its tag points to. Each action's major tag (`v7`, `v6`, `v7`, `v8`) points to the same commit.
+Source: [OpenTelemetry reference](https://docs.github.com/en/copilot/reference/enterprise-administrators/opentelemetry-reference) (GitHub Docs), which covers Copilot CLI, the GitHub Copilot app, and VS Code sessions using Agent Host.
 
-  | Action | Release | Commit |
-  |---|---|---|
-  | `actions/checkout` | v7.0.1 | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
-  | `actions/setup-dotnet` | v6.1.0 | `0f4a354dd5547a28c70b7853dbd95d5b67886e73` |
-  | `actions/upload-artifact` | v7.0.2 | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
-  | `actions/download-artifact` | v8.0.2 | `9000827ccba6bdab643e8b6fd33ac0654aef8333` |
+- Each agent interaction is a span tree: an `invoke_agent` root with `chat` and `execute_tool` children. "Subagent invocations are linked into the same trace by context propagation," and a subagent has its own `invoke_agent` span.
+- A `chat` span is "one span per LLM request" and carries `gen_ai.usage.cache_write.input_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.input_tokens` ("input tokens this turn"), `gen_ai.usage.output_tokens`, `github.copilot.turn_id`, `github.copilot.interaction_id`, and `github.copilot.request.type`, which is `compaction` on conversation-compaction requests. `invoke_agent` spans carry totals over all of their turns.
+- The page doesn't say when the cache attributes are left out. [Monitor agent usage with OpenTelemetry](https://code.visualstudio.com/docs/agents/guides/monitoring-agents) (VS Code docs), for VS Code's Local agent harness, lists `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_creation.input_tokens` on `chat` spans, each "when available".
 
-- `gh release view --repo <owner>/<repo> --json tagName --jq .tagName` prints the latest release's tag, and `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha` prints the commit the tag points to, following an annotated tag to its commit. Run together, they reproduced all four commits above; `docs/releasing.md` documents them for updating pins.
+### What Copilot CLI sends (Sprint 2's live capture)
 
-### Runner images and GitHub CLI
+Source: `.github/plans/archive/sprint-2.md`, "Live capture" (Copilot CLI 1.0.112, 2026-11-20).
 
-Sources: actions/runner-images [`Ubuntu2404-Readme.md`](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md) (image 20261116.376.1), [`Ubuntu2604-Readme.md`](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2604-Readme.md) (image 20261116.202.1), and [issue #14748](https://github.com/actions/runner-images/issues/14748); `gh release download --help` (gh 2.103.3).
+- On `chat` spans, `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_write.input_tokens` "appeared only when non-zero". The recorded fixture `CopilotTraces.TraceBA` shows it: its first request (span `00f067aa0ba902bb`) has a cache write of 3,662 tokens and no cache-read attribute, the next has both, and the third has only a cache read.
+- The default agent's `invoke_agent` span has no `gen_ai.agent.name`; a subagent's `invoke_agent` span has one and is a child of an `execute_tool task` span. `chat` spans arrive before their `invoke_agent` ancestors.
 
-- `ubuntu-latest` moves from Ubuntu 24.04 to Ubuntu 26.04 during November 2026. Both images have jq (1.7.1 and 1.8.1), GitHub CLI 2.104.0, PowerShell 7.6.10, curl, and .NET SDK 10.0.x, so Task 2's workflows run on either.
-- Without a tag argument, `gh release download` downloads assets from the latest release and requires `--pattern` or `--archive`. It fails when no asset matches.
-- The latest gh-ledger release is v0.4.0. Its `rates.json` asset is the embedded `rates.json` at `3a0a514`, whose `ratesVersion` is `2026-11-20`.
+### `gh pr checkout` and `.git/config`
 
-### Upgrading the extension while gh-ledger runs
+Source: `pkg/cmd/pr/checkout/checkout.go` in [cli/cli at v2.105.0](https://github.com/cli/cli/blob/v2.105.0/pkg/cmd/pr/checkout/checkout.go), the latest release (2026-11-18); v2.103.3 has the same logic.
 
-Sources: cli/cli v2.103.3 [`pkg/cmd/extension/manager.go`](https://github.com/cli/cli/blob/v2.103.3/pkg/cmd/extension/manager.go) and [`http.go`](https://github.com/cli/cli/blob/v2.103.3/pkg/cmd/extension/http.go); the MCP specification, [Transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#stdio); `copilot mcp --help` (Copilot CLI 1.0.112); a probe on Windows 11 ARM64.
+- When the pull request's head repository is already a local remote (for example, a branch of the same repository), `gh pr checkout` runs `git checkout -b <branch> --track <remote>/<head>`, so the branch's `merge` is `refs/heads/<head>`.
+- Otherwise (`cmdsForMissingRemote`: typically a fork with no local remote, or a deleted head repository), it fetches `refs/pull/<n>/head` from the base repository and, when the branch has no `merge` setting yet, writes `branch.<branch>.remote`, `branch.<branch>.pushRemote`, and `branch.<branch>.merge`. The `merge` value is `refs/pull/<n>/head`, unless the maintainer can modify the pull request and its head repository exists; then it's `refs/heads/<head>` on the head repository's URL.
+- `--detach` checks out `FETCH_HEAD` with a detached `HEAD` and writes no branch settings.
+- So `[branch "<b>"] merge = refs/pull/<n>/head` establishes the pull request number when it's there, and many pull request checkouts don't have it. That's the only source this sprint reads.
 
-- `gh extension upgrade` of a binary extension calls `installBin`, which downloads the new asset straight to `<data>/extensions/gh-ledger/gh-ledger[.exe]` with `downloadAsset`, opening that file with `O_CREATE|O_WRONLY|O_TRUNC` (`http.go`, line 95). `gh extension remove` calls `os.RemoveAll` on the extension's directory.
-- In MCP's stdio transport, "the client launches the MCP server as a subprocess" and ends it by closing its standard input. So each Copilot session that loads the `ledger` server keeps a `gh-ledger mcp` process running until the session ends.
-- **Probe.** While a `gh-ledger mcp` process ran (started with redirected standard input, in a temporary `COPILOT_LEDGER_HOME`), opening its executable for writing failed with "The process cannot access the file … because it is being used by another process." After its standard input was closed, the server exited with code 0, and the same open succeeded. Sprint 4 found the same for the daemon. So on Windows, `gh extension upgrade` and `gh extension remove` fail while the daemon or any Copilot session's MCP server runs the extension's binary.
-- `copilot mcp` has the subcommands `list`, `get`, `add`, `remove`, `enable`, and `disable`. `copilot mcp remove <name>` removes a server from the user configuration, `~/.copilot/mcp-config.json`. `copilot mcp add <name> -- <command> [args...]` adds a local (stdio) server, as the docs show.
+### .NET, SQLite, and System.CommandLine (probed in the scratch build)
 
-### GitHub Markdown
-
-Source: GitHub's REST API, `POST /markdown` with `"mode": "gfm"`.
-
-- Task 3's guide shows the sample receipt quoted with `> ` on every line. GitHub rendered it as a `<blockquote>` with the receipt's heading and list, then a collapsed `<details>` holding the table and the JSON code block, the same structure as the pull request comment. The receipt's first line, the `<!-- copilot-ledger-receipt -->` marker, renders as nothing.
-
-### gh-ledger probes
-
-Probes ran on Windows 11 ARM64 with .NET SDK 10.0.404, PowerShell 7.6, and the MSYS `sh` (bash 5.3), `curl`, `grep`, and `tr` that ship with the Copilot app's Git.
-
-- **The CI ingestion smoke (Task 2).** A `win-arm64` single-file publish of the scratch code, with a temporary `COPILOT_LEDGER_HOME`, ran Task 2's whole bash smoke step under MSYS `sh` on port 54318 (with a stand-in for `sleep`, which that `sh` lacks). It exited 0. The POST returned `{}`, and `branch --all-repos --since all --json` listed one row, `(none)` / `(none)`, with `"spans": 1,` and `"aiCredits": 50,`. 50 AI credits is `(100,000 × 4 + 5,000 × 20) / 1,000,000 = 0.50` USD at `claude-opus-5.5`'s $4 input and $20 output per 1M tokens, below the breaker's 150-credit velocity rule: `breaker status` printed `Circuit breaker: closed`, `daemon.log` had no `ALERT` line, and no `alert-toast.xml` was written. The first version of the trace, 600 credits on one prompt, tripped the breaker and showed a toast on the reviewer's machine. `1795219200000000000` ns is 2026-11-21T00:00:00Z.
-- **The Release workflow's rates check (Task 2).** The `rates` job's script ran locally under MSYS `sh`, downloading the real v0.4.0 `rates.json` with `gh`. An unchanged file printed `rates.json is unchanged since the latest release (2026-11-20).` and exited 0. A changed file with `ratesVersion` `2026-11-21` printed `rates.json changed since the latest release; ratesVersion moves from 2026-11-20 to 2026-11-21.` and exited 0. A changed file that kept `2026-11-20` printed `::error::rates.json changed since the latest release, but its ratesVersion 2026-11-20 isn't later than 2026-11-20. Set ratesVersion to the date of the change.` and exited 1. Against a repository with no release (swigerb/copilot-ledger-action), `gh` printed `release not found`, and the job printed `Skipping the check: no rates.json was downloaded from the latest release.` and exited 0. `jq` isn't installed on the architect's machine, so a PowerShell stand-in replaced it (see "Assumptions").
-- **A1.** After `DROP TABLE spans;` on a running daemon's ledger, every `POST /v1/traces` fails inside `RecordAsync` with `SqliteException: SQLite Error 1: 'no such table: spans'.` and gets 503 (DM7 runs exactly this). At `3a0a514` the receiver's bare `catch` writes nothing, so `daemon.log` gives no sign that spans aren't being recorded.
-- **The guide's stand-in daemon (Task 3).** An earlier `GuideWorld` whose stand-in daemon deleted `daemon.json` and `daemon.stop` with `File.Delete` before releasing its lock hung 2 of 11 test runs. The blame collector's hang dump named `GS2_CommandSamplesShowTheirOutput(id: "daemon-stop")`: under the manual clock, `daemon stop` waits until the lock is released, and a delete that throws (an antivirus scan of the just-written `daemon.stop`, the issue #30 pattern) left the lock held forever. With Task 3's `GuideWorld`, which deletes through `FileRetry.Delete`, releases the lock in `finally`, and gives each start its own lock and stop token, 30 of 30 runs passed.
-- **Line endings.** All 168 files in the index at `3a0a514` are stored with LF line endings, and the repository has no `.gitattributes`.
+- `Microsoft.Data.Sqlite` 10.0.15 (the bundled SQLite) supports window functions (`LAG`, `FIRST_VALUE`, `ROW_NUMBER`), `UPDATE … FROM`, recursive CTEs in `UPDATE`, and `ALTER TABLE … DROP COLUMN` on a column with its own `CHECK`. A pooled connection keeps the schema it loaded, so a test that changes the schema and initializes again calls `SqliteConnection.ClearAllPools()` first, as SL8 already does.
+- `decimal` division of two `long`s gives up to 28 significant digits, rounding the last half away from zero; for example `(decimal)3662 / 7429` is `0.4929331000134607618791223583`, and `(decimal)160000 / 3` is `53333.333333333333333333333333`. `decimal.ToString(CultureInfo.InvariantCulture)` writes every digit, which `Utf8JsonWriter.WriteRawValue` and `JsonNode.Parse` keep.
+- In System.CommandLine 2.0.15, `result.GetResult(option) is { Implicit: false }` is true only for an option the user typed; `Option.Name` includes its `--`. A command validator's error goes to standard error with exit code 1, and the command's help is written to standard output.
+- The CLI project sets `<InvariantGlobalization>true</InvariantGlobalization>`, but the test host has culture data, so a test can set `CultureInfo.CurrentCulture` to `de-DE`.
 
 ### Assumptions (not verified)
 
-- **The rates check on a runner.** The `rates` job's `jq -S .` hasn't run: the local check used a PowerShell stand-in (`ConvertFrom-Json`, then `ConvertTo-Json -Compress`). jq 1.7 and later keep number literals as written, so two files that differ only in how a number is written count as changed, which only asks for a later `ratesVersion`. The orchestrator's manual Release run in Task 2's verification runs the job for real.
-- **The ingestion smoke on the runners.** It ran under bash on Windows ARM64 only; `ubuntu-latest` and `windows-latest` first run it in Task 2's CI.
-- **Upgrading on macOS and Linux while gh-ledger runs** wasn't tested (carried from Sprint 4). The docs give every platform the same steps: stop the daemon and close the Copilot sessions and apps that use the MCP server first. That's needed on Windows and harmless elsewhere.
-- **The new tests on Linux.** DM7 and `GuideSamplesTests` ran on Windows. They use only the fake platform, in-memory hosting, and temporary directories, like the Sprint 4 tests that pass on `ubuntu-latest`, and `GuideWorld` builds every shown path from Windows-style strings that don't depend on the OS. They first run on Linux in Task 1's and Task 3's CI.
-- **The Marketplace name** is checked again when the release is published. "CopilotLedger PR Receipt" was free on 2026-11-21.
-- **`@v1` before it exists.** The docs show `uses: swigerb/copilot-ledger-action@v1` from Task 3 on, but `v1` exists only after the orchestrator's release (see "Final step"). Until then, the action repository's README and gh-ledger's docs describe a version that can't be used yet.
+- **Copilot leaves out a zero cache counter on every client.** Verified for Copilot CLI 1.0.112 (Sprint 2) and stated by the conventions; not captured again this sprint (Copilot CLI 1.0.103 is installed here), and not captured for the GitHub Copilot app or VS Code. The design below depends on it; see "Cache usage is per span".
+- **`github.copilot.turn_id` groups a user turn's requests.** The reference names the attribute without defining it, so this sprint treats each `chat` span as one turn and doesn't read `turn_id`. See "Deferred".
+
 ## Design decisions
 
-### Logging ingestion failures (Task 1, A1)
+### Cache usage is per span (deviation D1)
 
-- **The receiver reports and the daemon logs.** `OtlpReceiverApp.Build` gains an optional fourth parameter, `Action<Exception>? ingestFailed`. `HandleAsync` calls it with each exception that turns a request into a 503, just before it writes the response; a cancelled request still returns silently, as before. The Otlp project stays free of logging, and existing callers compile unchanged.
-- **At most once a minute.** The daemon passes `IngestFailureLog.Report`, which writes `Warning: could not record spans: <exception type>: <message>` through the daemon's `WriteLog` for the first failure, then at most once every minute, measured with `context.TimeProvider`. A ledger that stays unavailable (a full disk, or a locked or damaged database) gets one line a minute while Copilot keeps retrying, instead of one line per request. A line that can't be written (`IOException` or `ObjectDisposedException`) is dropped, so logging can never turn a 503 into a crash.
-- **A clock that steps back.** The interval uses the wall clock, the same clock as the log's timestamps. When the clock is earlier than the last line's time, for example after a time sync, the next failure is written at once instead of being held back until the old time plus a minute. Rejected: `TimeProvider.GetTimestamp`, which is monotonic, because the tests' `ManualTimeProvider` doesn't drive it and the log lines show wall-clock time anyway.
-- **Nothing from the request is logged**, only the exception's type and message. The ingestor never holds prompt or response content.
-- **Rejected:** `ILogger` (the daemon has no logging pipeline; its log is `WriteLog`), and logging inside the Otlp project, which has no log writer.
+Each span records two states, one per counter, exactly as the issue asks: `Reported` when the attribute was present (even with value 0), `Absent` when it wasn't, and `LegacyUnknown` for rows recorded before schema version 4. The token columns stay `INTEGER NOT NULL`, and an absent counter is still stored as 0, so pricing, rollups, and receipts don't change.
 
-### Test hygiene (Task 1, A2, A5, A10, A11)
+The metrics need one rule for whether a span's cache usage is known. The issue's rule is per counter: the hit ratio covers spans whose cache *read* was reported, and observed uncached input needs *both* counters. That rule can't work with what Copilot sends. The conventions make both counters "Recommended: When available and non-zero", and Copilot CLI sent each one only when it wasn't zero (see "Verified facts"). So a request that missed the cache never reports a cache read, and under the issue's rule every miss would drop out of the hit ratio: the ratio would describe only the requests that hit, and a real 0% could never appear. In the recorded `CopilotTraces.TraceBA`, the `explore` subagent's two requests read 3,662 of 7,429 input tokens (49.3%), but the issue's rule would report 97.3%, from the second request alone. And because a request rarely both reads and writes, observed uncached input would be unknown for most requests.
 
-- **Fresh files.** Every test read of a file the product just wrote goes through `FileRetry`: 25 lines in five test files. `GitFixture.Create` reads back the three `.git` files it wrote through a new synchronous `FileRetry.ReadAllText`, because `GitFixture` is synchronous and its callers are many. This is the issue #30 pattern: Windows antivirus briefly locks new files.
-- **Dead members are removed** (A5): `JsonRateCardCalculator.LoadDefault()`, `LedgerPaths.DefaultDatabasePath`, and `LedgerPaths.DefaultRatesOverlayPath`. They'd bypass `COPILOT_LEDGER_HOME` and `rates.downloaded.json` if anyone used them.
-- **No default home** (A10). `FakeCliPlatform.HomeDirectory` throws `InvalidOperationException` until a test sets it, so a test that forgets can't write a profile or sign-in item outside its `TempDirectory`. All 649 existing tests still pass, so none relied on the default.
-- **The flag file always finishes** (A11, the orchestrator's decision). `CircuitBreakerMonitor` calls `CircuitFlagFile.SyncAsync` with `CancellationToken.None` on purpose, and a comment says why. By then the trip is committed and its alert published. If a client disconnect cancelled the sync, the flag file would stay unwritten, with nothing logged and no retry. `SyncAsync` now deletes its temporary file whatever the write or move throws, not only `IOException` and `UnauthorizedAccessException`, so a cancelled `breaker reset` or `breaker config --flag-file` leaves no `CIRCUIT_OPEN.<guid>.tmp` behind.
+So this plan uses one rule per span, in two places that must agree: `CacheMetrics.IsReported` in C# and `ReportedSql` in SQL. **A span reported its cache usage when at least one of its counters is `Reported`.** On such a span an absent counter is the zero the conventions leave out, and the stored 0 is used as observed. A span with neither counter reported (`Absent` or `LegacyUnknown`) has unknown cache usage, as a Foundry BYOK or local endpoint that never reports caching does: it's left out of the hit ratio and of every observed cache or uncached total, counted in `CacheUnreportedSpanCount`, and shown as `n/a`, never as `0.0%`. A group with no reported span has a `null` ratio and `null` observed totals. Mixed groups mark observed totals as partial (`*` in tables), and estimated totals, which count unknown spans' input as uncached the way pricing does, are labeled as estimates.
 
-### Workflows (Task 2, A4, A6, A7)
+This differs from the issue's acceptance criterion "Missing write counters make observed uncached input unknown without hiding a known cache-read ratio … weighted hit ratios use only the input denominator from read-reported spans", and from its implementation notes (`CASE WHEN cache_read_state = 'reported'`; "observed `uncachedInputTokens` is nullable unless both cache counters are reported"). The rest of that criterion holds: mixed groups label partial and estimated totals. A provider that reports cache reads but never cache writes would have its writes counted as 0, which overstates uncached input the same way pricing does today. **The coordinating session accepted this deviation, with D2–D5, on 2026-11-23:** a span with neither counter stays unknown, so no zero-hit metric is made up from missing counters, and the per-counter rule's bias toward hits is avoided. Every place that shows a ratio also shows how many spans reported cache counters. One bias remains: a model that reports cache reads but never cache writes, such as OpenAI-style automatic caching, sends no counter at all on a miss, so its misses stay unreported and are left out of the ratio. If the issue's per-counter rule is ever preferred, the code change is small (`CacheMetrics.IsReported`, `ReportedSql`, and the nullability in `TurnTokenRow`), but many expected values in Tasks 4–11 change.
 
-- **SHA pins, no Dependabot.** Every `uses:` of another repository's action names a full commit SHA with its version in a comment, for example `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`. Nothing updates them automatically; Dependabot would open pull requests on its own, which the user didn't ask for. `docs/releasing.md` explains how to update a pin. GitHub's newer workflow lockfiles are deferred.
-- **Matrix values reach scripts only through `env`** (A6). CI's publish step reads `$RID`, as the Release workflow already does.
-- **`ratesVersion` check** (A4). A new `rates` job compares `src/CopilotLedger.Core/Pricing/rates.json` with the latest release's `rates.json` asset, both canonicalized with `jq -S .`. Unchanged passes. Changed passes only when the new `ratesVersion` sorts after the old one; for `yyyy-MM-dd` dates, string order is date order. If nothing can be downloaded (no release yet, or a network error), the job prints a message and passes: missing a check only delays `rates update` users until the next release, while failing would block every release on a download hiccup. The job runs on manual runs too, so the dry run in `docs/releasing.md` checks it, and the `release` job needs it.
-- **A scripted end-to-end check in CI.** The smoke test now posts a real OTLP/HTTP JSON trace to the published binary's daemon over a real socket and checks `branch --all-repos --since all --json`: one span, 50 AI credits. 50 credits stays below the breaker's 150-credit rule, so the smoke trips nothing and shows no notification, on the runner or for anyone who runs it locally. It complements Task 3's `GuideSamplesTests`, which run in-process. Generating the guide's samples from the published binary instead was rejected: it would need a real `install` on the runner (user environment, sign-in items), and real clocks and process IDs, so the output couldn't be exact.
+### Schema version 4 (deviations D2 and D3)
 
-### The user guide (Task 3, A8)
+Migration v4 is the next number after v3. Issues #61 and #63 take later numbers (see "Deferred").
 
-- **Scenarios.** `docs/guide.md` keeps its path, so links stay valid. It has eleven short scenarios: set up and check; see spend; the most expensive prompts; agents; a budget and its alert; a runaway loop; a pull request receipt; Foundry BYOK and local models; asking Copilot through MCP; updating rates; upgrading and uninstalling. Each has a **Goal** line, the exact commands, and their output.
-- **One example.** Every sample comes from the same world: gh-ledger as the GitHub CLI extension on Windows, the most common setup and the one that needs no Git for Windows, in `contoso/webapp` on `feature/search`, at 16:30 on 2026-11-21 (UTC-5), with a month of seeded spend, one breaker trip, a budget, and a Foundry price overlay. The data directory shows as `C:\Users\you\.copilot-ledger`.
-- **Samples can't drift.** `GuideSamplesTests` parses every `<!-- sample: <id> -->` … `<!-- /sample -->` block, runs its `gh ledger` command in `GuideWorld`, and compares the whole output with the guide. GS1 fails if the guide gains a sample that no test checks, or loses one. The overlay sample is the input that the example prices with. The receipt sample is quoted, so GitHub renders it the way the comment looks, and it's checked against `export-pr --stdout`. The MCP sample is `get_branch_ledger`'s text, with its one-line JSON indented. The budget alert sample is the real daemon's `ALERT` line.
-- **A stand-in daemon.** `install` and `daemon start` call `FakeCliPlatform.StartDetachedHandler`, which `GuideWorld` sets to a stand-in. It holds `daemon.lock`, writes `daemon.json` with process 4242 and the clock's time, and on `daemon stop` deletes its files and releases the lock, so samples show a fixed process ID and start time. Each start owns its lock and stop token, deletes through `FileRetry.Delete`, and releases the lock in `finally`, so an antivirus lock can't hang `daemon stop`. The budget alert uses the real daemon, in-process, because the `ALERT` line comes from it.
-- **The version is in the samples** (both `status` samples and the receipt), so `docs/releasing.md` lists the guide among the places a version bump changes, and `GuideSamplesTests` fails until it's updated.
-- **Not shown:** output that gh-ledger doesn't print (`gh extension install`, `upgrade`, and `remove`), and `rates init`, whose example world already has an overlay.
-- **gh-ledger's messages still say `gh-ledger <command>`** under the extension (deferred). The guide says once, in its introduction, to type those commands as `gh ledger <command>`.
-- **One starting state.** After the setup section, every sample starts from the same `Month` state, and the introduction says so. That's why the overlay's rates version, BYOK spend, and the open breaker trip appear before the sections that explain them.
+- It adds the issue's three columns and index as written, plus `agent_span_id TEXT` (null when unknown).
+- Rows recorded before v4 get `legacy_unknown` for both states. The issue lets the architect upgrade `cache_read_state` to `reported` where `cache_read_input_tokens > 0`, and this plan does. **Deviation D2:** it also sets `cache_write_state` to `reported` where `cache_write_input_tokens > 0`, by the same proof: a nonzero counter can only have been reported. With D1, that keeps a legacy cold request (a cache write and no read) in the hit ratio as the miss it was. Zero-valued counters stay `legacy_unknown`.
+- **Deviation D3, `agent_span_id`.** The issue asks for growth per sub-agent *instance*, identified by the nearest `invoke_agent` ancestor's trace and span IDs, and for "attribution unavailable" when lineage is missing. Lineage lives in `span_links`, which the daemon prunes after 7 days, so a query-time walk would lose it for older spans. Instead, `BackfillFromAgentSpansAsync`, which already walks each `invoke_agent` link's descendants without crossing a nested `invoke_agent` and runs for every trace in every batch, also sets `agent_span_id = COALESCE(agent_span_id, <invoke_agent span ID>)`. Because the walk stops at nested agents, only a span's nearest agent can reach it, whatever order the spans arrive in. The migration fills the column the same way from the links still kept. A span's agent identity is `(trace_id, agent_span_id)`.
+- `RecordAsync` writes both states and `pull_request_number`, and rejects an entry whose state is `LegacyUnknown` (only the migration produces it), whose `Absent` counter isn't 0 (the normalizer can't produce one), or whose pull request number is 0 or less. In `BackfillFromAgentSpansAsync`, the guard that skipped an agent link with neither a name nor a conversation ID goes, so every agent's `UPDATE` runs, and its `WHERE` also matches rows whose `agent_span_id` is still null. A second backfill of the same trace still changes no rows, and SL3–SL5 keep their counts; SL12 checks the new ones.
 
-### The documentation (Task 4, A3, A4, A9)
+### Fixtures
 
-- **One job per document, each fact in one place.** `README.md`: what CopilotLedger is, the quick start, and links. `docs/guide.md`: the scenarios. `docs/cli.md`: the reference for every command and option, plus troubleshooting. `docs/configuration.md`: pricing, the overlay, and the data files. `docs/releasing.md`: maintainers. The action's README in its own repository documents the action. Other documents link instead of repeating.
-- **One naming rule.** Commands are written `gh ledger <command>`. `gh-ledger` names the program: the binary, `--help`, and its messages. `docs/cli.md` says once that a binary built from source without the `gh ledger` alias runs by its path, as `<folder>/gh-ledger <command>` (it isn't on `PATH`), and that a `gh-ledger <command>` in a message is typed `gh ledger <command>` under the extension.
-- **Fixes folded in:** the MCP registration with the extension's binary path for each OS (A3); the `ratesVersion` release step, with every sample and test that shows the old date, and how to update pinned actions (A4, A7); `daemon.stop` and `alert-toast.xml` in the files table (A9); the report scopes (only `branch` defaults to the current repository); `daemon stop` ending the process after 15 seconds; restarting the daemon after an overlay change; the shell profile `install` edits; `daemon.log` at sign-in; building from source into a permanent folder and running `install` from there; and the new `could not record spans` warning in troubleshooting.
-- **Upgrading and removing the extension.** The daemon and every Copilot session that uses the `ledger` MCP server run the extension's binary, and on Windows gh can't rewrite or delete it until they stop. So the guide, `docs/cli.md`, and troubleshooting say to stop the daemon and close the Copilot sessions and apps that use the MCP server before `gh extension upgrade` or `remove`. The steps are the same on every platform: only Windows was verified, and the steps do no harm elsewhere. `uninstall` doesn't touch an MCP registration (registering it in `install` is deferred), so the docs add `copilot mcp remove ledger`, and removing the VS Code entry.
+New spans default to `Absent`/`Absent` (the enum's default value), so a fixture that gives a span a nonzero cache counter would now fail validation. Every test that records spans builds them with `TestSpans.Chat` or through the normalizer, so the fix is in one place: `TestSpans.Chat` gains optional `cacheReadState` and `cacheWriteState`, which default to `Reported` for a nonzero counter and `Absent` for 0. No other fixture changes until Task 7, when `GuideWorld` marks its GitHub-hosted spans `Reported` (so a request that read nothing shows a real 0.0%) and its Foundry BYOK and local spans `Absent`, and gives its first prompt 20,000 cache-read tokens, so the guide's first `status` sample shows a typical hit rather than a first-run 0.0%.
 
-### The action repository (Task R and Task 5)
+### Pull request numbers
 
-- **Content.** A root `action.yml`, as Marketplace requires; `receipt.ps1` and `tests/receipt.Tests.ps1`, identical to gh-ledger's `action/` files except for comment lines that named `docs/action.md` or the `action/` directory, so Sprint 4's 18 cases and its review carry over; a `README.md` that takes over `docs/action.md`; a CI workflow that runs the tests on `ubuntu-latest` and `windows-latest`; and the existing `LICENSE`.
-- **Marketplace-ready.** `name: CopilotLedger PR Receipt` (free on 2026-11-21), a one-sentence `description`, `author: swigerb`, and `branding` with the `dollar-sign` icon in `green`. Listing it is the user's step in the browser, with two-factor authentication and the Developer Agreement.
-- **Versions.** Releases are `v1.0.0`, `v1.0.1`, and so on, plus a `v1` tag that the maintainer moves to each v1.x release. Docs show `uses: swigerb/copilot-ledger-action@v1`. The action's README shows how to pin a commit SHA instead.
-- **gh-ledger's side (Task 5).** `action/` and `docs/action.md` go, CI stops running the action's tests (the action's own CI runs them), and `receipt.yml` uses the action pinned to the commit Task R merged, which the orchestrator tags `v1.0.0`. `swigerb/gh-ledger/action@v0.4.0` keeps working, because tags don't move, but no document shows it.
-- **Ordering.** Task R runs in parallel. Task 5 is last and waits for Task R's merge, so this repository never points at an action that doesn't exist.
+- `GitWorkspaceContext.PullRequestNumber` is an init-only property, not a seventh positional parameter, so the existing constructor calls don't change. Record equality includes it.
+- `FileSystemGitContextResolver` reads it from the config it already reads: `n` from the last `merge` value in a `[branch "<current branch>"]` section (section names case-insensitive, the branch name case-sensitive, as in Git), when that value is exactly `refs/pull/<n>/head` and `n` is 1 to 2,147,483,647 without a sign or leading zeros. A detached `HEAD`, any other `merge` value, or no section gives `null`. Linked worktrees read the common config. There's no branch-name inference, no network call, and no `git` process. `CachingGitContextResolver` caches the whole context, so it needs no change.
+- The ingestor stores the number with each span in `pull_request_number`. `--by pr` groups spans by `(repository, pull request)`, and spans without a number by `(repository, branch)`, labeled `(no PR) <branch>`.
 
-### Archives (A12)
+### Queries
 
-- This plan's pull request moves the Sprint 4 plan to `.github/plans/archive/sprint-4.md`, with an amendments section that records none. It also adds the missing amendments section to `.github/plans/archive/sprint-1.md`: the CI workflow added in Task 1, and the `Calculate` contract that a later sprint found didn't hold.
-## Task 1 specification: Audit Fixes & Version 0.4.1
+- **One filter.** `LedgerFilter` gains `PullRequestNumber` and `Agent` (`(none)` matches spans without an agent). Every filtered query uses one SQL fragment, `FilterSql`, with parameters from `AddFilterParameters`, so the six conditions are written once. The CLI and MCP filter by pull request (`--pr`, `pullRequest`) but not by agent; `--by agent` groups instead, and `Agent` is there for queries and for #64 and #65.
+- **Coverage sums.** `LedgerRollupRow` and `CacheEfficiencyRow` sum input, cache reads, and uncached input over the reported spans only. Uncached input is `MAX(input − cache read − cache write, 0)` per span (`UncachedSql`), so a span with inconsistent counters (status `invalid_usage`) can't make a total negative. Ratios are computed in C# as `decimal` from `long` sums (`CacheMetrics.HitRatio`), never rounded in Core or Storage, and `null` when the denominator is 0.
+- **`GetCacheEfficiencyAsync`** groups by `Model`, `Agent`, `Repository`, `Branch`, or the new `PullRequest`, and orders rows by input tokens, largest first, then by the group key. `PullRequest` isn't a valid grouping for `GetRollupAsync`, which throws for it, and `ChannelModel` isn't valid for `GetCacheEfficiencyAsync`.
+- **Turns.** A turn is one inference span, that is, one model request; Copilot's `github.copilot.turn_id` isn't stored (see "Deferred"). `GetTurnBreakdownAsync` takes a `TurnSelector`, which holds either a trace ID (validated as 32 hexadecimal characters and lowercased) or a conversation ID, never both, plus a `LedgerFilter`. It lists spans by start time, then span ID, then trace ID. `InputDeltaFromPreviousTurn` compares a span with the previous span of its *sequence*: the same trace, `agent_span_id`, repository, branch, conversation, and model, ordered by start time and then span ID. So interleaved subagents and requests that start in the same millisecond never mix. Deltas are computed over all of the selector's spans before the filter applies, and they're `null` for a sequence's first span and for a span whose `agent_span_id` is unknown.
+- **Context bloat.** `GetContextBloatAsync` ranks prompt chains (traces) three ways, each up to `limit`, ties going to the lower trace ID: chains whose spans all reported cache usage, by observed uncached input; chains with at least one span that didn't, by estimated uncached input, ranked separately so an unknown total is never compared with an observed one; and chains by input growth, the largest `peak input − first input` among the chain's sequences, counting only growth above 0. Spans with an unknown agent are left out of growth and counted in `SpansWithoutAgent`.
+
+### CLI
+
+- **Plain `status`** keeps its daemon and configuration lines and its spend table for today and the last 7 and 30 days, and adds a second table: `Period`, `Cache hit` (`53.7%` or `n/a`), and `Cache reported` (`6 of 8 spans`). **Deviation D4:** the issue's example is a line per period, `Cache hit: 72.4% (reported on 1,240 of 1,300 spans)`; a table matches the spend table above it. JSON adds a `cache` object to each period.
+- **Percentages** come from `LedgerFormat.Percent`: the ratio times 100, rounded to one decimal place with `MidpointRounding.AwayFromZero`, formatted `0.0` in the invariant culture, plus `%`; `null` is `n/a`. JSON writes the exact ratio with `LedgerFormat.WriteDecimal`.
+- **`status --cache`** reports by `--by model` (the default), `branch`, `pr`, or `agent`, in every repository or in `--repo`, with `--branch`, `--pr`, and `--since` (default `30d`). Columns are the group, then `Spans`, `Cache reported`, `Input`, `Cache read`, `Cache write`, `Uncached`, `Output`, and `Hit %`. **Deviation D5:** instead of one `Group` column, the group columns are named `Model`, `Agent`, `Branch`, or `Pull request`, with a `Repository` column first for branches and pull requests when `--repo` isn't given. `Cache read`, `Cache write`, and `Uncached` show `n/a` for a row with no reported span and end in `*` when some of the row's spans are unreported; `Hit %` is the ratio over the reported spans, or `n/a`. A footnote counts the unreported spans.
+- **`--turns`** takes `--trace <traceId>` or `--conversation <id>`; **`--bloat`** takes `--repo`, `--since`, and `--limit` (1–100, default 10). Option rules, checked in this order: without `--cache`, any breakdown option is an error; `--turns` and `--bloat` are exclusive; `--turns` takes only `--trace` or `--conversation` (exactly one); `--trace` and `--conversation` need `--turns`; `--by`, `--branch`, and `--pr` can't be used with `--bloat`; and `--limit` needs `--bloat`.
+- `branch --json` and `agents --json` rows end with `cacheReportedSpans`, `cacheUnreportedSpans`, and `cacheHitRatio`, after the totals, so the CI smoke test's `"spans": 1,` and `"aiCredits": 50,` still match. Their tables don't change. Receipts don't change: they use `LedgerFormat.WriteTotals`, which this sprint doesn't touch.
+
+### MCP
+
+- **`get_cache_efficiency`** is read-only (`ReadOnlyHint = true`, `OpenWorldHint = false`) and takes `repository`, `branch`, `pullRequest` (an integer of at least 1), `since` (the `--since` grammar, default `30d`), `by` (`model`, `branch`, `pr`, or `agent`, default `model`), and `limit` (1–50, default 10). The issue leaves defaults open, so: `repository` defaults to the current repository, or the tool returns an error outside one; `branch` and `pullRequest` are independent filters, so the "pass repository and branch together" rule of the other tools doesn't apply; and the warnings describe the current branch, or only the current session's trips outside a repository. Rows have the same fields as `status --cache --json`.
+- `get_branch_ledger` and `get_agent_breakdown` add `uncachedInputTokens` (observed, or `null`), `cacheReportedSpans`, and `cacheHitRatio` after `cacheWriteInputTokens`.
+- The `--since` grammar moves from the CLI's `Period` into `CopilotLedger.Storage.LedgerPeriod`, which both use; `Period` keeps its signature and delegates.
+
+### Docs
+
+`docs/cli.md` gains a "Prompt-cache efficiency" section, `docs/configuration.md` a "Cache tokens" section on pricing, and `docs/guide.md` a "Find context bloat" walkthrough with three tested samples. For the walkthrough, `GuideWorld`'s prompt that trips the breaker now grows from 357,500 to 642,500 input tokens over its four requests, with cache reads chosen so each request still costs 126.00 AI credits, and the guide's world records span links, so every money sample stays the same.
+
+### Deviations from issue #62
+
+| # | Issue #62 | This plan | Why |
+|---|---|---|---|
+| D1 | Hit ratio over spans with `cache_read_state = 'reported'`; observed uncached input only when both counters are reported (AC "Missing write counters make observed uncached input unknown…") | A span reported its cache usage when either counter is reported; on such a span an absent counter is 0 | Copilot and the conventions leave out zero counters, so the per-counter rule would drop every cache miss. Accepted by the coordinating session on 2026-11-23. |
+| D2 | The heuristic upgrade sets `cache_read_state` where `cache_read_input_tokens > 0` | Also sets `cache_write_state` where `cache_write_input_tokens > 0` | The same proof; keeps legacy cold requests in the ratio |
+| D3 | Three new columns and an index | Also `agent_span_id TEXT`, filled at ingest and by the migration | Span links are pruned after 7 days |
+| D4 | Plain `status`: a `Cache hit: …` line per period | A second table with `Cache hit` and `Cache reported` | Matches the spend table; the issue's line is an example |
+| D5 | `status --cache` table column `Group` | Named group columns, plus `Repository` when unscoped | Clearer, and matches `branch` and `agents` |
+
+### Acceptance criteria traceability
+
+| Issue #62 acceptance criterion | Tasks | Tests |
+|---|---|---|
+| Normalizer tests cover read+write, read only, legacy `cache_creation` only, and neither; token values unchanged | 1 | NZ13 (7 cases), NZ14 |
+| The migration keeps every row and marks legacy rows `legacy_unknown`; the heuristic upgrade only for nonzero counters | 3 | SL11, S1, SL1, SL8, SL10 (D2: SL11 checks both counters) |
+| `CacheHitRatio` is exact `decimal`, checked with `TheoryData<…, decimal>`: 0 reported spans → `null`; zero input → `null`; mixed → reported spans only; all hits → 1; true zero → 0 shown as `0.0%` | 1, 4, 5, 9, 11 | CM1, CM2, CE1, CE2, S14, CR7 and CR9 (`0.0%`), GS2 (`cache-bloat`) |
+| An all-absent group shows `n/a` in tables and `null` in JSON, never `0.0%` | 4, 5, 7, 8, 9, 10 | CE2, RP14, RP15, CR1, CR2, CR7, CR8, MC4, MC6, MC13 |
+| Missing write counters …; mixed groups label partial/estimated totals; ratios use the read-reported denominator | 5, 6, 8, 9 | D1 replaces the first and last parts; CE1 (case 4), CE3, CR1 (`*`), CR9 (`Est. uncached`), TB1 |
+| `--by pr` groups by `pull_request_number`; a `GitFixture` config with `refs/pull/42/head` gives PR 42 without `git`; other branches show `(no PR) <branch>` | 2, 3, 5, 8 | Resolve_PullRequestCheckout_ReadsTheNumberFromTheMergeRef, Resolve_MergeConfig_YieldsOnlyExplicitPullRequestRefs, IG10, CE4, CR3 |
+| `--turns --trace` lists inference spans in start order with the breakdown and `InputDeltaFromPreviousTurn`; `invoke_agent` spans excluded | 6, 9 | TB1, TB2, CR7, CR8 |
+| `--bloat` ranks by uncached input and input growth deterministically, ties by trace ID | 6, 9 | CB1, CB2, CR9, CR10 |
+| `status` shows the cache summary and its JSON `cache` object | 7 | StatusText, RP14, GS2 (`status`, `status-first`) |
+| `status --cache --by model\|branch\|pr\|agent`; plain `status` keeps its details and periods; interleaved agents and equal timestamps don't mix growth; unknown PRs stay unknown | 6, 7, 8 | CR1, CR3, StatusText, TB1, TB2 |
+| MCP `get_cache_efficiency` validates arguments, returns the documented fields, is read-only, and has `McpTestHarness` tests including the `WARNING:` prefix | 10 | MC1, MC8 (13 new cases), MC13, MC14 |
+| No `double`, `float`, or `REAL`; invariant culture, verified under `de-DE` | all | CM1, CR6 |
+| `docs/cli.md`, `configuration.md`, and `guide.md` updated; `GuideSamplesTests` passes | 7, 10, 11 | GS1, GS2 (`cache`, `cache-bloat`, `cache-turns`), GS7 |
+| Build and tests exit 0 with warnings as errors; hermetic, no network, no `git` | all | the whole suite |
+
+## Task 1 specification: Cache Counter States
 
 ### Files
 
 | File | Change |
 |---|---|
-| `src/CopilotLedger.Otlp/Receiver/OtlpReceiverApp.cs` | `Build` takes `ingestFailed`; `HandleAsync` reports each 503's exception (A1) |
-| `src/CopilotLedger.Cli/Daemon/IngestFailureLog.cs` | New, copy exactly (A1) |
-| `src/CopilotLedger.Cli/Daemon/DaemonHost.cs` | Passes `IngestFailureLog.Report` to `Build` (A1) |
-| `src/CopilotLedger.Otlp/Breaker/CircuitBreakerMonitor.cs` | Runs the flag-file sync with `CancellationToken.None`, and says why (A11) |
-| `src/CopilotLedger.Otlp/Breaker/CircuitFlagFile.cs` | `SyncAsync` deletes its temporary file whatever it throws (A11) |
-| `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs` | Remove `LoadDefault()` (A5) |
-| `src/CopilotLedger.Core/LedgerPaths.cs` | Remove `DefaultDatabasePath` and `DefaultRatesOverlayPath` (A5) |
-| `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`, `src/CopilotLedger.Cli/GhLedgerCli.cs`, `.github/workflows/ci.yml` | Version 0.4.1 |
-| `tests/CopilotLedger.Tests/TestSupport/FileRetry.cs` | Add `ReadAllText` (A2) |
-| `tests/CopilotLedger.Tests/TestSupport/GitFixture.cs` | Read back the files it writes (A2) |
-| `tests/CopilotLedger.Tests/TestSupport/FakeCliPlatform.cs` | `HomeDirectory` throws until set (A10) |
-| `tests/CopilotLedger.Tests/Otlp/OtlpReceiverTests.cs` | RC8 checks the callback (Task 1 tests) |
-| `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs` | DM1's version; new DM7 (Task 1 tests) |
-| `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs` | New BM12 (Task 1 tests), plus two of the A2 reads below |
-| `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs` | `StatusText`'s version (Task 1 tests) |
-| `AlertDaemonTests.cs`, `BreakerCommandTests.cs`, `InstallCommandTests.cs`, `RatesCommandTests.cs` (in `tests/CopilotLedger.Tests/Cli/`) and `CircuitBreakerMonitorTests.cs` (in `tests/CopilotLedger.Tests/Otlp/`) | 25 reads of fresh files go through `FileRetry` (A2, Task 1 tests) |
+| `src/CopilotLedger.Core/Telemetry/CacheCounterState.cs` | New: `Absent` (0, the default), `Reported`, `LegacyUnknown` |
+| `src/CopilotLedger.Core/Telemetry/CacheMetrics.cs` | New: `IsReported` and `HitRatio` |
+| `src/CopilotLedger.Core/Telemetry/NormalizedGenAiSpan.cs` | Adds `CacheReadState` and `CacheWriteState` |
+| `src/CopilotLedger.Otlp/Normalization/GenAiSpanNormalizer.cs` | Records each counter's state through a `TryToken` overload |
+| `tests/CopilotLedger.Tests/Otlp/GenAiSpanNormalizerTests.cs` | New NZ13 and NZ14 |
+| `tests/CopilotLedger.Tests/Telemetry/CacheMetricsTests.cs` | New: CM1–CM3 |
+| `tests/CopilotLedger.Tests/TestSupport/TestSpans.cs` | `Chat` takes optional states; a nonzero counter defaults to `Reported` |
 
-Make each edit below exactly as shown. Every "replace" block occurs exactly once in its file at `3a0a514`.
-
-### Report each 503's cause (A1, copy exactly)
-
-Edit 1 of 4 in `src/CopilotLedger.Otlp/Receiver/OtlpReceiverApp.cs`, replace:
+### Contracts
 
 ```csharp
+namespace CopilotLedger.Core.Telemetry;
+
+public enum CacheCounterState { Absent, Reported, LegacyUnknown }
+
+public static class CacheMetrics
 {
-    // Serves the OTLP endpoints on localhost (127.0.0.1 and ::1) at options.Port.
-    // configureWebHost runs after the defaults; tests pass builder => builder.UseTestServer().
-    public static WebApplication Build(
-        OtlpReceiverOptions options,
-        ILedgerIngestor ingestor,
-        Action<IWebHostBuilder>? configureWebHost = null)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(ingestor);
+    public static bool IsReported(CacheCounterState cacheRead, CacheCounterState cacheWrite);   // either is Reported
+    public static decimal? HitRatio(long cacheReadInputTokens, long inputTokens);              // null when inputTokens is 0
+}
+
+// NormalizedGenAiSpan gains:
+public CacheCounterState CacheReadState { get; init; }    // default Absent
+public CacheCounterState CacheWriteState { get; init; }   // default Absent
 ```
 
-with:
+- The normalizer sets `CacheReadState` to `Reported` when `gen_ai.usage.cache_read.input_tokens` is present, whatever its value, and `Absent` otherwise. `CacheWriteState` follows `gen_ai.usage.cache_write.input_tokens`, or, when that's absent, the legacy `gen_ai.usage.cache_creation.input_tokens`. Token values, the input adjustment, and rejections don't change; the new `TryToken` overload sets the state and then calls the existing `TryToken`.
+- `HitRatio` is `(decimal)cacheRead / input`, unrounded. `IsReported` is D1's rule (see "Design decisions").
+
+### Code (copy exactly)
+
+New file `src/CopilotLedger.Core/Telemetry/CacheCounterState.cs`:
 
 ```csharp
+namespace CopilotLedger.Core.Telemetry;
+
+// Whether a span carried one prompt-cache counter (gen_ai.usage.cache_read.input_tokens, or cache_write.input_tokens with
+// its legacy cache_creation.input_tokens). The counter's value is stored either way; an absent counter is stored as 0.
+public enum CacheCounterState
 {
-    // Serves the OTLP endpoints on localhost (127.0.0.1 and ::1) at options.Port.
-    // configureWebHost runs after the defaults; tests pass builder => builder.UseTestServer().
-    // ingestFailed receives each exception from IngestAsync that turns a request into a 503, so the caller can log it.
-    public static WebApplication Build(
-        OtlpReceiverOptions options,
-        ILedgerIngestor ingestor,
-        Action<IWebHostBuilder>? configureWebHost = null,
-        Action<Exception>? ingestFailed = null)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(ingestor);
+    Absent,          // the span didn't carry the attribute
+    Reported,        // the span carried the attribute
+    LegacyUnknown,   // the span was recorded before the ledger stored counter states
+}
 ```
 
-Edit 2 of 4 in `src/CopilotLedger.Otlp/Receiver/OtlpReceiverApp.cs`, replace:
+New file `src/CopilotLedger.Core/Telemetry/CacheMetrics.cs`:
 
 ```csharp
-        configureWebHost?.Invoke(builder.WebHost);
-        WebApplication app = builder.Build();
+namespace CopilotLedger.Core.Telemetry;
 
-        app.MapPost("/v1/traces", context => HandleAsync(context, options, ingestor, traces: true));
-        app.MapPost("/v1/metrics", context => HandleAsync(context, options, ingestor, traces: false));
-        app.MapPost("/v1/logs", context => HandleAsync(context, options, ingestor, traces: false));
-        return app;
-    }
-```
-
-with:
-
-```csharp
-        configureWebHost?.Invoke(builder.WebHost);
-        WebApplication app = builder.Build();
-
-        app.MapPost("/v1/traces", context => HandleAsync(context, options, ingestor, ingestFailed, traces: true));
-        app.MapPost("/v1/metrics", context => HandleAsync(context, options, ingestor, ingestFailed, traces: false));
-        app.MapPost("/v1/logs", context => HandleAsync(context, options, ingestor, ingestFailed, traces: false));
-        return app;
-    }
-```
-
-Edit 3 of 4 in `src/CopilotLedger.Otlp/Receiver/OtlpReceiverApp.cs`, replace:
-
-```csharp
-        HttpContext context,
-        OtlpReceiverOptions options,
-        ILedgerIngestor ingestor,
-        bool traces)
-    {
-        OtlpEncoding encoding = OtlpHttp.EncodingFromContentType(
-```
-
-with:
-
-```csharp
-        HttpContext context,
-        OtlpReceiverOptions options,
-        ILedgerIngestor ingestor,
-        Action<Exception>? ingestFailed,
-        bool traces)
-    {
-        OtlpEncoding encoding = OtlpHttp.EncodingFromContentType(
-```
-
-Edit 4 of 4 in `src/CopilotLedger.Otlp/Receiver/OtlpReceiverApp.cs`, replace:
-
-```csharp
-        {
-            return;
-        }
-        catch
-        {
-            context.Response.Headers.RetryAfter = "5";
-            await OtlpHttp.WriteErrorAsync(
-                context.Response,
-```
-
-with:
-
-```csharp
-        {
-            return;
-        }
-        catch (Exception ex)
-        {
-            ingestFailed?.Invoke(ex);
-            context.Response.Headers.RetryAfter = "5";
-            await OtlpHttp.WriteErrorAsync(
-                context.Response,
-```
-
-### `IngestFailureLog.cs` (copy exactly)
-
-New file `src/CopilotLedger.Cli/Daemon/IngestFailureLog.cs`:
-
-```csharp
-namespace CopilotLedger.Cli.Daemon;
-
-// Writes "Warning: could not record spans: <type>: <message>" for the first ingestion failure, then at most once a
-// minute, so a ledger that stays unavailable can't flood daemon.log. After the clock steps back, the next failure is
-// written at once. A line that can't be written is dropped.
-internal sealed class IngestFailureLog(Action<string> write, TimeProvider timeProvider)
+public static class CacheMetrics
 {
-    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
+    // True when the span reported its prompt-cache usage, that is, it carried at least one cache counter. The OTel GenAI
+    // conventions leave out a cache counter whose value is zero, so the other counter on such a span is a reported 0.
+    // A span with neither counter is unknown: its provider may not report cache usage at all.
+    public static bool IsReported(CacheCounterState cacheRead, CacheCounterState cacheWrite) =>
+        cacheRead == CacheCounterState.Reported || cacheWrite == CacheCounterState.Reported;
 
-    private readonly Lock _gate = new();
-    private DateTimeOffset? _lastWritten;
+    // cacheReadInputTokens / inputTokens, computed exactly in decimal; null when inputTokens is 0. Never rounds.
+    public static decimal? HitRatio(long cacheReadInputTokens, long inputTokens) =>
+        inputTokens == 0 ? null : (decimal)cacheReadInputTokens / inputTokens;
+}
+```
 
-    public void Report(Exception exception)
-    {
-        DateTimeOffset now = timeProvider.GetUtcNow();
-        lock (_gate)
-        {
-            if (_lastWritten is DateTimeOffset last && now >= last && now - last < Interval)
+Edit 1 of 1 in `src/CopilotLedger.Core/Telemetry/NormalizedGenAiSpan.cs`, replace:
+
+```csharp
+    public long CacheReadInputTokens { get; init; }          // gen_ai.usage.cache_read.input_tokens
+    public long CacheWriteInputTokens { get; init; }         // gen_ai.usage.cache_write.input_tokens (legacy: cache_creation)
+}
+```
+
+with:
+
+```csharp
+    public long CacheReadInputTokens { get; init; }          // gen_ai.usage.cache_read.input_tokens
+    public long CacheWriteInputTokens { get; init; }         // gen_ai.usage.cache_write.input_tokens (legacy: cache_creation)
+    public CacheCounterState CacheReadState { get; init; }   // Reported when the span carried the cache-read attribute
+    public CacheCounterState CacheWriteState { get; init; }  // Reported when it carried cache_write (or legacy cache_creation)
+}
+```
+
+Edit 1 of 5 in `src/CopilotLedger.Otlp/Normalization/GenAiSpanNormalizer.cs`, replace:
+
+```csharp
+        long cacheRead = 0;
+        long cacheWrite = 0;
+
+        if (isInference)
+```
+
+with:
+
+```csharp
+        long cacheRead = 0;
+        long cacheWrite = 0;
+        CacheCounterState cacheReadState = CacheCounterState.Absent;
+        CacheCounterState cacheWriteState = CacheCounterState.Absent;
+
+        if (isInference)
+```
+
+Edit 2 of 5 in `src/CopilotLedger.Otlp/Normalization/GenAiSpanNormalizer.cs`, replace:
+
+```csharp
+            if (!TryToken(attributes, GenAiAttributeNames.InputTokens, out input, out rejectionReason) ||
+                !TryToken(attributes, GenAiAttributeNames.OutputTokens, out output, out rejectionReason) ||
+                !TryToken(attributes, GenAiAttributeNames.CacheReadInputTokens, out cacheRead, out rejectionReason) ||
+                !TryToken(
+                    attributes,
+```
+
+with:
+
+```csharp
+            if (!TryToken(attributes, GenAiAttributeNames.InputTokens, out input, out rejectionReason) ||
+                !TryToken(attributes, GenAiAttributeNames.OutputTokens, out output, out rejectionReason) ||
+                !TryToken(
+                    attributes,
+                    GenAiAttributeNames.CacheReadInputTokens,
+                    out cacheRead,
+                    out cacheReadState,
+                    out rejectionReason) ||
+                !TryToken(
+                    attributes,
+```
+
+Edit 3 of 5 in `src/CopilotLedger.Otlp/Normalization/GenAiSpanNormalizer.cs`, replace:
+
+```csharp
+                        : GenAiAttributeNames.LegacyCacheCreationInputTokens,
+                    out cacheWrite,
+                    out rejectionReason))
             {
-                return;
-            }
+                return false;
+```
 
-            _lastWritten = now;
+with:
+
+```csharp
+                        : GenAiAttributeNames.LegacyCacheCreationInputTokens,
+                    out cacheWrite,
+                    out cacheWriteState,
+                    out rejectionReason))
+            {
+                return false;
+```
+
+Edit 4 of 5 in `src/CopilotLedger.Otlp/Normalization/GenAiSpanNormalizer.cs`, replace:
+
+```csharp
+                CacheReadInputTokens = cacheRead,
+                CacheWriteInputTokens = cacheWrite,
+            };
         }
 
-        try
-        {
-            write($"Warning: could not record spans: {exception.GetType().Name}: {exception.Message}");
+        return true;
+```
+
+with:
+
+```csharp
+                CacheReadInputTokens = cacheRead,
+                CacheWriteInputTokens = cacheWrite,
+                CacheReadState = cacheReadState,
+                CacheWriteState = cacheWriteState,
+            };
         }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+
+        return true;
+```
+
+Edit 5 of 5 in `src/CopilotLedger.Otlp/Normalization/GenAiSpanNormalizer.cs`, replace:
+
+```csharp
+        return true;
+    }
+
+    private static int? ReadServerPort(IReadOnlyList<OtlpAttribute> attributes)
+    {
+        OtlpAttribute? attribute = FindAttribute(attributes, GenAiAttributeNames.ServerPort);
+```
+
+with:
+
+```csharp
+        return true;
+    }
+
+    // Like TryToken, and also says whether the span carried the attribute. A missing attribute is Absent with value 0.
+    private static bool TryToken(
+        IReadOnlyList<OtlpAttribute> attributes,
+        string key,
+        out long value,
+        out CacheCounterState state,
+        out string? rejectionReason)
+    {
+        state = FindAttribute(attributes, key) is null
+            ? CacheCounterState.Absent
+            : CacheCounterState.Reported;
+        return TryToken(attributes, key, out value, out rejectionReason);
+    }
+
+    private static int? ReadServerPort(IReadOnlyList<OtlpAttribute> attributes)
+    {
+        OtlpAttribute? attribute = FindAttribute(attributes, GenAiAttributeNames.ServerPort);
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Otlp/GenAiSpanNormalizerTests.cs`, replace:
+
+```csharp
+            link => AssertLink(link, null, null, null, 0));
+    }
+
+    private static void AssertLink(
+        GenAiSpanLink link,
+```
+
+with:
+
+```csharp
+            link => AssertLink(link, null, null, null, 0));
+    }
+
+    [Theory]
+    [InlineData(0, CacheCounterState.Reported, CacheCounterState.Reported, 300, 100)]
+    [InlineData(1, CacheCounterState.Reported, CacheCounterState.Absent, 300, 0)]
+    [InlineData(2, CacheCounterState.Absent, CacheCounterState.Reported, 0, 200)]
+    [InlineData(3, CacheCounterState.Absent, CacheCounterState.Absent, 0, 0)]
+    [InlineData(4, CacheCounterState.Reported, CacheCounterState.Absent, 0, 0)]
+    [InlineData(5, CacheCounterState.Absent, CacheCounterState.Reported, 0, 0)]
+    [InlineData(6, CacheCounterState.Absent, CacheCounterState.Reported, 0, 0)]
+    public void NZ13_CacheCounterStates_SayWhichCountersTheSpanCarried(
+        int caseNumber,
+        CacheCounterState readState,
+        CacheCounterState writeState,
+        long cacheRead,
+        long cacheWrite)
+    {
+        OtlpAttribute[] cache = caseNumber switch
         {
-        }
+            0 =>
+            [
+                Int(GenAiAttributeNames.CacheReadInputTokens, 300),
+                Int(GenAiAttributeNames.CacheWriteInputTokens, 100),
+            ],
+            1 => [Int(GenAiAttributeNames.CacheReadInputTokens, 300)],
+            2 => [Int(GenAiAttributeNames.LegacyCacheCreationInputTokens, 200)],
+            3 => [],
+            4 => [Int(GenAiAttributeNames.CacheReadInputTokens, 0)],
+            5 => [Int(GenAiAttributeNames.LegacyCacheCreationInputTokens, 0)],
+            6 =>
+            [
+                Int(GenAiAttributeNames.CacheWriteInputTokens, 0),
+                Int(GenAiAttributeNames.LegacyCacheCreationInputTokens, 50),
+            ],
+            _ => throw new ArgumentOutOfRangeException(nameof(caseNumber)),
+        };
+
+        NormalizedGenAiSpan span = Assert.Single(GenAiSpanNormalizer.Normalize(
+            Request(
+                CopilotResource,
+                Span(attributes:
+                [
+                    Str(GenAiAttributeNames.OperationName, "chat"),
+                    Int(GenAiAttributeNames.InputTokens, 1000),
+                    Int(GenAiAttributeNames.OutputTokens, 7),
+                    .. cache,
+                ]))).InferenceSpans);
+
+        Assert.Equal(readState, span.CacheReadState);
+        Assert.Equal(writeState, span.CacheWriteState);
+        Assert.Equal(cacheRead, span.CacheReadInputTokens);
+        Assert.Equal(cacheWrite, span.CacheWriteInputTokens);
+        Assert.Equal(1000, span.InputTokens);
+        Assert.Equal(7, span.OutputTokens);
+    }
+
+    [Fact]
+    public void NZ14_CopilotCapture_LeavesOutZeroCacheCounters()
+    {
+        NormalizedTraceBatch batch = GenAiSpanNormalizer.Normalize(CopilotTraces.TraceBA());
+
+        Assert.Collection(
+            batch.InferenceSpans,
+            span =>
+            {
+                Assert.Equal("00f067aa0ba902bb", span.SpanId);
+                Assert.Equal(CacheCounterState.Absent, span.CacheReadState);
+                Assert.Equal(CacheCounterState.Reported, span.CacheWriteState);
+                Assert.Equal(0, span.CacheReadInputTokens);
+                Assert.Equal(3662, span.CacheWriteInputTokens);
+                Assert.True(CacheMetrics.IsReported(span.CacheReadState, span.CacheWriteState));
+            },
+            span =>
+            {
+                Assert.Equal("00f067aa0ba902bd", span.SpanId);
+                Assert.Equal(CacheCounterState.Reported, span.CacheReadState);
+                Assert.Equal(CacheCounterState.Reported, span.CacheWriteState);
+                Assert.Equal(3662, span.CacheReadInputTokens);
+                Assert.Equal(99, span.CacheWriteInputTokens);
+            },
+            span =>
+            {
+                Assert.Equal("00f067aa0ba902b8", span.SpanId);
+                Assert.Equal(CacheCounterState.Reported, span.CacheReadState);
+                Assert.Equal(CacheCounterState.Absent, span.CacheWriteState);
+                Assert.Equal(15872, span.CacheReadInputTokens);
+                Assert.Equal(0, span.CacheWriteInputTokens);
+            });
+        NormalizedGenAiSpan unreported = Assert.Single(
+            GenAiSpanNormalizer.Normalize(CopilotTraces.TraceF()).InferenceSpans);
+        Assert.Equal(CacheCounterState.Absent, unreported.CacheReadState);
+        Assert.Equal(CacheCounterState.Absent, unreported.CacheWriteState);
+        Assert.False(CacheMetrics.IsReported(unreported.CacheReadState, unreported.CacheWriteState));
+    }
+
+    private static void AssertLink(
+        GenAiSpanLink link,
+```
+
+New file `tests/CopilotLedger.Tests/Telemetry/CacheMetricsTests.cs`:
+
+```csharp
+using System.Globalization;
+using CopilotLedger.Core.Telemetry;
+
+namespace CopilotLedger.Tests.Telemetry;
+
+public sealed class CacheMetricsTests
+{
+    public static TheoryData<long, long, decimal> HitRatios => new()
+    {
+        { 1, 2, 0.5m },
+        { 0, 100, 0m },
+        { 100, 100, 1m },
+        { 1_450_000, 2_600_000, 0.5576923076923076923076923077m },
+        { 1, 3, 0.3333333333333333333333333333m },
+        { 2, 3, 0.6666666666666666666666666667m },
+        { 3_662, 7_429, 0.4929331000134607618791223583m },
+        { 1_950_000, 4_000_000, 0.4875m },
+    };
+
+    [Theory]
+    [MemberData(nameof(HitRatios))]
+    public void CM1_HitRatio_IsTheExactDecimalQuotient(long cacheRead, long input, decimal expected)
+    {
+        decimal? ratio = CacheMetrics.HitRatio(cacheRead, input);
+
+        Assert.Equal(expected, ratio);
+        Assert.Equal(
+            expected.ToString(CultureInfo.InvariantCulture),
+            ratio!.Value.ToString(CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void CM2_HitRatio_IsNullWithoutInput()
+    {
+        Assert.Null(CacheMetrics.HitRatio(0, 0));
+        Assert.Null(CacheMetrics.HitRatio(5, 0));
+    }
+
+    [Theory]
+    [InlineData(CacheCounterState.Reported, CacheCounterState.Reported, true)]
+    [InlineData(CacheCounterState.Reported, CacheCounterState.Absent, true)]
+    [InlineData(CacheCounterState.Reported, CacheCounterState.LegacyUnknown, true)]
+    [InlineData(CacheCounterState.Absent, CacheCounterState.Reported, true)]
+    [InlineData(CacheCounterState.LegacyUnknown, CacheCounterState.Reported, true)]
+    [InlineData(CacheCounterState.Absent, CacheCounterState.Absent, false)]
+    [InlineData(CacheCounterState.Absent, CacheCounterState.LegacyUnknown, false)]
+    [InlineData(CacheCounterState.LegacyUnknown, CacheCounterState.Absent, false)]
+    [InlineData(CacheCounterState.LegacyUnknown, CacheCounterState.LegacyUnknown, false)]
+    public void CM3_IsReported_NeedsOneReportedCounter(
+        CacheCounterState cacheRead,
+        CacheCounterState cacheWrite,
+        bool expected)
+    {
+        Assert.Equal(expected, CacheMetrics.IsReported(cacheRead, cacheWrite));
     }
 }
 ```
 
-### Log through it (A1, copy exactly)
-
-In `src/CopilotLedger.Cli/Daemon/DaemonHost.cs`, replace:
+Edit 1 of 2 in `tests/CopilotLedger.Tests/TestSupport/TestSpans.cs`, replace:
 
 ```csharp
-                    context.TimeProvider),
-                new CopilotSessionWorkspaceLocator(context.CopilotHome, context.TimeProvider),
-                monitor);
-            app = OtlpReceiverApp.Build(
-                new OtlpReceiverOptions { Port = port },
-                ingestor,
-                context.ConfigureWebHost);
-
-            if (!OperatingSystem.IsWindows())
-            {
+        long outputTokens = 0,
+        long cacheReadInputTokens = 0,
+        long cacheWriteInputTokens = 0)
+    {
+        DateTimeOffset start = startTime ?? new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero);
 ```
 
 with:
 
 ```csharp
-                    context.TimeProvider),
-                new CopilotSessionWorkspaceLocator(context.CopilotHome, context.TimeProvider),
-                monitor);
-            IngestFailureLog ingestFailures = new(
-                message => WriteLog(writer, context, message),
-                context.TimeProvider);
-            app = OtlpReceiverApp.Build(
-                new OtlpReceiverOptions { Port = port },
-                ingestor,
-                context.ConfigureWebHost,
-                ingestFailures.Report);
-
-            if (!OperatingSystem.IsWindows())
-            {
+        long outputTokens = 0,
+        long cacheReadInputTokens = 0,
+        long cacheWriteInputTokens = 0,
+        CacheCounterState? cacheReadState = null,
+        CacheCounterState? cacheWriteState = null)
+    {
+        DateTimeOffset start = startTime ?? new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero);
 ```
 
-### Finish the flag file (A11, copy exactly)
-
-In `src/CopilotLedger.Otlp/Breaker/CircuitBreakerMonitor.cs`, replace:
+Edit 2 of 2 in `tests/CopilotLedger.Tests/TestSupport/TestSpans.cs`, replace:
 
 ```csharp
-        try
-        {
-            await CircuitFlagFile.SyncAsync(
-                _store,
-                trip.RepositoryRoot);
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException)
-```
-
-with:
-
-```csharp
-        try
-        {
-            // The trip is committed and published, so an aborted request mustn't leave its flag file unwritten.
-            await CircuitFlagFile.SyncAsync(
-                _store,
-                trip.RepositoryRoot,
-                CancellationToken.None);
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException)
-```
-
-Edit 1 of 2 in `src/CopilotLedger.Otlp/Breaker/CircuitFlagFile.cs`, replace:
-
-```csharp
+            CacheReadInputTokens = cacheReadInputTokens,
+            CacheWriteInputTokens = cacheWriteInputTokens,
+        };
     }
-
-    // Makes the flag file match the ledger. Throws IOException or UnauthorizedAccessException from the file system, and
-    // whatever the store throws. Does nothing when repositoryRoot isn't an existing directory.
-    public static async Task SyncAsync(
-        SqliteLedgerStore store,
-        string repositoryRoot,
+}
 ```
 
 with:
 
 ```csharp
-    }
+            CacheReadInputTokens = cacheReadInputTokens,
+            CacheWriteInputTokens = cacheWriteInputTokens,
 
-    // Makes the flag file match the ledger. Throws IOException or UnauthorizedAccessException from the file system, and
-    // whatever the store throws, including OperationCanceledException. Whatever it throws, it first tries to delete the
-    // temporary file it was writing. Does nothing when repositoryRoot isn't an existing directory.
-    public static async Task SyncAsync(
-        SqliteLedgerStore store,
-        string repositoryRoot,
+            // Only a reported counter can be nonzero. Pass a state to record a reported 0.
+            CacheReadState = cacheReadState
+                ?? (cacheReadInputTokens == 0 ? CacheCounterState.Absent : CacheCounterState.Reported),
+            CacheWriteState = cacheWriteState
+                ?? (cacheWriteInputTokens == 0 ? CacheCounterState.Absent : CacheCounterState.Reported),
+        };
+    }
+}
 ```
 
-Edit 2 of 2 in `src/CopilotLedger.Otlp/Breaker/CircuitFlagFile.cs`, replace:
+### Tests
+
+- **NZ13** (7 cases): read and write present → `Reported`/`Reported` with 300 and 100; read only → `Reported`/`Absent` with 300 and 0; legacy `cache_creation` only → `Absent`/`Reported` with 0 and 200; neither → `Absent`/`Absent`; a present 0 is `Reported`, for cache read, for `cache_creation`, and for `cache_write` 0 with `cache_creation` 50 (the write counter wins, 0). Input stays 1,000 and output 7 in every case.
+- **NZ14**: the recorded Copilot CLI capture `CopilotTraces.TraceBA` gives (`Absent`, `Reported` 3,662), (`Reported` 3,662, `Reported` 99), and (`Reported` 15,872, `Absent`); the first span `IsReported`. `CopilotTraces.TraceF`'s span has neither counter and isn't reported.
+- **CM1** (8 `TheoryData<long, long, decimal>` cases): 1/2 → `0.5`; 0/100 → `0`; 100/100 → `1`; 1,450,000/2,600,000 → `0.5576923076923076923076923077`; 1/3 → `0.3333333333333333333333333333`; 2/3 → `0.6666666666666666666666666667`; 3,662/7,429 → `0.4929331000134607618791223583`; 1,950,000/4,000,000 → `0.4875`, each also compared as invariant text. **CM2**: input 0 → `null`. **CM3** (9 cases): reported when either state is `Reported`, not for any mix of `Absent` and `LegacyUnknown`.
+
+### Acceptance criteria
+
+- The four attribute combinations the issue lists produce the states above, with token values unchanged (NZ13, NZ14), and every existing normalizer, pricing, and storage test passes unchanged.
+- `HitRatio` is exact `decimal`, never rounded; no `double` or `float`.
+- `dotnet test CopilotLedger.slnx` passes **697** tests (671 + 26).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 2 specification: Pull Request Numbers from Git Config
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Git/GitWorkspaceContext.cs` | Adds `int? PullRequestNumber { get; init; }` |
+| `src/CopilotLedger.Core/Git/FileSystemGitContextResolver.cs` | `ReadOriginUrl` becomes `ReadConfig`, which also reads the branch's `merge`; new `ParsePullRequestRef` |
+| `tests/CopilotLedger.Tests/TestSupport/GitFixture.cs` | `Create(string root, int? pullRequest = null)` |
+| `tests/CopilotLedger.Tests/Git/FileSystemGitContextResolverTests.cs` | Four new tests |
+| `tests/CopilotLedger.Tests/Git/GitWorkspaceContextTests.cs` | One new test |
+| `tests/CopilotLedger.Tests/Git/CachingGitContextResolverTests.cs` | New CG4 |
+
+### Contract and algorithm
 
 ```csharp
-                    await File.WriteAllTextAsync(temp, desired, Utf8, cancellationToken);
-                    File.Move(temp, path, overwrite: true);
+public sealed record GitWorkspaceContext(/* the same six positional parameters */)
+{
+    public int? PullRequestNumber { get; init; }
+    public bool IsDetachedHead => BranchName is null && HeadCommitSha is not null;
+}
+```
+
+`ReadConfig(configPath, branch)` makes one pass over `<commonDir>/config`:
+
+1. A section header line sets two flags: the `origin` section (`[remote "origin"]`, as before) and the branch section (`[branch "<branch>"]`, only when `branch` isn't null). Section names compare without regard to case and subsection names exactly, as `TryReadSection` already parses them.
+2. A line without `=` is skipped. Otherwise its key is the text before the first `=`, trimmed.
+3. In the `origin` section, the first `url` line (any case) sets the origin URL through `ReadConfigValue` and `GitRemoteUrl.Sanitize`, and later `url` lines are ignored. This is `ReadOriginUrl`'s behavior.
+4. In the branch section, every `merge` line (any case) sets the pull request number to `ParsePullRequestRef(ReadConfigValue(value))`, so the last one wins, including a later one that isn't a pull request ref.
+5. `ParsePullRequestRef` returns `n` only for exactly `refs/pull/<n>/head` where `<n>` is ASCII digits without a leading zero that parse as an `int` (1 to 2,147,483,647); anything else is `null`.
+
+`Resolve` passes the branch it read from `HEAD` (null when detached) and sets `PullRequestNumber` with an object initializer.
+
+### Code (copy exactly)
+
+Edit 1 of 5 in `src/CopilotLedger.Core/Git/FileSystemGitContextResolver.cs`, replace:
+
+```csharp
+namespace CopilotLedger.Core.Git;
+
+public sealed class FileSystemGitContextResolver : IGitContextResolver
+```
+
+with:
+
+```csharp
+using System.Globalization;
+
+namespace CopilotLedger.Core.Git;
+
+public sealed class FileSystemGitContextResolver : IGitContextResolver
+```
+
+Edit 2 of 5 in `src/CopilotLedger.Core/Git/FileSystemGitContextResolver.cs`, replace:
+
+```csharp
+                        commit = head.ToLowerInvariant();
+                    }
                 }
-                catch (Exception ex) when (
-                    ex is IOException or UnauthorizedAccessException)
+
+                string? remoteUrl = null;
+                string configPath = Path.Combine(commonDirectory, "config");
+                if (File.Exists(configPath))
                 {
-                    try
-                    {
-```
-
-with:
-
-```csharp
-                    await File.WriteAllTextAsync(temp, desired, Utf8, cancellationToken);
-                    File.Move(temp, path, overwrite: true);
+                    remoteUrl = ReadOriginUrl(configPath);
                 }
-                catch
+
+                return new GitWorkspaceContext(
+```
+
+with:
+
+```csharp
+                        commit = head.ToLowerInvariant();
+                    }
+                }
+
+                string? remoteUrl = null;
+                int? pullRequestNumber = null;
+                string configPath = Path.Combine(commonDirectory, "config");
+                if (File.Exists(configPath))
                 {
-                    try
-                    {
+                    (remoteUrl, pullRequestNumber) = ReadConfig(configPath, branch);
+                }
+
+                return new GitWorkspaceContext(
 ```
 
-### Remove dead members (A5, copy exactly)
-
-In `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+Edit 3 of 5 in `src/CopilotLedger.Core/Git/FileSystemGitContextResolver.cs`, replace:
 
 ```csharp
-        }
-    }
-
-    public static JsonRateCardCalculator LoadDefault()
-    {
-        return File.Exists(LedgerPaths.DefaultRatesOverlayPath)
-            ? LoadEmbeddedWithOverlay(LedgerPaths.DefaultRatesOverlayPath)
-            : LoadEmbedded();
-    }
-
-    // baseJson is a complete rates document, such as a downloaded rates.json; its errors have no prefix. When overlayPath
-    // isn't null, that overlay is merged as LoadEmbeddedWithOverlay merges it, and its errors start with overlayPath.
-    public static JsonRateCardCalculator LoadWithOverlay(string baseJson, string? overlayPath)
-```
-
-with:
-
-```csharp
-        }
-    }
-
-    // baseJson is a complete rates document, such as a downloaded rates.json; its errors have no prefix. When overlayPath
-    // isn't null, that overlay is merged as LoadEmbeddedWithOverlay merges it, and its errors start with overlayPath.
-    public static JsonRateCardCalculator LoadWithOverlay(string baseJson, string? overlayPath)
-```
-
-In `src/CopilotLedger.Core/LedgerPaths.cs`, replace:
-
-```csharp
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".copilot-ledger");
-
-    public static string DefaultDatabasePath { get; } =
-        Path.Combine(DataDirectory, "ledger.db");
-
-    public static string DefaultRatesOverlayPath { get; } =
-        Path.Combine(DataDirectory, "rates.json");
-}
-```
-
-with:
-
-```csharp
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".copilot-ledger");
-}
-```
-
-### Version 0.4.1 (copy exactly)
-
-In `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`, replace:
-
-```xml
-    <AssemblyName>gh-ledger</AssemblyName>
-    <RootNamespace>CopilotLedger.Cli</RootNamespace>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.4.0</Version>
-    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <InvariantGlobalization>true</InvariantGlobalization>
-    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
-```
-
-with:
-
-```xml
-    <AssemblyName>gh-ledger</AssemblyName>
-    <RootNamespace>CopilotLedger.Cli</RootNamespace>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.4.1</Version>
-    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <InvariantGlobalization>true</InvariantGlobalization>
-    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
-```
-
-In `src/CopilotLedger.Cli/GhLedgerCli.cs`, replace:
-
-```csharp
-public static class GhLedgerCli
-{
-    // AssemblyInformationalVersionAttribute: "0.4.0"
-    public static string Version { get; } =
-        typeof(GhLedgerCli).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion
-        ?? "0.4.0";
-
-    // Builds a new RootCommand, parses args, and invokes it with
-    // new InvocationConfiguration { Output = context.Out, Error = context.Error, ProcessTerminationTimeout = null }.
-```
-
-with:
-
-```csharp
-public static class GhLedgerCli
-{
-    // AssemblyInformationalVersionAttribute: "0.4.1"
-    public static string Version { get; } =
-        typeof(GhLedgerCli).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion
-        ?? "0.4.1";
-
-    // Builds a new RootCommand, parses args, and invokes it with
-    // new InvocationConfiguration { Output = context.Out, Error = context.Error, ProcessTerminationTimeout = null }.
-```
-
-In `.github/workflows/ci.yml`, replace:
-
-```yaml
-        env:
-          COPILOT_LEDGER_HOME: ${{ runner.temp }}/copilot-ledger
-        run: |
-          test "$(./artifacts/gh-ledger/gh-ledger --version | tr -d '\r')" = "0.4.0"
-          ./artifacts/gh-ledger/gh-ledger rates validate
-          started=$(./artifacts/gh-ledger/gh-ledger daemon start | tr -d '\r')
-          echo "$started"
-```
-
-with:
-
-```yaml
-        env:
-          COPILOT_LEDGER_HOME: ${{ runner.temp }}/copilot-ledger
-        run: |
-          test "$(./artifacts/gh-ledger/gh-ledger --version | tr -d '\r')" = "0.4.1"
-          ./artifacts/gh-ledger/gh-ledger rates validate
-          started=$(./artifacts/gh-ledger/gh-ledger daemon start | tr -d '\r')
-          echo "$started"
-```
-
-DM1 and `ReportCommandTests.StatusText` change with it (see "Task 1 tests").
-
-### Test support (A2 and A10, copy exactly)
-
-Add `ReadAllText` at the end of `FileRetry`:
-
-In `tests/CopilotLedger.Tests/TestSupport/FileRetry.cs`, replace:
-
-```csharp
+                    commit,
+                    remoteUrl,
+                    remoteUrl is null ? null : GitRemoteUrl.GetRepositorySlug(remoteUrl));
             }
-        }
-    }
-}
+
+            if (_ceilingDirectory is not null &&
 ```
 
 with:
 
 ```csharp
+                    commit,
+                    remoteUrl,
+                    remoteUrl is null ? null : GitRemoteUrl.GetRepositorySlug(remoteUrl))
+                {
+                    PullRequestNumber = pullRequestNumber,
+                };
             }
-        }
+
+            if (_ceilingDirectory is not null &&
+```
+
+Edit 4 of 5 in `src/CopilotLedger.Core/Git/FileSystemGitContextResolver.cs`, replace:
+
+```csharp
+        return null;
     }
 
-    // Like ReadAllTextAsync, for synchronous helpers such as GitFixture.Create.
-    public static string ReadAllText(string path)
+    private static string? ReadOriginUrl(string configPath)
     {
-        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-        while (true)
+        string? contents = ReadAllLines(configPath);
+        if (contents is null)
         {
-            try
-            {
-                return File.ReadAllText(path);
+            return null;
+        }
+
+        bool originSection = false;
+        foreach (string rawLine in contents.Split('\n'))
+        {
+            string line = rawLine.Trim().TrimEnd('\r');
+```
+
+with:
+
+```csharp
+        return null;
+    }
+
+    // Returns remote.origin.url, read as before: the first url line in an origin section, sanitized. When branch isn't null,
+    // also returns n from the last merge value in a [branch "<branch>"] section when that value is refs/pull/<n>/head.
+    private static (string? OriginUrl, int? PullRequestNumber) ReadConfig(string configPath, string? branch)
+    {
+        string? contents = ReadAllLines(configPath);
+        if (contents is null)
+        {
+            return (null, null);
+        }
+
+        bool originSection = false;
+        bool branchSection = false;
+        bool originRead = false;
+        string? originUrl = null;
+        int? pullRequestNumber = null;
+        foreach (string rawLine in contents.Split('\n'))
+        {
+            string line = rawLine.Trim().TrimEnd('\r');
+```
+
+Edit 5 of 5 in `src/CopilotLedger.Core/Git/FileSystemGitContextResolver.cs`, replace:
+
+```csharp
+                    name.Equals("remote", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(subsection, "origin", StringComparison.Ordinal);
+                continue;
             }
-            catch (IOException) when (DateTime.UtcNow < deadline)
+
+            if (!originSection)
             {
-                Thread.Sleep(25);
+                continue;
+            }
+
+            int equals = line.IndexOf('=');
+            if (equals < 0 || !line[..equals].Trim().Equals("url", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string? value = ReadConfigValue(line[(equals + 1)..]);
+            return value is null ? null : GitRemoteUrl.Sanitize(value);
+        }
+
+        return null;
+    }
+
+    private static bool TryReadSection(string line, out string name, out string? subsection)
+```
+
+with:
+
+```csharp
+                    name.Equals("remote", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(subsection, "origin", StringComparison.Ordinal);
+                branchSection =
+                    branch is not null &&
+                    name.Equals("branch", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(subsection, branch, StringComparison.Ordinal);
+                continue;
+            }
+
+            int equals = line.IndexOf('=');
+            if (equals < 0)
+            {
+                continue;
+            }
+
+            string key = line[..equals].Trim();
+            if (originSection && !originRead && key.Equals("url", StringComparison.OrdinalIgnoreCase))
+            {
+                originRead = true;
+                string? value = ReadConfigValue(line[(equals + 1)..]);
+                originUrl = value is null ? null : GitRemoteUrl.Sanitize(value);
+            }
+            else if (branchSection && key.Equals("merge", StringComparison.OrdinalIgnoreCase))
+            {
+                pullRequestNumber = ParsePullRequestRef(ReadConfigValue(line[(equals + 1)..]));
             }
         }
+
+        return (originUrl, pullRequestNumber);
+    }
+
+    // n for "refs/pull/<n>/head", where n is 1 to int.MaxValue written without a sign or leading zeros; otherwise null.
+    private static int? ParsePullRequestRef(string? value)
+    {
+        const string Prefix = "refs/pull/";
+        const string Suffix = "/head";
+        if (value is null ||
+            value.Length <= Prefix.Length + Suffix.Length ||
+            !value.StartsWith(Prefix, StringComparison.Ordinal) ||
+            !value.EndsWith(Suffix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string digits = value[Prefix.Length..^Suffix.Length];
+        return digits[0] != '0' &&
+               digits.All(char.IsAsciiDigit) &&
+               int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out int number)
+            ? number
+            : null;
+    }
+
+    private static bool TryReadSection(string line, out string name, out string? subsection)
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Git/GitWorkspaceContext.cs`, replace:
+
+```csharp
+    string? RepositorySlug)     // "owner/repo"; null if not derivable
+{
+    public bool IsDetachedHead => BranchName is null && HeadCommitSha is not null;
+}
+```
+
+with:
+
+```csharp
+    string? RepositorySlug)     // "owner/repo"; null if not derivable
+{
+    // n when the repository's config has [branch "<BranchName>"] merge = refs/pull/<n>/head, as gh pr checkout writes for
+    // a pull request whose head it fetched from the base repository; null otherwise, including for detached HEADs.
+    public int? PullRequestNumber { get; init; }
+
+    public bool IsDetachedHead => BranchName is null && HeadCommitSha is not null;
+}
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Git/CachingGitContextResolverTests.cs`, replace:
+
+```csharp
+        Assert.Equal(2, inner.Calls);
+    }
+
+    private static GitWorkspaceContext Context(string root) =>
+        new(root, Path.Combine(root, ".git"), "main", null, null, null);
+```
+
+with:
+
+```csharp
+        Assert.Equal(2, inner.Calls);
+    }
+
+    [Fact]
+    public void CG4_CachedContext_KeepsItsPullRequestNumber()
+    {
+        ManualTimeProvider time = Time();
+        FakeResolver inner = new(Context("/r") with { PullRequestNumber = 42 });
+        CachingGitContextResolver resolver = new(inner, time);
+
+        Assert.Equal(42, resolver.Resolve("/r")!.PullRequestNumber);
+        time.Advance(TimeSpan.FromSeconds(4));
+        Assert.Equal(42, resolver.Resolve("/r")!.PullRequestNumber);
+        Assert.Equal(1, inner.Calls);
+    }
+
+    private static GitWorkspaceContext Context(string root) =>
+        new(root, Path.Combine(root, ".git"), "main", null, null, null);
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Git/FileSystemGitContextResolverTests.cs`, replace:
+
+```csharp
+        Assert.Null(Resolve(temp, repo));
+    }
+
+    private static GitWorkspaceContext? Resolve(TempDirectory temp, string workingDirectory) =>
+        new FileSystemGitContextResolver(temp.Path).Resolve(workingDirectory);
+```
+
+with:
+
+```csharp
+        Assert.Null(Resolve(temp, repo));
+    }
+
+    [Fact]
+    public void Resolve_PullRequestCheckout_ReadsTheNumberFromTheMergeRef()
+    {
+        using TempDirectory temp = new();
+        using TempDirectory plain = new();
+        string repo = GitFixture.Create(temp.Path, pullRequest: 42);
+        string other = GitFixture.Create(plain.Path);
+
+        GitWorkspaceContext? result = Resolve(temp, Path.Combine(repo, "src"));
+        GitWorkspaceContext? withoutPullRequest = Resolve(plain, other);
+
+        Assert.NotNull(result);
+        Assert.Equal("feature/ledger", result.BranchName);
+        Assert.Equal("swigerb/copilot-ledger", result.RepositorySlug);
+        Assert.Equal(42, result.PullRequestNumber);
+        Assert.NotNull(withoutPullRequest);
+        Assert.Null(withoutPullRequest.PullRequestNumber);
+    }
+
+    public static TheoryData<string, int?> MergeConfigs => new()
+    {
+        { "[branch \"feature/x\"]\n\tremote = origin\n\tmerge = refs/pull/42/head\n", 42 },
+        { "[branch \"feature/x\"]\n\tremote = origin\n\tmerge = refs/heads/feature/x\n", null },
+        { "[branch \"other\"]\n\tmerge = refs/pull/42/head\n", null },
+        { "[branch \"Feature/X\"]\n\tmerge = refs/pull/42/head\n", null },
+        { "[Branch \"feature/x\"]\n\tMERGE = \"refs/pull/7/head\" ; gh pr checkout\n", 7 },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/42/head\n\tmerge = refs/heads/feature/x\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/42/head\n[branch \"feature/x\"]\n\tremote = origin\n", 42 },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/42/head\n[branch \"feature/x\"]\n\tmerge = refs/pull/43/head\n", 43 },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/2147483647/head\n", 2147483647 },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/2147483648/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/0/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/042/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/-1/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/+1/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/4 2/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/42/merge\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull//head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = \"refs/pull/42/head\n", null },
+    };
+
+    [Theory]
+    [MemberData(nameof(MergeConfigs))]
+    public void Resolve_MergeConfig_YieldsOnlyExplicitPullRequestRefs(string branchConfig, int? expected)
+    {
+        using TempDirectory temp = new();
+        string repo = CreateDirectory(temp, "repo");
+        string git = CreateDirectory(repo, ".git");
+        Write(git, "HEAD", "ref: refs/heads/feature/x\n");
+        Write(git, "refs/heads/feature/x", Sha1 + "\n");
+        Write(git, "config", $"[remote \"origin\"]\n\turl = {OriginUrl}\n" + branchConfig);
+
+        GitWorkspaceContext? result = Resolve(temp, repo);
+
+        Assert.NotNull(result);
+        Assert.Equal(expected, result.PullRequestNumber);
+        Assert.Equal(OriginUrl, result.RemoteOriginUrl);
+        Assert.Equal("swigerb/copilot-ledger", result.RepositorySlug);
+    }
+
+    [Fact]
+    public void Resolve_DetachedHead_HasNoPullRequest()
+    {
+        using TempDirectory temp = new();
+        string repo = CreateDirectory(temp, "repo");
+        string git = CreateDirectory(repo, ".git");
+        Write(git, "HEAD", Sha1 + "\n");
+        Write(git, "config", "[branch \"feature/x\"]\n\tmerge = refs/pull/42/head\n");
+
+        GitWorkspaceContext? result = Resolve(temp, repo);
+
+        Assert.NotNull(result);
+        Assert.True(result.IsDetachedHead);
+        Assert.Null(result.PullRequestNumber);
+    }
+
+    [Fact]
+    public void Resolve_LinkedWorktree_ReadsTheMergeRefFromTheCommonConfig()
+    {
+        using TempDirectory temp = new();
+        string main = CreateDirectory(temp, "main");
+        string mainGit = CreateDirectory(main, ".git");
+        Write(mainGit, "HEAD", "ref: refs/heads/main\n");
+        Write(
+            mainGit,
+            "config",
+            $"[remote \"origin\"]\n\turl = {OriginUrl}\n[branch \"wt-branch\"]\n\tremote = origin\n\tmerge = refs/pull/9/head\n");
+        Write(mainGit, "refs/heads/wt-branch", Sha1 + "\n");
+        string worktreeGit = CreateDirectory(mainGit, "worktrees", "wt");
+        Write(worktreeGit, "HEAD", "ref: refs/heads/wt-branch\n");
+        Write(worktreeGit, "commondir", "../..\n");
+        string worktree = CreateDirectory(temp, "wt");
+        Write(worktree, ".git", "gitdir: " + worktreeGit + "\n");
+
+        GitWorkspaceContext? worktreeResult = Resolve(temp, worktree);
+        GitWorkspaceContext? mainResult = Resolve(temp, main);
+
+        Assert.Equal(9, worktreeResult!.PullRequestNumber);
+        Assert.Equal("main", mainResult!.BranchName);
+        Assert.Null(mainResult.PullRequestNumber);
+    }
+
+    private static GitWorkspaceContext? Resolve(TempDirectory temp, string workingDirectory) =>
+        new FileSystemGitContextResolver(temp.Path).Resolve(workingDirectory);
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Git/GitWorkspaceContextTests.cs`, replace:
+
+```csharp
+        Assert.Equal(expected, context.IsDetachedHead);
     }
 }
 ```
 
-In `tests/CopilotLedger.Tests/TestSupport/GitFixture.cs`, replace:
+with:
 
 ```csharp
-        File.WriteAllText(
-            Path.Combine(git, "config"),
-            "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n");
-        return repo;
+        Assert.Equal(expected, context.IsDetachedHead);
     }
+
+    [Fact]
+    public void PullRequestNumber_DefaultsToNullAndTakesPartInEquality()
+    {
+        GitWorkspaceContext context = new("/repo", "/repo/.git", "feature/x", null, null, null);
+        GitWorkspaceContext pullRequest = context with { PullRequestNumber = 42 };
+
+        Assert.Null(context.PullRequestNumber);
+        Assert.Equal(42, pullRequest.PullRequestNumber);
+        Assert.NotEqual(context, pullRequest);
+        Assert.Equal(pullRequest, context with { PullRequestNumber = 42 });
+    }
+}
+```
+
+Edit 1 of 3 in `tests/CopilotLedger.Tests/TestSupport/GitFixture.cs`, replace:
+
+```csharp
+using CopilotLedger.Core.Git;
+
+namespace CopilotLedger.Tests.TestSupport;
 ```
 
 with:
+
+```csharp
+using System.Globalization;
+using CopilotLedger.Core.Git;
+
+namespace CopilotLedger.Tests.TestSupport;
+```
+
+Edit 2 of 3 in `tests/CopilotLedger.Tests/TestSupport/GitFixture.cs`, replace:
+
+```csharp
+    // Creates <root>/repo with .git/HEAD "ref: refs/heads/feature/ledger\n", .git/refs/heads/feature/ledger Sha1 + "\n",
+    // .git/config "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n", and an empty <root>/repo/src.
+    // Returns <root>/repo.
+    public static string Create(string root)
+    {
+        string repo = Path.Combine(root, "repo");
+```
+
+with:
+
+```csharp
+    // Creates <root>/repo with .git/HEAD "ref: refs/heads/feature/ledger\n", .git/refs/heads/feature/ledger Sha1 + "\n",
+    // .git/config "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n", and an empty <root>/repo/src.
+    // With pullRequest, the config also has "[branch \"feature/ledger\"]\n\tremote = origin\n\tmerge = refs/pull/<n>/head\n",
+    // as gh pr checkout writes it. Returns <root>/repo.
+    public static string Create(string root, int? pullRequest = null)
+    {
+        string repo = Path.Combine(root, "repo");
+```
+
+Edit 3 of 3 in `tests/CopilotLedger.Tests/TestSupport/GitFixture.cs`, replace:
 
 ```csharp
         File.WriteAllText(
@@ -672,56 +1148,1072 @@ with:
             "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n");
 
         // Reading the files back waits out a brief antivirus lock, so the resolver sees them when the test runs.
-        _ = FileRetry.ReadAllText(Path.Combine(git, "HEAD"));
-        _ = FileRetry.ReadAllText(branch);
-        _ = FileRetry.ReadAllText(Path.Combine(git, "config"));
-        return repo;
-    }
-```
-
-In `tests/CopilotLedger.Tests/TestSupport/FakeCliPlatform.cs`, replace:
-
-```csharp
-public sealed class FakeCliPlatform : ICliPlatform
-{
-    public bool IsWindows { get; set; }
-    public bool IsMacOS { get; set; }
-    public string HomeDirectory { get; set; } = "/home/test";
-    public string? ProcessPath { get; set; } = "/opt/gh-ledger/gh-ledger";
-    public string? ShellPath { get; set; }
-    public Dictionary<string, string> ProcessVariables { get; } =
 ```
 
 with:
 
 ```csharp
-public sealed class FakeCliPlatform : ICliPlatform
-{
-    private string? _homeDirectory;
+        File.WriteAllText(
+            Path.Combine(git, "config"),
+            "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n" +
+            (pullRequest is null
+                ? string.Empty
+                : $"[branch \"feature/ledger\"]\n\tremote = origin\n\tmerge = refs/pull/{pullRequest.Value.ToString(CultureInfo.InvariantCulture)}/head\n"));
 
-    public bool IsWindows { get; set; }
-    public bool IsMacOS { get; set; }
+        // Reading the files back waits out a brief antivirus lock, so the resolver sees them when the test runs.
+```
 
-    // Throws until a test sets it, so install can't write a profile or sign-in item outside the test's TempDirectory.
-    public string HomeDirectory
-    {
-        get => _homeDirectory
-            ?? throw new InvalidOperationException(
-                "Set FakeCliPlatform.HomeDirectory to a directory under the test's TempDirectory.");
-        set => _homeDirectory = value;
+### Tests
+
+- **Resolve_PullRequestCheckout_ReadsTheNumberFromTheMergeRef:** `GitFixture.Create(root, pullRequest: 42)` resolves from `repo/src` to branch `feature/ledger`, slug `swigerb/copilot-ledger`, and pull request 42; a fixture without `pullRequest` has `null`.
+- **Resolve_MergeConfig_YieldsOnlyExplicitPullRequestRefs** (19 cases, branch `feature/x`): `refs/pull/42/head` → 42; `refs/heads/feature/x` → null; another branch's section → null; `[branch "Feature/X"]` → null; `[Branch "feature/x"]` with `MERGE = "refs/pull/7/head" ; gh pr checkout` → 7; a later `merge = refs/heads/…` → null; a later section without `merge` → 42; a later section with `refs/pull/43/head` → 43; 2147483647 → 2147483647; 2147483648, 0, 042, -1, +1, `4 2`, `/merge`, `refs/pull/head`, `refs/pull//head`, and an unterminated quote → null. Every case keeps the origin URL and slug.
+- **Resolve_DetachedHead_HasNoPullRequest** and **Resolve_LinkedWorktree_ReadsTheMergeRefFromTheCommonConfig** (the worktree's branch gets 9 from the common config; the main worktree's `main` gets null).
+- **PullRequestNumber_DefaultsToNullAndTakesPartInEquality** and **CG4** (the cached context keeps 42, with one inner call in 4 seconds).
+
+### Acceptance criteria
+
+- The number comes only from an explicit `refs/pull/<n>/head` merge ref of the current branch in the on-disk config, with no `git` process, no network, and no inference from branch names.
+- The six-parameter constructor is unchanged; no other constructor call changes.
+- `dotnet test CopilotLedger.slnx` passes **721** tests (697 + 24).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 3 specification: Ledger Schema Version 4
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Storage/LedgerMigrations.cs` | Migration 4 |
+| `src/CopilotLedger.Storage/SqliteLedgerStore.cs` | Inserts the new columns, validates them, and records `agent_span_id` in the backfill |
+| `tests/CopilotLedger.Tests/Storage/SqliteLedgerStoreTests.cs` | S1 expects version 4; new S12 and S13 |
+| `tests/CopilotLedger.Tests/Storage/SpanLinkStoreTests.cs` | SL1, SL8, and SL10 move to version 4; new SL11 and SL12 and the `ChatEntry` helper |
+| `tests/CopilotLedger.Tests/Otlp/LedgerIngestorTests.cs` | New IG10 |
+
+### DDL (migration 4, in one transaction)
+
+```sql
+ALTER TABLE spans ADD COLUMN cache_read_state TEXT NOT NULL DEFAULT 'legacy_unknown'
+    CHECK (cache_read_state IN ('reported', 'absent', 'legacy_unknown'));
+ALTER TABLE spans ADD COLUMN cache_write_state TEXT NOT NULL DEFAULT 'legacy_unknown'
+    CHECK (cache_write_state IN ('reported', 'absent', 'legacy_unknown'));
+ALTER TABLE spans ADD COLUMN pull_request_number INTEGER
+    CHECK (pull_request_number IS NULL OR pull_request_number > 0);
+ALTER TABLE spans ADD COLUMN agent_span_id TEXT;
+CREATE INDEX IF NOT EXISTS ix_spans_conversation_start ON spans (conversation_id, start_time_unix_ms);
+```
+
+Then the migration:
+
+1. sets `cache_read_state = 'reported'` where `cache_read_input_tokens > 0`, and `cache_write_state = 'reported'` where `cache_write_input_tokens > 0` (D2); every other legacy row keeps `legacy_unknown`;
+2. fills `agent_span_id` with a recursive CTE over `span_links`: start from each `invoke_agent` link's children that aren't `invoke_agent`, follow children that aren't `invoke_agent`, and set each matching `spans` row's `agent_span_id` to the `invoke_agent` span it started from (`UPDATE … FROM`). Rows below no recorded `invoke_agent` keep `NULL`.
+
+### `SqliteLedgerStore` changes
+
+- `InsertSql` and `AddInsertParameters` add `cache_read_state`, `cache_write_state` (`reported`, `absent`, or `legacy_unknown` from `ToDatabaseString`), and `pull_request_number` (`entry.Git?.PullRequestNumber`, or `NULL`).
+- `ValidateEntry` adds two checks, after the existing ones:
+  - unless both states are `Reported` or `Absent`, and every `Absent` counter is 0: `ArgumentException("Cache counter states must be Reported or Absent, and an Absent counter must be 0.", parameterName)`;
+  - when `entry.Git?.PullRequestNumber` is 0 or less: `ArgumentException("Pull request numbers must be positive.", parameterName)`.
+- `BackfillFromAgentSpansAsync` runs the first `UPDATE` for every agent link, also setting `agent_span_id = COALESCE(agent_span_id, @agentSpanId)`, and matches rows where `agent_span_id IS NULL` too. The Git `UPDATE` is unchanged.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/LedgerMigrations.cs`, replace:
+
+```csharp
+            VALUES (1, 1500000000000, 5, 5, 0, 1, 0);
+            """),
+    ];
+}
+```
+
+with:
+
+```csharp
+            VALUES (1, 1500000000000, 5, 5, 0, 1, 0);
+            """),
+
+        // Rows recorded before version 4 get legacy_unknown cache states, except that a nonzero counter can only have been
+        // reported. agent_span_id is each span's nearest invoke_agent ancestor, filled from the span links not yet pruned.
+        (4, """
+            ALTER TABLE spans ADD COLUMN cache_read_state TEXT NOT NULL DEFAULT 'legacy_unknown'
+                CHECK (cache_read_state IN ('reported', 'absent', 'legacy_unknown'));
+            ALTER TABLE spans ADD COLUMN cache_write_state TEXT NOT NULL DEFAULT 'legacy_unknown'
+                CHECK (cache_write_state IN ('reported', 'absent', 'legacy_unknown'));
+            ALTER TABLE spans ADD COLUMN pull_request_number INTEGER
+                CHECK (pull_request_number IS NULL OR pull_request_number > 0);
+            ALTER TABLE spans ADD COLUMN agent_span_id TEXT;
+
+            CREATE INDEX IF NOT EXISTS ix_spans_conversation_start ON spans (conversation_id, start_time_unix_ms);
+
+            UPDATE spans SET cache_read_state = 'reported' WHERE cache_read_input_tokens > 0;
+            UPDATE spans SET cache_write_state = 'reported' WHERE cache_write_input_tokens > 0;
+
+            WITH RECURSIVE below (trace_id, span_id, agent_span_id) AS (
+                SELECT child.trace_id, child.span_id, agent.span_id
+                  FROM span_links AS agent
+                  JOIN span_links AS child
+                    ON child.trace_id = agent.trace_id AND child.parent_span_id = agent.span_id
+                 WHERE agent.operation_name = 'invoke_agent'
+                   AND (child.operation_name IS NULL OR child.operation_name <> 'invoke_agent')
+                UNION
+                SELECT child.trace_id, child.span_id, below.agent_span_id
+                  FROM below
+                  JOIN span_links AS child
+                    ON child.trace_id = below.trace_id AND child.parent_span_id = below.span_id
+                 WHERE child.operation_name IS NULL OR child.operation_name <> 'invoke_agent'
+            )
+            UPDATE spans
+               SET agent_span_id = below.agent_span_id
+              FROM below
+             WHERE below.trace_id = spans.trace_id AND below.span_id = spans.span_id;
+            """),
+    ];
+}
+```
+
+Edit 1 of 8 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+            cache_read_input_tokens, cache_write_input_tokens, billing_channel,
+            pricing_status, rates_version, cost_usd_pico, saved_usd_pico,
+            repo_root, repo_slug, branch_name, head_commit_sha, recorded_at_unix_ms
+        ) VALUES (
+            @trace_id, @span_id, @parent_span_id, @operation_name, @conversation_id,
+```
+
+with:
+
+```csharp
+            cache_read_input_tokens, cache_write_input_tokens, billing_channel,
+            pricing_status, rates_version, cost_usd_pico, saved_usd_pico,
+            repo_root, repo_slug, branch_name, head_commit_sha, recorded_at_unix_ms,
+            cache_read_state, cache_write_state, pull_request_number
+        ) VALUES (
+            @trace_id, @span_id, @parent_span_id, @operation_name, @conversation_id,
+```
+
+Edit 2 of 8 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+            @cache_read_input_tokens, @cache_write_input_tokens, @billing_channel,
+            @pricing_status, @rates_version, @cost_usd_pico, @saved_usd_pico,
+            @repo_root, @repo_slug, @branch_name, @head_commit_sha, @recorded_at_unix_ms
+        ) ON CONFLICT (trace_id, span_id) DO NOTHING;
+        """;
+
+    private readonly TimeProvider _timeProvider;
+```
+
+with:
+
+```csharp
+            @cache_read_input_tokens, @cache_write_input_tokens, @billing_channel,
+            @pricing_status, @rates_version, @cost_usd_pico, @saved_usd_pico,
+            @repo_root, @repo_slug, @branch_name, @head_commit_sha, @recorded_at_unix_ms,
+            @cache_read_state, @cache_write_state, @pull_request_number
+        ) ON CONFLICT (trace_id, span_id) DO NOTHING;
+        """;
+
+    private readonly TimeProvider _timeProvider;
+```
+
+Edit 3 of 8 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        return counts;
     }
 
-    public string? ProcessPath { get; set; } = "/opt/gh-ledger/gh-ledger";
-    public string? ShellPath { get; set; }
-    public Dictionary<string, string> ProcessVariables { get; } =
+    // For each trace, copies each invoke_agent link's agent name, conversation id, and Git slug/branch/sha onto spans rows below it,
+    // without crossing a nested invoke_agent. Returns the total rows changed by all UPDATE statements. One transaction.
+    // Throws InvalidOperationException if InitializeAsync hasn't run.
+    public async Task<int> BackfillFromAgentSpansAsync(
 ```
+
+with:
+
+```csharp
+        return counts;
+    }
+
+    // For each trace, copies each invoke_agent link's span ID, agent name, conversation id, and Git slug/branch/sha onto spans
+    // rows below it, without crossing a nested invoke_agent, so agent_span_id is each row's nearest invoke_agent ancestor.
+    // Returns the total rows changed by all UPDATE statements. One transaction.
+    // Throws InvalidOperationException if InitializeAsync hasn't run.
+    public async Task<int> BackfillFromAgentSpansAsync(
+```
+
+Edit 4 of 8 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+            foreach (AgentLink agent in agents)
+            {
+                if (agent.AgentName is not null || agent.ConversationId is not null)
+                {
+                    await using SqliteCommand command = connection.CreateCommand();
+                    command.Transaction = transaction;
+                    command.CommandText = """
+```
+
+with:
+
+```csharp
+            foreach (AgentLink agent in agents)
+            {
+                await using (SqliteCommand command = connection.CreateCommand())
+                {
+                    command.Transaction = transaction;
+                    command.CommandText = """
+```
+
+Edit 5 of 8 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                        UPDATE spans
+                           SET agent_name      = COALESCE(agent_name, @agentName),
+                               conversation_id = COALESCE(conversation_id, @conversationId)
+                         WHERE trace_id = @trace
+                           AND span_id IN (SELECT span_id FROM sub)
+                           AND ((agent_name IS NULL AND @agentName IS NOT NULL)
+                             OR (conversation_id IS NULL AND @conversationId IS NOT NULL));
+                        """;
+                    command.Parameters.AddWithValue("@trace", trace);
+```
+
+with:
+
+```csharp
+                        UPDATE spans
+                           SET agent_name      = COALESCE(agent_name, @agentName),
+                               conversation_id = COALESCE(conversation_id, @conversationId),
+                               agent_span_id   = COALESCE(agent_span_id, @agentSpanId)
+                         WHERE trace_id = @trace
+                           AND span_id IN (SELECT span_id FROM sub)
+                           AND ((agent_name IS NULL AND @agentName IS NOT NULL)
+                             OR (conversation_id IS NULL AND @conversationId IS NOT NULL)
+                             OR agent_span_id IS NULL);
+                        """;
+                    command.Parameters.AddWithValue("@trace", trace);
+```
+
+Edit 6 of 8 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                parameterName);
+        }
+    }
+
+    private static void AddInsertParameters(
+```
+
+with:
+
+```csharp
+                parameterName);
+        }
+
+        if (span.CacheReadState is not (CacheCounterState.Reported or CacheCounterState.Absent)
+            || span.CacheWriteState is not (CacheCounterState.Reported or CacheCounterState.Absent)
+            || (span.CacheReadState == CacheCounterState.Absent && span.CacheReadInputTokens != 0)
+            || (span.CacheWriteState == CacheCounterState.Absent && span.CacheWriteInputTokens != 0))
+        {
+            throw new ArgumentException(
+                "Cache counter states must be Reported or Absent, and an Absent counter must be 0.",
+                parameterName);
+        }
+
+        if (entry.Git?.PullRequestNumber is <= 0)
+        {
+            throw new ArgumentException("Pull request numbers must be positive.", parameterName);
+        }
+    }
+
+    private static void AddInsertParameters(
+```
+
+Edit 7 of 8 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+            OrDbNull(entry.Git?.HeadCommitSha));
+        command.Parameters.AddWithValue("@recorded_at_unix_ms", recordedAtUnixMs);
+    }
+
+    private static string GetRollupSql(LedgerGrouping grouping)
+```
+
+with:
+
+```csharp
+            OrDbNull(entry.Git?.HeadCommitSha));
+        command.Parameters.AddWithValue("@recorded_at_unix_ms", recordedAtUnixMs);
+        command.Parameters.AddWithValue("@cache_read_state", ToDatabaseString(span.CacheReadState));
+        command.Parameters.AddWithValue("@cache_write_state", ToDatabaseString(span.CacheWriteState));
+        command.Parameters.AddWithValue(
+            "@pull_request_number",
+            OrDbNull(entry.Git?.PullRequestNumber));
+    }
+
+    private static string GetRollupSql(LedgerGrouping grouping)
+```
+
+Edit 8 of 8 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+    };
+
+    private static object OrDbNull<T>(T? value) where T : struct =>
+        value.HasValue ? value.Value : DBNull.Value;
+```
+
+with:
+
+```csharp
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+    };
+
+    private static string ToDatabaseString(CacheCounterState state) => state switch
+    {
+        CacheCounterState.Reported => "reported",
+        CacheCounterState.Absent => "absent",
+        CacheCounterState.LegacyUnknown => "legacy_unknown",
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
+    };
+
+    private static object OrDbNull<T>(T? value) where T : struct =>
+        value.HasValue ? value.Value : DBNull.Value;
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Otlp/LedgerIngestorTests.cs`, replace:
+
+```csharp
+        AssertRollup(model, "mai-code-2-flash", 4, 0.086175m, 0.00086175m);
+    }
+
+    private static OtlpSpan IgSpan(string spanId, params OtlpAttribute[] attributes) =>
+        Span(
+```
+
+with:
+
+```csharp
+        AssertRollup(model, "mai-code-2-flash", 4, 0.086175m, 0.00086175m);
+    }
+
+    [Fact]
+    public async Task IG10_PullRequestCheckout_RecordsThePullRequestAndCacheStates()
+    {
+        using TempDirectory temp = new();
+        Harness harness = await Harness.CreateAsync(temp);
+        string repo = GitFixture.Create(Path.Combine(temp.Path, "pr"), pullRequest: 42);
+
+        AssertResult(
+            await harness.Ingestor.IngestAsync(
+                CopilotTraces.TraceE([Str("process.working_directory", repo)])),
+            1,
+            0,
+            null,
+            1,
+            1);
+        AssertResult(
+            await harness.Ingestor.IngestAsync(CopilotTraces.TraceF()),
+            2,
+            0,
+            null,
+            1,
+            1);
+
+        await using SqliteConnection connection = new($"Data Source={harness.DatabasePath}");
+        await connection.OpenAsync();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT span_id, branch_name, pull_request_number, cache_read_state, cache_write_state, agent_span_id FROM spans ORDER BY span_id;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("0f00000000000002", reader.GetString(0));
+        Assert.True(reader.IsDBNull(1));
+        Assert.True(reader.IsDBNull(2));
+        Assert.Equal("absent", reader.GetString(3));
+        Assert.Equal("absent", reader.GetString(4));
+        Assert.Equal("0f00000000000001", reader.GetString(5));
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("e4c5e6a7b8c9d0e1", reader.GetString(0));
+        Assert.Equal("feature/ledger", reader.GetString(1));
+        Assert.Equal(42L, reader.GetInt64(2));
+        Assert.Equal("reported", reader.GetString(3));
+        Assert.Equal("reported", reader.GetString(4));
+        Assert.True(reader.IsDBNull(5));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    private static OtlpSpan IgSpan(string spanId, params OtlpAttribute[] attributes) =>
+        Span(
+```
+
+Edit 1 of 4 in `tests/CopilotLedger.Tests/Storage/SpanLinkStoreTests.cs`, replace:
+
+```csharp
+    private const string Sha1 = "0123456789abcdef0123456789abcdef01234567";
+    private static readonly JsonRateCardCalculator Calculator =
+        JsonRateCardCalculator.LoadEmbedded();
+
+    [Fact]
+    public async Task SL1_Migration2_UpgradesVersion1AndKeepsRows()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore first = await StoreAsync(temp);
+        await first.RecordAsync([Entry("mai-code-2", 1000, 100)]);
+        await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
+        {
+            await ExecuteAsync(connection, """
+                DROP INDEX ix_spans_trace;
+                DROP TABLE span_links;
+                DROP TABLE breaker_trips;
+                DROP TABLE branch_budgets;
+                DROP TABLE breaker_settings;
+                PRAGMA user_version = 1;
+                """);
+        }
+
+        await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
+        await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
+        Assert.Equal(3L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(
+            "span_links",
+            await ScalarAsync(
+                check,
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'span_links';"));
+        Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM spans;"));
+    }
+
+    [Fact]
+    public async Task SL2_RecordSpanLinksAsync_InsertsOnce()
+    {
+        using TempDirectory temp = new();
+```
+
+with:
+
+```csharp
+    private const string Sha1 = "0123456789abcdef0123456789abcdef01234567";
+    private static readonly JsonRateCardCalculator Calculator =
+        JsonRateCardCalculator.LoadEmbedded();
+
+    [Fact]
+    public async Task SL1_Migration2_UpgradesVersion1AndKeepsRows()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore first = await StoreAsync(temp);
+        await first.RecordAsync([Entry("mai-code-2", 1000, 100)]);
+        await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
+        {
+            await ExecuteAsync(connection, """
+                DROP INDEX ix_spans_conversation_start;
+                ALTER TABLE spans DROP COLUMN cache_read_state;
+                ALTER TABLE spans DROP COLUMN cache_write_state;
+                ALTER TABLE spans DROP COLUMN pull_request_number;
+                ALTER TABLE spans DROP COLUMN agent_span_id;
+                DROP INDEX ix_spans_trace;
+                DROP TABLE span_links;
+                DROP TABLE breaker_trips;
+                DROP TABLE branch_budgets;
+                DROP TABLE breaker_settings;
+                PRAGMA user_version = 1;
+                """);
+        }
+
+        // A new process starts with no pooled connections; see SL8.
+        SqliteConnection.ClearAllPools();
+        await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
+        await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
+        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(
+            "span_links",
+            await ScalarAsync(
+                check,
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'span_links';"));
+        Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM spans;"));
+    }
+
+    [Fact]
+    public async Task SL2_RecordSpanLinksAsync_InsertsOnce()
+    {
+        using TempDirectory temp = new();
+```
+
+Edit 2 of 4 in `tests/CopilotLedger.Tests/Storage/SpanLinkStoreTests.cs`, replace:
+
+```csharp
+        await first.RecordSpanLinksAsync(
+        [
+            Link("8", "8888888888888881", null, "execute_tool") with
+            {
+                ToolName = "powershell",
+                ToolExitCode = 1,
+                StatusCode = 2,
+            },
+        ]);
+        await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
+        {
+            await ExecuteAsync(connection, """
+                DROP TABLE breaker_trips;
+                DROP TABLE branch_budgets;
+                DROP TABLE breaker_settings;
+                ALTER TABLE span_links DROP COLUMN tool_name;
+                ALTER TABLE span_links DROP COLUMN tool_exit_code;
+                ALTER TABLE span_links DROP COLUMN status_code;
+                PRAGMA user_version = 2;
+                """);
+        }
+
+        // A new process starts with no pooled connections. A pooled connection keeps the schema it loaded,
+        // and SQLite checks ALTER TABLE ADD COLUMN against that cached schema.
+        SqliteConnection.ClearAllPools();
+        await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
+
+        await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
+        Assert.Equal(3L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM spans;"));
+        Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM span_links;"));
+        Assert.Equal(
+            1L,
+            await ScalarAsync(
+                check,
+                "SELECT tool_name IS NULL AND tool_exit_code IS NULL AND status_code = 0 FROM span_links;"));
+        Assert.Equal(
+            1500000000000L,
+            await ScalarAsync(
+```
+
+with:
+
+```csharp
+        await first.RecordSpanLinksAsync(
+        [
+            Link("8", "8888888888888881", null, "execute_tool") with
+            {
+                ToolName = "powershell",
+                ToolExitCode = 1,
+                StatusCode = 2,
+            },
+        ]);
+        await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
+        {
+            await ExecuteAsync(connection, """
+                DROP INDEX ix_spans_conversation_start;
+                ALTER TABLE spans DROP COLUMN cache_read_state;
+                ALTER TABLE spans DROP COLUMN cache_write_state;
+                ALTER TABLE spans DROP COLUMN pull_request_number;
+                ALTER TABLE spans DROP COLUMN agent_span_id;
+                DROP TABLE breaker_trips;
+                DROP TABLE branch_budgets;
+                DROP TABLE breaker_settings;
+                ALTER TABLE span_links DROP COLUMN tool_name;
+                ALTER TABLE span_links DROP COLUMN tool_exit_code;
+                ALTER TABLE span_links DROP COLUMN status_code;
+                PRAGMA user_version = 2;
+                """);
+        }
+
+        // A new process starts with no pooled connections. A pooled connection keeps the schema it loaded,
+        // and SQLite checks ALTER TABLE ADD COLUMN against that cached schema.
+        SqliteConnection.ClearAllPools();
+        await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
+
+        await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
+        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM spans;"));
+        Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM span_links;"));
+        Assert.Equal(
+            1L,
+            await ScalarAsync(
+                check,
+                "SELECT tool_name IS NULL AND tool_exit_code IS NULL AND status_code = 0 FROM span_links;"));
+        Assert.Equal(
+            1500000000000L,
+            await ScalarAsync(
+```
+
+Edit 3 of 4 in `tests/CopilotLedger.Tests/Storage/SpanLinkStoreTests.cs`, replace:
+
+```csharp
+        Assert.True(reader.IsDBNull(2));
+        Assert.Equal(1, reader.GetInt32(3));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [Fact]
+    public async Task SL10_AnotherProcessAppliesMigrationFirst()
+    {
+        using TempDirectory temp = new();
+        await StoreAsync(temp);
+        await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
+        {
+            await ExecuteAsync(connection, "PRAGMA user_version = 2;");
+        }
+
+        await using SqliteConnection holder = await OpenAsync(DatabasePath(temp));
+        SqliteTransaction held = holder.BeginTransaction(deferred: false);
+        Task init = Task.Run(
+            () => new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync());
+
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Assert.False(init.IsCompleted);
+        await using (SqliteCommand version = holder.CreateCommand())
+        {
+            version.Transaction = held;
+            version.CommandText = "PRAGMA user_version = 3;";
+            await version.ExecuteNonQueryAsync();
+        }
+
+        held.Commit();
+        await init;
+
+        await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
+        Assert.Equal(3L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM breaker_settings;"));
+        Assert.Equal(
+            1L,
+            await ScalarAsync(
+                check,
+                "SELECT COUNT(*) FROM pragma_table_info('span_links') WHERE name = 'tool_name';"));
+    }
+
+    private static void AssertChain(
+        PromptChainRow row,
+        string trace,
+        string start,
+        string end,
+        string repository,
+        string branch,
+        IReadOnlyList<string> agents,
+        IReadOnlyList<string> models,
+```
+
+with:
+
+```csharp
+        Assert.True(reader.IsDBNull(2));
+        Assert.Equal(1, reader.GetInt32(3));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [Fact]
+    public async Task SL10_AnotherProcessAppliesMigrationFirst()
+    {
+        using TempDirectory temp = new();
+        await StoreAsync(temp);
+        await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
+        {
+            await ExecuteAsync(connection, "PRAGMA user_version = 3;");
+        }
+
+        await using SqliteConnection holder = await OpenAsync(DatabasePath(temp));
+        SqliteTransaction held = holder.BeginTransaction(deferred: false);
+        Task init = Task.Run(
+            () => new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync());
+
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Assert.False(init.IsCompleted);
+        await using (SqliteCommand version = holder.CreateCommand())
+        {
+            version.Transaction = held;
+            version.CommandText = "PRAGMA user_version = 4;";
+            await version.ExecuteNonQueryAsync();
+        }
+
+        held.Commit();
+        await init;
+
+        await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
+        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM breaker_settings;"));
+        Assert.Equal(
+            1L,
+            await ScalarAsync(
+                check,
+                "SELECT COUNT(*) FROM pragma_table_info('span_links') WHERE name = 'tool_name';"));
+    }
+
+    [Fact]
+    public async Task SL11_Migration4_KeepsRowsMarksLegacyStatesAndFillsAgents()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore first = await StoreAsync(temp);
+        const string trace = "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c";
+        await first.RecordAsync(
+        [
+            ChatEntry(trace, "c000000000000001", "a000000000000001", 1_000, 800, 100),
+            ChatEntry(trace, "c000000000000002", "e000000000000001", 1_000, 300, 0),
+            ChatEntry(trace, "c000000000000003", "a000000000000002", 1_000, 0, 200),
+            ChatEntry(trace, "c000000000000004", "f000000000000009", 1_000, 0, 0),
+        ]);
+        await first.RecordSpanLinksAsync(
+        [
+            Link(trace, "a000000000000001", null, "invoke_agent"),
+            Link(trace, "e000000000000001", "a000000000000001", "execute_tool"),
+            Link(trace, "a000000000000002", "e000000000000001", "invoke_agent", "explore"),
+            Link(trace, "c000000000000001", "a000000000000001", "chat"),
+            Link(trace, "c000000000000002", "e000000000000001", "chat"),
+            Link(trace, "c000000000000003", "a000000000000002", "chat"),
+            Link(trace, "c000000000000004", "f000000000000009", "chat"),
+        ]);
+        await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
+        {
+            await ExecuteAsync(connection, """
+                DROP INDEX ix_spans_conversation_start;
+                ALTER TABLE spans DROP COLUMN cache_read_state;
+                ALTER TABLE spans DROP COLUMN cache_write_state;
+                ALTER TABLE spans DROP COLUMN pull_request_number;
+                ALTER TABLE spans DROP COLUMN agent_span_id;
+                PRAGMA user_version = 3;
+                """);
+        }
+
+        // A new process starts with no pooled connections; see SL8.
+        SqliteConnection.ClearAllPools();
+        await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
+
+        await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
+        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(
+            "ix_spans_conversation_start",
+            await ScalarAsync(
+                check,
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'ix_spans_conversation_start';"));
+        Assert.Equal(4_000L, await ScalarAsync(check, "SELECT SUM(input_tokens) FROM spans;"));
+        await using SqliteCommand command = check.CreateCommand();
+        command.CommandText =
+            "SELECT span_id, cache_read_state, cache_write_state, pull_request_number, agent_span_id FROM spans ORDER BY span_id;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        string?[][] rows =
+        [
+            ["c000000000000001", "reported", "reported", null, "a000000000000001"],
+            ["c000000000000002", "reported", "legacy_unknown", null, "a000000000000001"],
+            ["c000000000000003", "legacy_unknown", "reported", null, "a000000000000002"],
+            ["c000000000000004", "legacy_unknown", "legacy_unknown", null, null],
+        ];
+        foreach (string?[] row in rows)
+        {
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(row[0], reader.GetString(0));
+            Assert.Equal(row[1], reader.GetString(1));
+            Assert.Equal(row[2], reader.GetString(2));
+            Assert.True(reader.IsDBNull(3));
+            Assert.Equal(row[4], reader.IsDBNull(4) ? null : reader.GetString(4));
+        }
+
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [Fact]
+    public async Task SL12_Backfill_RecordsEachSpansNearestAgent()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        const string trace = "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d";
+        await store.RecordAsync(
+        [
+            ChatEntry(trace, "c000000000000001", "a000000000000001", 1_000, 0, 0),
+            ChatEntry(trace, "c000000000000002", "a000000000000002", 2_000, 0, 0),
+            ChatEntry(trace, "c000000000000003", "a000000000000002", 3_000, 0, 0),
+        ]);
+        await store.RecordSpanLinksAsync(
+        [
+            Link(trace, "c000000000000001", "a000000000000001", "chat"),
+            Link(trace, "c000000000000002", "a000000000000002", "chat"),
+            Link(trace, "c000000000000003", "a000000000000002", "chat"),
+        ]);
+        Assert.Equal(0, await store.BackfillFromAgentSpansAsync([trace]));
+
+        await store.RecordSpanLinksAsync(
+        [
+            Link(trace, "a000000000000002", "e000000000000001", "invoke_agent", "explore", "conv-d"),
+        ]);
+        Assert.Equal(2, await store.BackfillFromAgentSpansAsync([trace]));
+
+        await store.RecordSpanLinksAsync(
+        [
+            Link(trace, "e000000000000001", "a000000000000001", "execute_tool"),
+            Link(trace, "a000000000000001", null, "invoke_agent"),
+        ]);
+        Assert.Equal(1, await store.BackfillFromAgentSpansAsync([trace]));
+        Assert.Equal(0, await store.BackfillFromAgentSpansAsync([trace]));
+
+        await using SqliteConnection connection = await OpenAsync(DatabasePath(temp));
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT span_id, agent_span_id, agent_name, conversation_id FROM spans ORDER BY span_id;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("c000000000000001", reader.GetString(0));
+        Assert.Equal("a000000000000001", reader.GetString(1));
+        Assert.True(reader.IsDBNull(2));
+        Assert.True(reader.IsDBNull(3));
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("c000000000000002", reader.GetString(0));
+        Assert.Equal("a000000000000002", reader.GetString(1));
+        Assert.Equal("explore", reader.GetString(2));
+        Assert.Equal("conv-d", reader.GetString(3));
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("c000000000000003", reader.GetString(0));
+        Assert.Equal("a000000000000002", reader.GetString(1));
+        Assert.Equal("explore", reader.GetString(2));
+        Assert.Equal("conv-d", reader.GetString(3));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    private static void AssertChain(
+        PromptChainRow row,
+        string trace,
+        string start,
+        string end,
+        string repository,
+        string branch,
+        IReadOnlyList<string> agents,
+        IReadOnlyList<string> models,
+```
+
+Edit 4 of 4 in `tests/CopilotLedger.Tests/Storage/SpanLinkStoreTests.cs`, replace:
+
+```csharp
+    private static LedgerEntry Entry(string model, long input, long output)
+    {
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            requestModel: model,
+            inputTokens: input,
+            outputTokens: output) with
+        {
+            TraceId = "5b8efff798038103d269b633813fc60c",
+            SpanId = "eee19b7ec3c1b174",
+            ParentSpanId = "eee19b7ec3c1b173",
+        };
+        return new LedgerEntry(span, Calculator.Calculate(span), null);
+    }
+
+    private static GenAiSpanLink Link(
+        string trace,
+        string span,
+        string? parent,
+        string? operation = null,
+        string? agent = null,
+        string? conversation = null,
+        string? slug = null,
+        string? branch = null,
+```
+
+with:
+
+```csharp
+    private static LedgerEntry Entry(string model, long input, long output)
+    {
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            requestModel: model,
+            inputTokens: input,
+            outputTokens: output) with
+        {
+            TraceId = "5b8efff798038103d269b633813fc60c",
+            SpanId = "eee19b7ec3c1b174",
+            ParentSpanId = "eee19b7ec3c1b173",
+        };
+        return new LedgerEntry(span, Calculator.Calculate(span), null);
+    }
+
+    // A mai-code-2 chat span; a nonzero cache counter is Reported and a zero one is Absent, as TestSpans.Chat sets them.
+    private static LedgerEntry ChatEntry(
+        string trace,
+        string span,
+        string parent,
+        long input,
+        long cacheRead,
+        long cacheWrite)
+    {
+        NormalizedGenAiSpan chat = TestSpans.Chat(
+            requestModel: "mai-code-2",
+            inputTokens: input,
+            outputTokens: 10,
+            cacheReadInputTokens: cacheRead,
+            cacheWriteInputTokens: cacheWrite) with
+        {
+            TraceId = trace,
+            SpanId = span,
+            ParentSpanId = parent,
+        };
+        return new LedgerEntry(chat, Calculator.Calculate(chat), null);
+    }
+
+    private static GenAiSpanLink Link(
+        string trace,
+        string span,
+        string? parent,
+        string? operation = null,
+        string? agent = null,
+        string? conversation = null,
+        string? slug = null,
+        string? branch = null,
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Storage/SqliteLedgerStoreTests.cs`, replace:
+
+```csharp
+            await using (SqliteCommand versionCommand = connection.CreateCommand())
+            {
+                versionCommand.CommandText = "PRAGMA user_version;";
+                Assert.Equal(3L, await versionCommand.ExecuteScalarAsync());
+            }
+        }
+
+        await store.InitializeAsync();
+```
+
+with:
+
+```csharp
+            await using (SqliteCommand versionCommand = connection.CreateCommand())
+            {
+                versionCommand.CommandText = "PRAGMA user_version;";
+                Assert.Equal(4L, await versionCommand.ExecuteScalarAsync());
+            }
+        }
+
+        await store.InitializeAsync();
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Storage/SqliteLedgerStoreTests.cs`, replace:
+
+```csharp
+        Assert.Equal(0.0000025m, v12.AiCredits);
+    }
+
+    private static async Task<SqliteLedgerStore> SeededStoreAsync(TempDirectory temp)
+    {
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+```
+
+with:
+
+```csharp
+        Assert.Equal(0.0000025m, v12.AiCredits);
+    }
+
+    [Fact]
+    public async Task S12_RecordAsync_StoresCacheStatesAndPullRequest()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+        JsonRateCardCalculator calculator = JsonRateCardCalculator.LoadEmbedded();
+        NormalizedGenAiSpan reported = TestSpans.Chat(
+            requestModel: "claude-opus-5.5",
+            inputTokens: 1_000,
+            outputTokens: 10,
+            cacheReadInputTokens: 600,
+            cacheWriteState: CacheCounterState.Reported) with
+        {
+            TraceId = new string('a', 32),
+            SpanId = "aaaaaaaaaaaaaaa1",
+        };
+        NormalizedGenAiSpan absent = TestSpans.Chat(
+            requestModel: "mai-code-2",
+            inputTokens: 500,
+            outputTokens: 5) with
+        {
+            TraceId = new string('a', 32),
+            SpanId = "aaaaaaaaaaaaaaa2",
+        };
+        GitWorkspaceContext pullRequest =
+            Git(temp.Path, "swigerb/copilot-ledger", "feature/ledger") with { PullRequestNumber = 42 };
+
+        Assert.Equal(2, await store.RecordAsync(
+        [
+            new LedgerEntry(reported, calculator.Calculate(reported), pullRequest),
+            new LedgerEntry(absent, calculator.Calculate(absent), null),
+        ]));
+
+        await using SqliteConnection connection = new($"Data Source={DatabasePath(temp)}");
+        await connection.OpenAsync();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT span_id, cache_read_state, cache_write_state, pull_request_number, agent_span_id FROM spans ORDER BY span_id;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("aaaaaaaaaaaaaaa1", reader.GetString(0));
+        Assert.Equal("reported", reader.GetString(1));
+        Assert.Equal("reported", reader.GetString(2));
+        Assert.Equal(42L, reader.GetInt64(3));
+        Assert.True(reader.IsDBNull(4));
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("aaaaaaaaaaaaaaa2", reader.GetString(0));
+        Assert.Equal("absent", reader.GetString(1));
+        Assert.Equal("absent", reader.GetString(2));
+        Assert.True(reader.IsDBNull(3));
+        Assert.True(reader.IsDBNull(4));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [Theory]
+    [InlineData(0, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(1, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(2, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(3, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(4, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(5, "Pull request numbers must be positive. (Parameter 'entries')")]
+    [InlineData(6, "Pull request numbers must be positive. (Parameter 'entries')")]
+    public async Task S13_RecordAsync_RejectsInconsistentCacheStatesAndPullRequests(int caseNumber, string message)
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+        IReadOnlyList<LedgerEntry> seed = CreateSeedEntries(temp.Path);
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            requestModel: "mai-code-2",
+            inputTokens: 1_000,
+            outputTokens: 10);
+        span = caseNumber switch
+        {
+            0 => span with { CacheReadState = CacheCounterState.LegacyUnknown },
+            1 => span with { CacheWriteState = CacheCounterState.LegacyUnknown },
+            2 => span with { CacheReadInputTokens = 5 },
+            3 => span with { CacheWriteInputTokens = 5 },
+            4 => span with { CacheReadState = (CacheCounterState)7 },
+            _ => span,
+        };
+        GitWorkspaceContext? git = caseNumber switch
+        {
+            5 => Git(temp.Path, "swigerb/copilot-ledger", "main") with { PullRequestNumber = 0 },
+            6 => Git(temp.Path, "swigerb/copilot-ledger", "main") with { PullRequestNumber = -1 },
+            _ => null,
+        };
+        LedgerEntry invalid = new(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), git);
+
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => store.RecordAsync([seed[0], invalid]));
+
+        Assert.Equal(message, exception.Message);
+        Assert.Empty(await store.GetRollupAsync(LedgerGrouping.Repository, LedgerFilter.All));
+    }
+
+    private static async Task<SqliteLedgerStore> SeededStoreAsync(TempDirectory temp)
+    {
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+```
+
+### Tests
+
+- **S1, SL1, SL8, SL10** now expect `user_version` 4. SL1 and SL8 also drop the version 4 index and columns before downgrading, and SL1 clears the connection pools first, as SL8 does.
+- **SL11:** four legacy rows, (read 800, write 100), (300, 0), (0, 200), and (0, 0), migrate to (`reported`, `reported`), (`reported`, `legacy_unknown`), (`legacy_unknown`, `reported`), and (`legacy_unknown`, `legacy_unknown`); input still sums to 4,000; the index exists; and `agent_span_id` is the root agent for a span under it and under its `execute_tool` span, the `explore` agent for a span below that nested agent, and `NULL` for a span whose parent was never recorded.
+- **SL12:** the backfill returns 0 before any `invoke_agent` link, 2 when the subagent's link arrives (which also sets `explore` and `conv-d`), 1 when the root's link without a name arrives, and 0 when run again; each span keeps its nearest agent.
+- **S12:** a span with a cache read and a reported 0 write stores `reported`/`reported`, one without counters stores `absent`/`absent`, and pull request 42 is stored. **S13** (7 cases): `LegacyUnknown` in either state, a nonzero `Absent` read or write, an undefined state (`(CacheCounterState)7`), and pull request 0 or -1 throw `ArgumentException` with the messages above plus ` (Parameter 'entries')`, and nothing is recorded, not even the valid entry in the same batch.
+- **IG10:** ingesting `CopilotTraces.TraceE` from a `GitFixture` repository with pull request 42, then `TraceF`, stores pull request 42 and `reported`/`reported` for TraceE's span, and `absent`/`absent` with `agent_span_id` `0f00000000000001` for TraceF's span.
 
 ### Acceptance criteria
 
-- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors.
-- `dotnet test CopilotLedger.slnx` passes 651 tests: the 649 from before plus DM7 and BM12. 0 failed, 0 skipped.
-- Each file in the table matches this section and "Task 1 tests" exactly, and no other file changes.
-- `src/`, `tests/`, and `.github/workflows/` contain no `0.4.0`, `LoadDefault`, `DefaultDatabasePath`, or `DefaultRatesOverlayPath`.
+- Existing rows are kept; legacy rows are `legacy_unknown` except where a counter is nonzero.
+- New rows always have explicit `reported` or `absent` states; `spans.pull_request_number` holds the resolved pull request.
+- `dotnet test CopilotLedger.slnx` passes **732** tests (721 + 11).
 
 ### Verify
 
@@ -729,287 +2221,620 @@ public sealed class FakeCliPlatform : ICliPlatform
 dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
-## Task 2 specification: Workflow Hardening
+
+## Task 4 specification: Cache Coverage in Rollups
 
 ### Files
 
 | File | Change |
 |---|---|
-| `.github/workflows/ci.yml` | Replace, copy exactly |
-| `.github/workflows/release.yml` | Replace, copy exactly |
-| `.github/workflows/receipt.yml` | Replace, copy exactly |
+| `src/CopilotLedger.Storage/LedgerFilter.cs` | Adds `PullRequestNumber` and `Agent` |
+| `src/CopilotLedger.Storage/LedgerRollupRow.cs` | Adds four required sums and two computed properties |
+| `src/CopilotLedger.Storage/SqliteLedgerStore.cs` | `FilterSql`, `ReportedSql`, `UncachedSql`, and `AddFilterParameters`; the filtered queries use them; rollups sum coverage |
+| `src/CopilotLedger.Cli/Reporting/ReportCommands.cs` | `Sum` adds the new sums |
+| `src/CopilotLedger.Cli/Receipts/ReceiptCommands.cs` | `NoSpend` sets the new sums to 0 |
+| `src/CopilotLedger.Mcp/LedgerMcpTools.cs` | `EmptyRollup` sets the new sums to 0 |
+| `tests/CopilotLedger.Tests/Storage/SqliteLedgerStoreTests.cs` | New S14 and S15, and the helpers `AssertCoverage` and `FilterSpan` |
 
-What changes, for review:
+### Contracts
 
-- **All three:** each remote `uses:` names a full commit SHA with its version in a comment, from the table in "Verified facts" (A7). `receipt.yml`'s local `uses: ./action` stays until Task 5.
-- **`ci.yml`:** the publish step reads the runtime identifier from `$RID`, set in `env` (A6). The bash smoke step, after its `daemon start` check, posts one OTLP/HTTP JSON trace to the daemon, expects the response `{}`, and checks that `branch --all-repos --since all --json` shows 1 span and 50 AI credits. Its other lines, the PowerShell capture step, and the "Test the receipt action" step (which Task 5 removes) don't change.
-- **`release.yml`:** a new `rates` job checks `ratesVersion` (A4), and the `release` job needs it.
-- **`receipt.yml`:** only the pin. Task 5 replaces this file.
+```csharp
+public sealed record LedgerFilter
+{
+    // From, To, Repository, Branch as before
+    public int? PullRequestNumber { get; init; }   // spans recorded with this pull request number
+    public string? Agent { get; init; }            // agent name, or (none) for spans without one
+}
 
-### The smoke test's trace
-
-The trace has one `chat` span for `claude-opus-5.5`, 100,000 input and 5,000 output tokens, starting at 2026-11-21T00:00:00Z. It has no resource attributes, so the span is recorded under repository `(none)` and branch `(none)`, and `--all-repos --since all` finds it whatever the runner's date and directory. It costs `(100,000 × 4 + 5,000 × 20) / 1,000,000 = 0.50` USD, or 50 AI credits: below the breaker's 150-credit rule, so the smoke test trips no breaker and shows no desktop notification, on the runner or on a developer's machine. `branch --json` writes indented JSON, so the checks match the whole `"spans": 1,` and `"aiCredits": 50,` properties.
-
-### `.github/workflows/ci.yml` (copy exactly)
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  build-test:
-    name: build-test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            rid: linux-x64
-          - os: windows-latest
-            rid: win-x64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          dotnet-version: 10.0.x
-      - run: dotnet build CopilotLedger.slnx
-      - run: dotnet test CopilotLedger.slnx
-      - name: Test the receipt action
-        shell: pwsh
-        run: pwsh -NoProfile -File action/tests/receipt.Tests.ps1
-      - name: Publish single-file gh-ledger
-        shell: bash
-        env:
-          RID: ${{ matrix.rid }}
-        run: dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r "$RID" -o artifacts/gh-ledger
-      - name: Smoke-test the published binary
-        shell: bash
-        timeout-minutes: 5
-        env:
-          COPILOT_LEDGER_HOME: ${{ runner.temp }}/copilot-ledger
-        run: |
-          test "$(./artifacts/gh-ledger/gh-ledger --version | tr -d '\r')" = "0.4.1"
-          ./artifacts/gh-ledger/gh-ledger rates validate
-          started=$(./artifacts/gh-ledger/gh-ledger daemon start | tr -d '\r')
-          echo "$started"
-          grep -Eq '^gh-ledger daemon started \(pid [0-9]+\) on http://localhost:4318\.$' <<< "$started"
-          trace='{"resourceSpans":[{"resource":{"attributes":[]},"scopeSpans":[{"spans":[{"traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"b7ad6b7169203331","name":"chat claude-opus-5.5","kind":3,"startTimeUnixNano":"1795219200000000000","endTimeUnixNano":"1795219202000000000","attributes":[{"key":"gen_ai.operation.name","value":{"stringValue":"chat"}},{"key":"gen_ai.request.model","value":{"stringValue":"claude-opus-5.5"}},{"key":"gen_ai.usage.input_tokens","value":{"intValue":"100000"}},{"key":"gen_ai.usage.output_tokens","value":{"intValue":"5000"}}]}]}]}]}'
-          test "$(curl -sS -H 'Content-Type: application/json' --data "$trace" http://localhost:4318/v1/traces)" = "{}"
-          spend=$(./artifacts/gh-ledger/gh-ledger branch --all-repos --since all --json | tr -d '\r')
-          echo "$spend"
-          grep -q '"spans": 1,' <<< "$spend"
-          grep -q '"aiCredits": 50,' <<< "$spend"
-          ./artifacts/gh-ledger/gh-ledger status
-          ./artifacts/gh-ledger/gh-ledger breaker status
-          ./artifacts/gh-ledger/gh-ledger budget list
-          request='{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
-          response=$( { echo "$request"; sleep 10; } | ./artifacts/gh-ledger/gh-ledger mcp )
-          echo "$response"
-          grep -q '"get_branch_ledger"' <<< "$response"
-          ./artifacts/gh-ledger/gh-ledger daemon stop
-      - name: Smoke-test daemon start under PowerShell capture
-        shell: pwsh
-        timeout-minutes: 5
-        env:
-          COPILOT_LEDGER_HOME: ${{ runner.temp }}/copilot-ledger-pwsh
-        run: |
-          $started = & ./artifacts/gh-ledger/gh-ledger daemon start --port 4319
-          $started
-          if ($started -cnotmatch '^gh-ledger daemon started \(pid \d+\) on http://localhost:4319\.$') { exit 1 }
-          & ./artifacts/gh-ledger/gh-ledger daemon stop
+public sealed record LedgerRollupRow
+{
+    // existing members as before, then:
+    public required long CacheReportedSpanCount { get; init; }         // spans where CacheMetrics.IsReported
+    public required long ReportedInputTokens { get; init; }
+    public required long ReportedCacheReadInputTokens { get; init; }
+    public required long ReportedUncachedInputTokens { get; init; }    // Σ max(input − read − write, 0) over those spans
+    public long CacheUnreportedSpanCount => SpanCount - CacheReportedSpanCount;
+    public decimal? CacheHitRatio => CacheMetrics.HitRatio(ReportedCacheReadInputTokens, ReportedInputTokens);
+}
 ```
 
-### `.github/workflows/release.yml` (copy exactly)
+SQL fragments, each used by every query that needs it:
 
-```yaml
-name: Release
-
-on:
-  push:
-    tags: ['v*']
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
-jobs:
-  build:
-    name: build (${{ matrix.rid }})
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: windows-latest
-            rid: win-x64
-            asset: gh-ledger-windows-amd64.exe
-            smoke: true
-          - os: windows-latest
-            rid: win-arm64
-            asset: gh-ledger-windows-arm64.exe
-            smoke: false
-          - os: ubuntu-latest
-            rid: linux-x64
-            asset: gh-ledger-linux-amd64
-            smoke: true
-          - os: ubuntu-latest
-            rid: linux-arm64
-            asset: gh-ledger-linux-arm64
-            smoke: false
-          - os: macos-latest
-            rid: osx-x64
-            asset: gh-ledger-darwin-amd64
-            smoke: false
-          - os: macos-latest
-            rid: osx-arm64
-            asset: gh-ledger-darwin-arm64
-            smoke: true
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          dotnet-version: 10.0.x
-      - name: Check the version
-        shell: bash
-        run: |
-          version=$(dotnet msbuild src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -getProperty:Version | tr -d '\r')
-          echo "Project version: $version"
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME doesn't match the project version $version."
-            exit 1
-          fi
-      - name: Publish
-        shell: bash
-        env:
-          RID: ${{ matrix.rid }}
-        run: dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r "$RID" -o publish
-      - name: Name the asset
-        shell: bash
-        env:
-          ASSET: ${{ matrix.asset }}
-        run: |
-          mkdir dist
-          if [ -f publish/gh-ledger.exe ]; then
-            cp publish/gh-ledger.exe "dist/$ASSET"
-          else
-            cp publish/gh-ledger "dist/$ASSET"
-          fi
-      - name: Smoke-test the asset
-        if: matrix.smoke
-        shell: bash
-        env:
-          ASSET: ${{ matrix.asset }}
-        run: |
-          version=$(dotnet msbuild src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -getProperty:Version | tr -d '\r')
-          test "$("./dist/$ASSET" --version | tr -d '\r')" = "$version"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
-          if-no-files-found: error
-
-  rates:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Check ratesVersion against the latest release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if ! gh release download --repo "$GITHUB_REPOSITORY" --pattern rates.json --dir latest; then
-            echo "Skipping the check: no rates.json was downloaded from the latest release."
-            exit 0
-          fi
-          current=src/CopilotLedger.Core/Pricing/rates.json
-          old=$(jq -r .ratesVersion latest/rates.json)
-          new=$(jq -r .ratesVersion "$current")
-          if cmp -s <(jq -S . latest/rates.json) <(jq -S . "$current"); then
-            echo "rates.json is unchanged since the latest release ($old)."
-          elif [[ "$new" > "$old" ]]; then
-            echo "rates.json changed since the latest release; ratesVersion moves from $old to $new."
-          else
-            echo "::error::rates.json changed since the latest release, but its ratesVersion $new isn't later than $old. Set ratesVersion to the date of the change."
-            exit 1
-          fi
-
-  release:
-    needs: [build, rates]
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Add the rates and checksums
-        run: |
-          cp src/CopilotLedger.Core/Pricing/rates.json dist/rates.json
-          cd dist
-          sha256sum gh-ledger-* rates.json > gh-ledger-checksums.txt
-          cat gh-ledger-checksums.txt
-      - name: Create the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          prerelease=()
-          case "$GITHUB_REF_NAME" in
-            *-*) prerelease=(--prerelease) ;;
-          esac
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "gh-ledger $GITHUB_REF_NAME" --generate-notes "${prerelease[@]}"
+```sql
+-- FilterSql: a null parameter matches every span
+(@from IS NULL OR start_time_unix_ms >= @from)
+  AND (@to IS NULL OR start_time_unix_ms < @to)
+  AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
+  AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+  AND (@pull_request IS NULL OR pull_request_number = @pull_request)
+  AND (@agent IS NULL OR COALESCE(agent_name, '(none)') = @agent)
+-- ReportedSql (CacheMetrics.IsReported)
+(cache_read_state = 'reported' OR cache_write_state = 'reported')
+-- UncachedSql
+MAX(input_tokens - cache_read_input_tokens - cache_write_input_tokens, 0)
 ```
 
-### `.github/workflows/receipt.yml` (copy exactly)
+`GetRollupAsync`, both queries in `GetTopPromptChainsAsync`, and `GetPromptCountAsync` use `WHERE {FilterSql}` and `AddFilterParameters`, with the same results as before for the four existing filter properties. The rollup adds `SUM(CASE WHEN {ReportedSql} THEN … ELSE 0 END)` for the span count, input, cache reads, and `{UncachedSql}`.
 
-```yaml
-name: Receipt
+### Code (copy exactly)
 
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+Edit 1 of 1 in `src/CopilotLedger.Cli/Receipts/ReceiptCommands.cs`, replace:
 
-permissions:
-  contents: read
-  pull-requests: write
-
-concurrency:
-  group: receipt-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
-jobs:
-  receipt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./action
+```csharp
+        CacheReadInputTokens = 0,
+        CacheWriteInputTokens = 0,
+        AiCredits = 0m,
+        AiCreditsUsd = 0m,
 ```
+
+with:
+
+```csharp
+        CacheReadInputTokens = 0,
+        CacheWriteInputTokens = 0,
+        CacheReportedSpanCount = 0,
+        ReportedInputTokens = 0,
+        ReportedCacheReadInputTokens = 0,
+        ReportedUncachedInputTokens = 0,
+        AiCredits = 0m,
+        AiCreditsUsd = 0m,
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+            CacheReadInputTokens = rows.Sum(row => row.CacheReadInputTokens),
+            CacheWriteInputTokens = rows.Sum(row => row.CacheWriteInputTokens),
+            AiCredits = rows.Sum(row => row.AiCredits),
+            AiCreditsUsd = rows.Sum(row => row.AiCreditsUsd),
+```
+
+with:
+
+```csharp
+            CacheReadInputTokens = rows.Sum(row => row.CacheReadInputTokens),
+            CacheWriteInputTokens = rows.Sum(row => row.CacheWriteInputTokens),
+            CacheReportedSpanCount = rows.Sum(row => row.CacheReportedSpanCount),
+            ReportedInputTokens = rows.Sum(row => row.ReportedInputTokens),
+            ReportedCacheReadInputTokens = rows.Sum(row => row.ReportedCacheReadInputTokens),
+            ReportedUncachedInputTokens = rows.Sum(row => row.ReportedUncachedInputTokens),
+            AiCredits = rows.Sum(row => row.AiCredits),
+            AiCreditsUsd = rows.Sum(row => row.AiCreditsUsd),
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+        CacheReadInputTokens = 0,
+        CacheWriteInputTokens = 0,
+        AiCredits = 0m,
+        AiCreditsUsd = 0m,
+```
+
+with:
+
+```csharp
+        CacheReadInputTokens = 0,
+        CacheWriteInputTokens = 0,
+        CacheReportedSpanCount = 0,
+        ReportedInputTokens = 0,
+        ReportedCacheReadInputTokens = 0,
+        ReportedUncachedInputTokens = 0,
+        AiCredits = 0m,
+        AiCreditsUsd = 0m,
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/LedgerFilter.cs`, replace:
+
+```csharp
+    public string? Repository { get; init; }
+    public string? Branch { get; init; }
+}
+```
+
+with:
+
+```csharp
+    public string? Repository { get; init; }
+    public string? Branch { get; init; }
+    public int? PullRequestNumber { get; init; }   // spans recorded with this pull request number
+    public string? Agent { get; init; }            // agent name, or (none) for spans without one
+}
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Storage/LedgerRollupRow.cs`, replace:
+
+```csharp
+using CopilotLedger.Core.Pricing;
+
+namespace CopilotLedger.Storage;
+```
+
+with:
+
+```csharp
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
+
+namespace CopilotLedger.Storage;
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Storage/LedgerRollupRow.cs`, replace:
+
+```csharp
+    public required long CacheReadInputTokens { get; init; }
+    public required long CacheWriteInputTokens { get; init; }
+    public required decimal AiCredits { get; init; }
+    public required decimal AiCreditsUsd { get; init; }
+    public required decimal FoundryByokUsd { get; init; }
+    public required decimal LocalSavedUsd { get; init; }
+}
+```
+
+with:
+
+```csharp
+    public required long CacheReadInputTokens { get; init; }
+    public required long CacheWriteInputTokens { get; init; }
+    public required long CacheReportedSpanCount { get; init; }         // spans that reported cache usage (CacheMetrics.IsReported)
+    public required long ReportedInputTokens { get; init; }            // input tokens of those spans
+    public required long ReportedCacheReadInputTokens { get; init; }   // cache-read tokens of those spans
+    public required long ReportedUncachedInputTokens { get; init; }    // their input less cache reads and writes, at least 0 a span
+    public required decimal AiCredits { get; init; }
+    public required decimal AiCreditsUsd { get; init; }
+    public required decimal FoundryByokUsd { get; init; }
+    public required decimal LocalSavedUsd { get; init; }
+    public long CacheUnreportedSpanCount => SpanCount - CacheReportedSpanCount;
+    public decimal? CacheHitRatio => CacheMetrics.HitRatio(ReportedCacheReadInputTokens, ReportedInputTokens);
+}
+```
+
+Edit 1 of 9 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        ) ON CONFLICT (trace_id, span_id) DO NOTHING;
+        """;
+
+    private readonly TimeProvider _timeProvider;
+```
+
+with:
+
+```csharp
+        ) ON CONFLICT (trace_id, span_id) DO NOTHING;
+        """;
+
+    // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
+    private const string FilterSql = """
+        (@from IS NULL OR start_time_unix_ms >= @from)
+          AND (@to IS NULL OR start_time_unix_ms < @to)
+          AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
+          AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+          AND (@pull_request IS NULL OR pull_request_number = @pull_request)
+          AND (@agent IS NULL OR COALESCE(agent_name, '(none)') = @agent)
+        """;
+
+    // CacheMetrics.IsReported: the span carried at least one cache counter.
+    private const string ReportedSql = "(cache_read_state = 'reported' OR cache_write_state = 'reported')";
+
+    // A span's input tokens that were neither read from nor written to the cache, never below 0.
+    private const string UncachedSql = "MAX(input_tokens - cache_read_input_tokens - cache_write_input_tokens, 0)";
+
+    private readonly TimeProvider _timeProvider;
+```
+
+Edit 2 of 9 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = GetRollupSql(grouping);
+        command.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
+        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+
+        List<LedgerRollupRow> rows = [];
+```
+
+with:
+
+```csharp
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = GetRollupSql(grouping);
+        AddFilterParameters(command, filter);
+
+        List<LedgerRollupRow> rows = [];
+```
+
+Edit 3 of 9 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                CacheWriteInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("cache_write_input_tokens")),
+                AiCredits = AiCreditMath.UsdToAiCredits(aiCreditsUsd),
+                AiCreditsUsd = aiCreditsUsd,
+```
+
+with:
+
+```csharp
+                CacheWriteInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("cache_write_input_tokens")),
+                CacheReportedSpanCount =
+                    reader.GetInt64(reader.GetOrdinal("cache_reported_span_count")),
+                ReportedInputTokens = reader.GetInt64(reader.GetOrdinal("reported_input_tokens")),
+                ReportedCacheReadInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_cache_read_input_tokens")),
+                ReportedUncachedInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_uncached_input_tokens")),
+                AiCredits = AiCreditMath.UsdToAiCredits(aiCreditsUsd),
+                AiCreditsUsd = aiCreditsUsd,
+```
+
+Edit 4 of 9 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        await using (SqliteCommand query = connection.CreateCommand())
+        {
+            query.CommandText = """
+                SELECT trace_id,
+                       MIN(start_time_unix_ms)                                                            AS start_ms,
+```
+
+with:
+
+```csharp
+        await using (SqliteCommand query = connection.CreateCommand())
+        {
+            query.CommandText = $"""
+                SELECT trace_id,
+                       MIN(start_time_unix_ms)                                                            AS start_ms,
+```
+
+Edit 5 of 9 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                       SUM(saved_usd_pico)                                                                AS saved_usd_pico
+                FROM spans
+                WHERE (@from IS NULL OR start_time_unix_ms >= @from)
+                  AND (@to IS NULL OR start_time_unix_ms < @to)
+                  AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
+                  AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+                GROUP BY trace_id
+                ORDER BY github_usd_pico + byok_usd_pico DESC, saved_usd_pico DESC, start_ms DESC, trace_id ASC
+                LIMIT @limit;
+                """;
+            query.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
+            query.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
+            query.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
+            query.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+            query.Parameters.AddWithValue("@limit", limit);
+            await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
+```
+
+with:
+
+```csharp
+                       SUM(saved_usd_pico)                                                                AS saved_usd_pico
+                FROM spans
+                WHERE {FilterSql}
+                GROUP BY trace_id
+                ORDER BY github_usd_pico + byok_usd_pico DESC, saved_usd_pico DESC, start_ms DESC, trace_id ASC
+                LIMIT @limit;
+                """;
+            AddFilterParameters(query, filter);
+            query.Parameters.AddWithValue("@limit", limit);
+            await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
+```
+
+Edit 6 of 9 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                SELECT DISTINCT trace_id, agent_name, model_id
+                FROM spans
+                WHERE (@from IS NULL OR start_time_unix_ms >= @from)
+                  AND (@to IS NULL OR start_time_unix_ms < @to)
+                  AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
+                  AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+                  AND trace_id IN ({traceParameters});
+                """;
+            query.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
+            query.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
+            query.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
+            query.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+            for (int index = 0; index < data.Count; index++)
+            {
+                query.Parameters.AddWithValue($"@t{index}", data[index].TraceId);
+```
+
+with:
+
+```csharp
+                SELECT DISTINCT trace_id, agent_name, model_id
+                FROM spans
+                WHERE {FilterSql}
+                  AND trace_id IN ({traceParameters});
+                """;
+            AddFilterParameters(query, filter);
+            for (int index = 0; index < data.Count; index++)
+            {
+                query.Parameters.AddWithValue($"@t{index}", data[index].TraceId);
+```
+
+Edit 7 of 9 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(DISTINCT trace_id)
+            FROM spans
+            WHERE (@from IS NULL OR start_time_unix_ms >= @from)
+              AND (@to IS NULL OR start_time_unix_ms < @to)
+              AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
+              AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch);
+            """;
+        command.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
+        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+    }
+
+    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+```
+
+with:
+
+```csharp
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT COUNT(DISTINCT trace_id)
+            FROM spans
+            WHERE {FilterSql};
+            """;
+        AddFilterParameters(command, filter);
+        return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+    }
+
+    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+```
+
+Edit 8 of 9 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        command.Parameters.AddWithValue("@repo_root", OrDbNull(filter.RepositoryRoot));
+    }
+
+    private static async Task<IReadOnlyList<BreakerTrip>> ReadTripsAsync(
+```
+
+with:
+
+```csharp
+        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        command.Parameters.AddWithValue("@repo_root", OrDbNull(filter.RepositoryRoot));
+    }
+
+    // The parameters of FilterSql.
+    private static void AddFilterParameters(
+        SqliteCommand command,
+        LedgerFilter filter)
+    {
+        command.Parameters.AddWithValue("@from", OrDbNull(filter.From?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@to", OrDbNull(filter.To?.ToUnixTimeMilliseconds()));
+        command.Parameters.AddWithValue("@repository", OrDbNull(filter.Repository));
+        command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
+        command.Parameters.AddWithValue("@pull_request", OrDbNull(filter.PullRequestNumber));
+        command.Parameters.AddWithValue("@agent", OrDbNull(filter.Agent));
+    }
+
+    private static async Task<IReadOnlyList<BreakerTrip>> ReadTripsAsync(
+```
+
+Edit 9 of 9 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                   SUM(cache_read_input_tokens)                                                      AS cache_read_input_tokens,
+                   SUM(cache_write_input_tokens)                                                     AS cache_write_input_tokens,
+                   SUM(CASE WHEN billing_channel = 'github_ai_credits' THEN cost_usd_pico ELSE 0 END) AS github_usd_pico,
+                   SUM(CASE WHEN billing_channel = 'foundry_byok' THEN cost_usd_pico ELSE 0 END)      AS byok_usd_pico,
+                   SUM(saved_usd_pico)                                                               AS saved_usd_pico
+            FROM spans
+            WHERE (@from IS NULL OR start_time_unix_ms >= @from)
+              AND (@to IS NULL OR start_time_unix_ms < @to)
+              AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
+              AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
+            GROUP BY {keyAliases}
+            ORDER BY github_usd_pico + byok_usd_pico DESC, saved_usd_pico DESC, {keyAliases} ASC;
+```
+
+with:
+
+```csharp
+                   SUM(cache_read_input_tokens)                                                      AS cache_read_input_tokens,
+                   SUM(cache_write_input_tokens)                                                     AS cache_write_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END)                                    AS cache_reported_span_count,
+                   SUM(CASE WHEN {ReportedSql} THEN input_tokens ELSE 0 END)                         AS reported_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_read_input_tokens ELSE 0 END)              AS reported_cache_read_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN {UncachedSql} ELSE 0 END)                        AS reported_uncached_input_tokens,
+                   SUM(CASE WHEN billing_channel = 'github_ai_credits' THEN cost_usd_pico ELSE 0 END) AS github_usd_pico,
+                   SUM(CASE WHEN billing_channel = 'foundry_byok' THEN cost_usd_pico ELSE 0 END)      AS byok_usd_pico,
+                   SUM(saved_usd_pico)                                                               AS saved_usd_pico
+            FROM spans
+            WHERE {FilterSql}
+            GROUP BY {keyAliases}
+            ORDER BY github_usd_pico + byok_usd_pico DESC, saved_usd_pico DESC, {keyAliases} ASC;
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Storage/SqliteLedgerStoreTests.cs`, replace:
+
+```csharp
+        Assert.Empty(await store.GetRollupAsync(LedgerGrouping.Repository, LedgerFilter.All));
+    }
+
+    private static async Task<SqliteLedgerStore> SeededStoreAsync(TempDirectory temp)
+    {
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+```
+
+with:
+
+```csharp
+        Assert.Empty(await store.GetRollupAsync(LedgerGrouping.Repository, LedgerFilter.All));
+    }
+
+    [Fact]
+    public async Task S14_Rollups_CountCacheCoverage()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await SeededStoreAsync(temp);
+
+        Assert.Collection(
+            await store.GetRollupAsync(LedgerGrouping.Model, LedgerFilter.All),
+            row => AssertCoverage(row, "claude-opus-5.5", 1, 1, 1_200_000, 800_000, 300_000, 0.6666666666666666666666666667m),
+            row => AssertCoverage(row, "mai-code-2", 1, 1, 1_000_000, 400_000, 600_000, 0.4m),
+            row => AssertCoverage(row, "gpt-6.1-sol", 1, 0, 0, 0, 0, null),
+            row => AssertCoverage(row, "qwen3.8-27b", 1, 0, 0, 0, 0, null),
+            row => AssertCoverage(row, "gpt-unknown", 1, 0, 0, 0, 0, null));
+        Assert.Collection(
+            await store.GetRollupAsync(LedgerGrouping.Repository, LedgerFilter.All),
+            row => AssertCoverage(row, "swigerb/copilot-ledger", 3, 2, 2_200_000, 1_200_000, 900_000, 0.5454545454545454545454545455m),
+            row => AssertCoverage(row, "contoso/api", 1, 0, 0, 0, 0, null),
+            row => AssertCoverage(row, "(none)", 1, 0, 0, 0, 0, null));
+    }
+
+    [Fact]
+    public async Task S15_Filters_SelectPullRequestsAndAgents()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+        JsonRateCardCalculator calculator = JsonRateCardCalculator.LoadEmbedded();
+        GitWorkspaceContext feature =
+            Git(temp.Path, "swigerb/copilot-ledger", "feature/ledger") with { PullRequestNumber = 42 };
+        GitWorkspaceContext main = Git(temp.Path, "swigerb/copilot-ledger", "main");
+        NormalizedGenAiSpan p1 = FilterSpan('7', "claude-opus-5.5", "ledger-builder");
+        NormalizedGenAiSpan p2 = FilterSpan('8', "mai-code-2", null);
+        NormalizedGenAiSpan p3 = FilterSpan('9', "mai-code-2", "ledger-builder");
+        await store.RecordAsync(
+        [
+            new LedgerEntry(p1, calculator.Calculate(p1), feature),
+            new LedgerEntry(p2, calculator.Calculate(p2), feature),
+            new LedgerEntry(p3, calculator.Calculate(p3), main),
+        ]);
+
+        Assert.Equal(2, Assert.Single(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { PullRequestNumber = 42 })).SpanCount);
+        Assert.Empty(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { PullRequestNumber = 7 }));
+        Assert.Equal(2, Assert.Single(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { Agent = "ledger-builder" })).SpanCount);
+        Assert.Equal(1, Assert.Single(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { Agent = "(none)" })).SpanCount);
+        Assert.Equal(1, Assert.Single(await store.GetRollupAsync(
+            LedgerGrouping.Repository,
+            new LedgerFilter { PullRequestNumber = 42, Agent = "ledger-builder" })).SpanCount);
+        Assert.Equal(
+            [new string('7', 32), new string('8', 32)],
+            (await store.GetTopPromptChainsAsync(new LedgerFilter { PullRequestNumber = 42 }, 10))
+                .Select(row => row.TraceId));
+        Assert.Equal(
+            [new string('7', 32), new string('9', 32)],
+            (await store.GetTopPromptChainsAsync(new LedgerFilter { Agent = "ledger-builder" }, 10))
+                .Select(row => row.TraceId));
+        Assert.Equal(2, await store.GetPromptCountAsync(new LedgerFilter { PullRequestNumber = 42 }));
+        Assert.Equal(1, await store.GetPromptCountAsync(new LedgerFilter { Agent = "(none)" }));
+    }
+
+    private static async Task<SqliteLedgerStore> SeededStoreAsync(TempDirectory temp)
+    {
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Storage/SqliteLedgerStoreTests.cs`, replace:
+
+```csharp
+        Assert.Equal(savedUsd, row.LocalSavedUsd);
+    }
+}
+```
+
+with:
+
+```csharp
+        Assert.Equal(savedUsd, row.LocalSavedUsd);
+    }
+
+    // key is the row's Model, or its Repository for a Repository rollup.
+    private static void AssertCoverage(
+        LedgerRollupRow row,
+        string key,
+        long spans,
+        long reported,
+        long reportedInput,
+        long reportedCacheRead,
+        long reportedUncached,
+        decimal? hitRatio)
+    {
+        Assert.Equal(key, row.Model ?? row.Repository);
+        Assert.Equal(spans, row.SpanCount);
+        Assert.Equal(reported, row.CacheReportedSpanCount);
+        Assert.Equal(spans - reported, row.CacheUnreportedSpanCount);
+        Assert.Equal(reportedInput, row.ReportedInputTokens);
+        Assert.Equal(reportedCacheRead, row.ReportedCacheReadInputTokens);
+        Assert.Equal(reportedUncached, row.ReportedUncachedInputTokens);
+        Assert.Equal(hitRatio, row.CacheHitRatio);
+    }
+
+    private static NormalizedGenAiSpan FilterSpan(char trace, string model, string? agent) =>
+        TestSpans.Chat(
+            startTime: Cutover.AddHours(-3),
+            requestModel: model,
+            agentName: agent,
+            inputTokens: 10_000,
+            outputTokens: 1_000) with
+        {
+            TraceId = new string(trace, 32),
+            SpanId = new string(trace, 16),
+        };
+}
+```
+
+### Tests
+
+- **S14:** over the seeded ledger, by model: `claude-opus-5.5` 1 span, 1 reported, reported input 1,200,000, cache read 800,000, uncached 300,000, ratio `0.6666666666666666666666666667`; `mai-code-2` 1,000,000, 400,000, 600,000, `0.4`; `gpt-6.1-sol`, `qwen3.8-27b`, and `gpt-unknown` 0 reported and a `null` ratio. By repository: `swigerb/copilot-ledger` 3 spans, 2 reported, 2,200,000, 1,200,000, 900,000, `0.5454545454545454545454545455`; `contoso/api` and `(none)` `null`.
+- **S15:** pull request 42 selects 2 of 3 spans, pull request 7 none; agent `ledger-builder` 2, `(none)` 1, both filters together 1; `GetTopPromptChainsAsync` and `GetPromptCountAsync` honor both filters.
 
 ### Acceptance criteria
 
-- The three files match the blocks above exactly.
-- Every remote `uses:` names a 40-character commit SHA followed by `# v<version>`; the only other `uses:` is `receipt.yml`'s `./action`. No `run:` script contains `${{`.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 651 tests (0 failed, 0 skipped).
-- CI on the pull request passes on `ubuntu-latest` and `windows-latest`, including the new smoke lines, and the Receipt workflow runs with the pinned checkout.
+- One `FilterSql` serves every filtered query; existing rollup, prompt-chain, and receipt tests pass unchanged.
+- `dotnet test CopilotLedger.slnx` passes **734** tests (732 + 2).
 
 ### Verify
 
@@ -1018,118 +2843,1927 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
-Then the orchestrator runs the Release workflow from the task's branch (`gh workflow run release.yml --ref <branch> -R swigerb/gh-ledger`) and confirms that all six builds and the three smoke tests pass, that the `rates` job prints `rates.json is unchanged since the latest release (2026-11-20).`, and that the `release` job is skipped.
-## Task 3 specification: User Guide with Tested Samples
+## Task 5 specification: Cache-Efficiency Query
 
 ### Files
 
 | File | Change |
 |---|---|
-| `docs/guide.md` | Replace, copy exactly |
-| `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs` | New, copy exactly |
-| `tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs` | New, copy exactly (see "Task 3 tests") |
-| `tests/CopilotLedger.Tests/TestSupport/FileRetry.cs` | Add `Delete` |
-| `tests/CopilotLedger.Tests/CopilotLedger.Tests.csproj` | Copy `docs/guide.md` into the test output |
+| `src/CopilotLedger.Storage/CacheEfficiencyRow.cs` | New |
+| `src/CopilotLedger.Storage/LedgerGrouping.cs` | Adds `PullRequest` |
+| `src/CopilotLedger.Storage/SqliteLedgerStore.cs` | New `GetCacheEfficiencyAsync` |
+| `tests/CopilotLedger.Tests/Storage/CacheEfficiencyTests.cs` | New: CE1–CE5 |
 
-### The example world
+### Contracts
 
-`GuideWorld` builds the setting that every sample comes from:
+```csharp
+public enum LedgerGrouping { Repository, Branch, Model, Agent, ChannelModel, PullRequest }
 
-- **gh-ledger as the extension on Windows.** A `FakeCliPlatform` with `IsWindows`, `ProcessPath` `C:\Users\you\AppData\Local\GitHub CLI\extensions\gh-ledger\gh-ledger.exe`, and that directory's `manifest.yml` in `ExistingFiles`, so gh-ledger detects the extension. `RunningProcesses` holds 4242, the stand-in daemon's process ID.
-- **The time.** A `ManualTimeProvider` at UTC-5 (`ManualTimeProvider.UtcMinus5`); "now" is 2026-11-21T21:30:00Z, 16:30 local time.
-- **The repository.** `<root>/webapp`, on branch `feature/search` at commit `4f9c2e1d8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d`, with `origin` `https://github.com/contoso/webapp.git`, so its key is `contoso/webapp`. Commands run there.
-- **Three states.** `Fresh`: nothing installed and no ledger. `FirstPrompt`: installed at 16:20 local time, with one prompt at 16:25. `Month`: installed at 08:02, with a month of spend (below), the guide's overlay saved as `rates.json`, one breaker trip that has already been notified, and a 750-credit budget on `feature/search`.
-- **The stand-in daemon** answers `install` and `daemon start` (see "Design decisions"). The budget alert sample uses the real daemon, in-process.
-- **`Display`** shows the test's data directory as `C:\Users\you\.copilot-ledger`.
+public sealed record CacheEfficiencyRow
+{
+    public string? Repository { get; init; }        // Repository, Branch, and PullRequest groupings
+    public string? Branch { get; init; }            // Branch; PullRequest when PullRequestNumber is null
+    public int? PullRequestNumber { get; init; }    // PullRequest
+    public string? Model { get; init; }             // Model
+    public string? Agent { get; init; }             // Agent
+    public required long SpanCount { get; init; }
+    public required long CacheReportedSpanCount { get; init; }
+    public required long InputTokens { get; init; }
+    public required long OutputTokens { get; init; }
+    public required long MaxInputTokens { get; init; }
+    public required long ReportedInputTokens { get; init; }
+    public required long ReportedCacheReadInputTokens { get; init; }
+    public required long ReportedCacheWriteInputTokens { get; init; }
+    public required long ReportedUncachedInputTokens { get; init; }     // Σ max(input − read − write, 0) over reported spans
+    public required long EstimatedUncachedInputTokens { get; init; }    // the same over all spans, as pricing counts them
+    public long CacheUnreportedSpanCount => SpanCount - CacheReportedSpanCount;
+    public long? UncachedInputTokens => CacheReportedSpanCount == 0 ? null : ReportedUncachedInputTokens;   // observed
+    public decimal? CacheHitRatio => CacheMetrics.HitRatio(ReportedCacheReadInputTokens, ReportedInputTokens);
+    public decimal? AverageInputTokensPerTurn => SpanCount == 0 ? null : (decimal)InputTokens / SpanCount;
+}
 
-The `Month` state's spans, priced with the built-in rates and the guide's overlay. Rates are USD per 1M tokens: `claude-opus-5.5` $4 input, $0.20 cached input, $20 output; `mai-code-2` (promotional until 2027-05-17) $0.50, $0.025, $2.50; the overlay's `gpt-6.1-sol` $1.75 and $14.00. Local savings use `mai-code-2`'s rates. Each span ends 2 seconds after it starts.
+public Task<IReadOnlyList<CacheEfficiencyRow>> GetCacheEfficiencyAsync(
+    LedgerGrouping grouping, LedgerFilter filter, CancellationToken cancellationToken = default);
+```
 
-| Trace | Start (UTC) | Branch | Model | Agent | Input | Cached | Output | Cost |
-|---|---|---|---|---|---:|---:|---:|---|
-| `…00a1` | 2026-11-21 14:05 | `feature/search` | `claude-opus-5.5` | | 400,000 | 250,000 | 15,000 | 95.00 credits |
-| `…00a1` | 2026-11-21 14:07 | `feature/search` | `mai-code-2` | `explore` | 300,000 | 0 | 15,000 | 18.75 credits |
-| `…00b2` | 16:20, 16:21:30, 16:23, 16:24:30 | `feature/search` | `claude-opus-5.5` | | 500,000 each | 300,000 each | 20,000 each | 126.00 credits each |
-| `…00c3` | 2026-11-21 19:10 | `feature/search` | `gpt-6.1-sol` at `contoso.openai.azure.com` | | 200,000 | 0 | 10,000 | $0.49 BYOK |
-| `…00d4` | 2026-11-21 20:40 | `feature/search` | `qwen3.8-27b` at `127.0.0.1` | | 300,000 | 0 | 9,000 | $0.00; saves $0.1725 |
-| `…00e5` | 2026-11-19 15:00 | `fix/login-timeout` | `claude-opus-5.5` | `code-review` | 200,000 | 0 | 20,000 | 120.00 credits |
-| `…00f6` | 2026-11-18 18:00 | `main` | `mai-code-2` | | 800,000 | 500,000 | 40,000 | 26.25 credits |
-| `…00a7` | 2026-11-03 15:30 | `main` | `claude-opus-5.5` | `explore` | 300,000 | 0 | 12,000 | 144.00 credits |
+### Algorithm
 
-Recomputed in decimal, these give every number in the samples:
+1. Group keys: `Repository` → `COALESCE(repo_slug, repo_root, '(none)')`; `Branch` → that and `COALESCE(branch_name, '(none)')`; `Model` → `COALESCE(model_id, '(none)')`; `Agent` → `COALESCE(agent_name, '(none)')`; `PullRequest` → the repository, `pull_request_number`, and `CASE WHEN pull_request_number IS NULL THEN COALESCE(branch_name, '(none)') END`, so spans with a number group by repository and number, and the rest by repository and branch. `ChannelModel` throws `ArgumentOutOfRangeException`.
+2. Sums over all filtered spans: count, input, output, `MAX(input_tokens)`, and `SUM({UncachedSql})` as the estimate; and over the spans matching `ReportedSql`: count, input, cache reads, cache writes, and `{UncachedSql}`.
+3. Order by input tokens descending, then the group keys ascending.
+4. `GetRollupAsync` keeps throwing `ArgumentOutOfRangeException` for any grouping it doesn't know, now including `PullRequest`.
 
-- `feature/search`: 95 + 18.75 + 4 × 126 = 617.75 credits ($6.1775, shown as $6.18), $0.49 BYOK, and $0.1725 saved (shown as $0.17). Billed, with BYOK at $0.01 per credit: 617.75 + 49 = 666.75, which the budget samples show.
-- `main`: 26.25 + 144 = 170.25. `fix/login-timeout`: 120.00. Today (from 05:00Z): the 8 `feature/search` spans, 617.75; the last 7 days add `…00e5` and `…00f6`, 764.00; the last 30 days add `…00a7`, 908.00.
-- Agents: `(none)` 95 + 504 + 26.25 = 625.25 over 8 spans; `explore` 18.75 + 144 = 162.75; `code-review` 120.00.
-- Prompts by cost: `…00b2` 504.00, `…00a7` 144.00, `…00e5` 120.00, then `…00a1` 113.75.
-- The breaker: `…00b2`'s first two spans make 252.00 credits within 5 minutes, over the 150-credit limit, so it trips when the second ends, at 16:21:32Z (11:21 local).
-- The receipt: `claude-opus-5.5` 95 + 504 = 599.00 over 5 turns, `mai-code-2` 18.75, 4 prompts, 309,000 local tokens. `get_branch_ledger`: 3,200,000 input, 129,000 output, and 1,450,000 cached tokens.
-- `FirstPrompt`'s prompt: `claude-opus-5.5`, 30,000 input and 1,500 output tokens, 15.00 credits. The budget alert's span: 250,000 input tokens of `claude-opus-5.5`, 100.00 credits, which takes the branch to 766.75.
+### Code (copy exactly)
 
-### How samples are marked
+New file `src/CopilotLedger.Storage/CacheEfficiencyRow.cs`:
 
-A sample starts with a line `<!-- sample: <id> -->` and ends with a line `<!-- /sample -->`. Between them is one of:
+```csharp
+using CopilotLedger.Core.Telemetry;
 
-- a `shell` block with one `gh ledger` command, a blank line, and a `text` block with its output;
-- a single `text` or `json` block;
-- the receipt, with every line quoted (`> ` before each line, `>` alone for an empty one).
+namespace CopilotLedger.Storage;
 
-`GuideSamplesTests` reads these from `docs/guide.md` in the test output. When you change the guide, keep every marker line, and don't put anything else between the markers.
+// One group's prompt-cache efficiency. Counts and sums cover all the group's spans, except that Reported* sums cover only
+// the spans that reported cache usage (CacheMetrics.IsReported). Nothing is rounded.
+public sealed record CacheEfficiencyRow
+{
+    public string? Repository { get; init; }        // Repository, Branch, and PullRequest groupings
+    public string? Branch { get; init; }            // Branch grouping, and PullRequest grouping when PullRequestNumber is null
+    public int? PullRequestNumber { get; init; }    // PullRequest grouping; null for the spans of a branch without one
+    public string? Model { get; init; }             // Model grouping
+    public string? Agent { get; init; }             // Agent grouping
+    public required long SpanCount { get; init; }
+    public required long CacheReportedSpanCount { get; init; }
+    public required long InputTokens { get; init; }
+    public required long OutputTokens { get; init; }
+    public required long MaxInputTokens { get; init; }
+    public required long ReportedInputTokens { get; init; }
+    public required long ReportedCacheReadInputTokens { get; init; }
+    public required long ReportedCacheWriteInputTokens { get; init; }
+    public required long ReportedUncachedInputTokens { get; init; }     // input less cache reads and writes, at least 0 a span
+    public required long EstimatedUncachedInputTokens { get; init; }    // the same over all spans, as pricing counts them
+    public long CacheUnreportedSpanCount => SpanCount - CacheReportedSpanCount;
 
-### `docs/guide.md` (copy exactly)
+    // Observed uncached input; null when no span reported cache usage. It covers only the reported spans.
+    public long? UncachedInputTokens => CacheReportedSpanCount == 0 ? null : ReportedUncachedInputTokens;
+    public decimal? CacheHitRatio => CacheMetrics.HitRatio(ReportedCacheReadInputTokens, ReportedInputTokens);
+    public decimal? AverageInputTokensPerTurn => SpanCount == 0 ? null : (decimal)InputTokens / SpanCount;
+}
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/LedgerGrouping.cs`, replace:
+
+```csharp
+    Agent,
+    ChannelModel,
+}
+```
+
+with:
+
+```csharp
+    Agent,
+    ChannelModel,
+    PullRequest,     // GetCacheEfficiencyAsync only: repository and pull request, or repository and branch without one
+}
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                LocalSavedUsd =
+                    PicoUsd.ToUsd(reader.GetInt64(reader.GetOrdinal("saved_usd_pico"))),
+            });
+        }
+
+        return rows;
+```
+
+with:
+
+```csharp
+                LocalSavedUsd =
+                    PicoUsd.ToUsd(reader.GetInt64(reader.GetOrdinal("saved_usd_pico"))),
+            });
+        }
+
+        return rows;
+    }
+
+    // Prompt-cache efficiency by group, largest input first, then by the group key. grouping is Repository, Branch, Model,
+    // Agent, or PullRequest, which groups spans by repository and pull request number, and spans without one by repository
+    // and branch. Throws ArgumentOutOfRangeException for ChannelModel.
+    public async Task<IReadOnlyList<CacheEfficiencyRow>> GetCacheEfficiencyAsync(
+        LedgerGrouping grouping,
+        LedgerFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        (string keyColumns, string keyAliases) = grouping switch
+        {
+            LedgerGrouping.Repository =>
+                ("COALESCE(repo_slug, repo_root, '(none)') AS repository",
+                 "repository"),
+            LedgerGrouping.Branch =>
+                ("""
+                 COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                          COALESCE(branch_name, '(none)') AS branch
+                 """,
+                 "repository, branch"),
+            LedgerGrouping.Model =>
+                ("COALESCE(model_id, '(none)') AS model",
+                 "model"),
+            LedgerGrouping.Agent =>
+                ("COALESCE(agent_name, '(none)') AS agent",
+                 "agent"),
+            LedgerGrouping.PullRequest =>
+                ("""
+                 COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                          pull_request_number AS pull_request,
+                          CASE WHEN pull_request_number IS NULL THEN COALESCE(branch_name, '(none)') END AS branch
+                 """,
+                 "repository, pull_request, branch"),
+            _ => throw new ArgumentOutOfRangeException(nameof(grouping), grouping, null),
+        };
+
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {keyColumns},
+                   COUNT(*)                                                                AS span_count,
+                   SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END)                          AS cache_reported_span_count,
+                   SUM(input_tokens)                                                       AS input_tokens,
+                   SUM(output_tokens)                                                      AS output_tokens,
+                   MAX(input_tokens)                                                       AS max_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN input_tokens ELSE 0 END)               AS reported_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_read_input_tokens ELSE 0 END)    AS reported_cache_read_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_write_input_tokens ELSE 0 END)   AS reported_cache_write_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN {UncachedSql} ELSE 0 END)              AS reported_uncached_input_tokens,
+                   SUM({UncachedSql})                                                      AS estimated_uncached_input_tokens
+            FROM spans
+            WHERE {FilterSql}
+            GROUP BY {keyAliases}
+            ORDER BY input_tokens DESC, {keyAliases} ASC;
+            """;
+        AddFilterParameters(command, filter);
+
+        List<CacheEfficiencyRow> rows = [];
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            bool hasRepository = grouping is LedgerGrouping.Repository
+                or LedgerGrouping.Branch
+                or LedgerGrouping.PullRequest;
+            bool hasBranch = grouping is LedgerGrouping.Branch or LedgerGrouping.PullRequest
+                && !reader.IsDBNull(reader.GetOrdinal("branch"));
+            rows.Add(new CacheEfficiencyRow
+            {
+                Repository = hasRepository ? reader.GetString(reader.GetOrdinal("repository")) : null,
+                Branch = hasBranch ? reader.GetString(reader.GetOrdinal("branch")) : null,
+                PullRequestNumber = grouping == LedgerGrouping.PullRequest
+                    && !reader.IsDBNull(reader.GetOrdinal("pull_request"))
+                        ? reader.GetInt32(reader.GetOrdinal("pull_request"))
+                        : null,
+                Model = grouping == LedgerGrouping.Model
+                    ? reader.GetString(reader.GetOrdinal("model"))
+                    : null,
+                Agent = grouping == LedgerGrouping.Agent
+                    ? reader.GetString(reader.GetOrdinal("agent"))
+                    : null,
+                SpanCount = reader.GetInt64(reader.GetOrdinal("span_count")),
+                CacheReportedSpanCount = reader.GetInt64(reader.GetOrdinal("cache_reported_span_count")),
+                InputTokens = reader.GetInt64(reader.GetOrdinal("input_tokens")),
+                OutputTokens = reader.GetInt64(reader.GetOrdinal("output_tokens")),
+                MaxInputTokens = reader.GetInt64(reader.GetOrdinal("max_input_tokens")),
+                ReportedInputTokens = reader.GetInt64(reader.GetOrdinal("reported_input_tokens")),
+                ReportedCacheReadInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_cache_read_input_tokens")),
+                ReportedCacheWriteInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_cache_write_input_tokens")),
+                ReportedUncachedInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_uncached_input_tokens")),
+                EstimatedUncachedInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("estimated_uncached_input_tokens")),
+            });
+        }
+
+        return rows;
+```
+
+New file `tests/CopilotLedger.Tests/Storage/CacheEfficiencyTests.cs`:
+
+```csharp
+using CopilotLedger.Core.Git;
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Storage;
+using CopilotLedger.Tests.TestSupport;
+
+namespace CopilotLedger.Tests.Storage;
+
+public sealed class CacheEfficiencyTests
+{
+    private static readonly JsonRateCardCalculator Calculator = JsonRateCardCalculator.LoadEmbedded();
+
+    public static TheoryData<int, decimal> HitRatios => new()
+    {
+        { 0, 1m },
+        { 1, 0m },
+        { 2, 0.25m },
+        { 3, 0.1666666666666666666666666667m },
+        { 4, 0.4929331000134607618791223583m },
+    };
+
+    [Theory]
+    [MemberData(nameof(HitRatios))]
+    public async Task CE1_HitRatio_UsesOnlyTheSpansThatReportedCacheUsage(int caseNumber, decimal expected)
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        LedgerEntry[] entries = caseNumber switch
+        {
+            // All input read from the cache.
+            0 => [Entry("1", input: 1_000, cacheRead: 1_000)],
+
+            // True misses: a cache-read counter of 0, and a span that reported only a cache write.
+            1 =>
+            [
+                Entry("1", input: 1_000, readState: CacheCounterState.Reported),
+                Entry("2", input: 500, cacheWrite: 500),
+            ],
+
+            // A span without cache counters is left out, not counted as a miss.
+            2 => [Entry("1", input: 1_000, cacheRead: 250), Entry("2", input: 3_000)],
+            3 =>
+            [
+                Entry("1", input: 2_000, cacheRead: 500),
+                Entry("2", input: 1_000, cacheWrite: 400),
+                Entry("3", input: 5_000),
+            ],
+
+            // Copilot CLI's explore subagent: its first call wrote the cache and left out cache_read.
+            4 => [Entry("1", input: 3_665, cacheWrite: 3_662), Entry("2", input: 3_764, cacheRead: 3_662, cacheWrite: 99)],
+            _ => throw new ArgumentOutOfRangeException(nameof(caseNumber)),
+        };
+        await store.RecordAsync(entries);
+
+        CacheEfficiencyRow row = Assert.Single(
+            await store.GetCacheEfficiencyAsync(LedgerGrouping.Model, LedgerFilter.All));
+
+        Assert.Equal(expected, row.CacheHitRatio);
+    }
+
+    [Fact]
+    public async Task CE2_HitRatio_IsNullWithoutReportedInput()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        Assert.Empty(await store.GetCacheEfficiencyAsync(LedgerGrouping.Model, LedgerFilter.All));
+
+        await store.RecordAsync(
+        [
+            Entry("1", model: "qwen3.8-27b-cuda-gpu:1", input: 1_000),
+            Entry("2", model: "qwen3.8-27b-cuda-gpu:1", input: 3_000),
+            Entry("3", model: "mai-code-2", input: 0, readState: CacheCounterState.Reported),
+        ]);
+
+        Assert.Collection(
+            await store.GetCacheEfficiencyAsync(LedgerGrouping.Model, LedgerFilter.All),
+            row =>
+            {
+                Assert.Equal("qwen3.8-27b", row.Model);
+                Assert.Equal(2, row.SpanCount);
+                Assert.Equal(0, row.CacheReportedSpanCount);
+                Assert.Equal(2, row.CacheUnreportedSpanCount);
+                Assert.Null(row.CacheHitRatio);
+                Assert.Null(row.UncachedInputTokens);
+                Assert.Equal(0, row.ReportedInputTokens);
+                Assert.Equal(4_000, row.EstimatedUncachedInputTokens);
+            },
+            row =>
+            {
+                Assert.Equal("mai-code-2", row.Model);
+                Assert.Equal(1, row.SpanCount);
+                Assert.Equal(1, row.CacheReportedSpanCount);
+                Assert.Null(row.CacheHitRatio);
+                Assert.Equal(0, row.UncachedInputTokens);
+            });
+    }
+
+    [Fact]
+    public async Task CE3_Row_SeparatesObservedAndEstimatedTotals()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        await store.RecordAsync(
+        [
+            Entry("1", input: 1_000, output: 40, cacheRead: 600, cacheWrite: 100),
+            Entry("2", input: 500, output: 20),
+            Entry("3", input: 300, output: 10, cacheRead: 300),
+        ]);
+
+        CacheEfficiencyRow row = Assert.Single(
+            await store.GetCacheEfficiencyAsync(LedgerGrouping.Model, LedgerFilter.All));
+
+        Assert.Equal("mai-code-2", row.Model);
+        Assert.Null(row.Repository);
+        Assert.Null(row.Branch);
+        Assert.Null(row.PullRequestNumber);
+        Assert.Null(row.Agent);
+        Assert.Equal(3, row.SpanCount);
+        Assert.Equal(2, row.CacheReportedSpanCount);
+        Assert.Equal(1, row.CacheUnreportedSpanCount);
+        Assert.Equal(1_800, row.InputTokens);
+        Assert.Equal(70, row.OutputTokens);
+        Assert.Equal(1_000, row.MaxInputTokens);
+        Assert.Equal(1_300, row.ReportedInputTokens);
+        Assert.Equal(900, row.ReportedCacheReadInputTokens);
+        Assert.Equal(100, row.ReportedCacheWriteInputTokens);
+        Assert.Equal(300, row.ReportedUncachedInputTokens);
+        Assert.Equal(300, row.UncachedInputTokens);
+        Assert.Equal(800, row.EstimatedUncachedInputTokens);
+        Assert.Equal(600m, row.AverageInputTokensPerTurn);
+        Assert.Equal(0.6923076923076923076923076923m, row.CacheHitRatio);
+    }
+
+    [Fact]
+    public async Task CE4_Groupings_KeyRowsAndOrderThemByInput()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        GitWorkspaceContext feature = GitFixture.Feature(temp.Path) with { PullRequestNumber = 42 };
+        GitWorkspaceContext main = GitFixture.Feature(temp.Path) with { BranchName = "main" };
+        GitWorkspaceContext fix = GitFixture.Feature(temp.Path) with { BranchName = "fix/login" };
+        await store.RecordAsync(
+        [
+            Entry("1", model: "claude-opus-5.5", agent: "explore", git: feature, input: 4_000, cacheRead: 3_000),
+            Entry("2", model: "mai-code-2", git: feature, input: 2_000, cacheRead: 500),
+            Entry("3", model: "mai-code-2", agent: "explore", git: main, input: 1_000),
+            Entry("4", model: "claude-opus-5.5", git: fix, input: 1_000, cacheRead: 1_000),
+            Entry("5", model: "mai-code-2", input: 500, cacheRead: 100),
+        ]);
+
+        Assert.Collection(
+            await store.GetCacheEfficiencyAsync(LedgerGrouping.Model, LedgerFilter.All),
+            row => AssertRow(row, null, null, null, "claude-opus-5.5", null, 2, 2, 5_000, 0.8m),
+            row => AssertRow(row, null, null, null, "mai-code-2", null, 3, 2, 3_500, 0.24m));
+        Assert.Collection(
+            await store.GetCacheEfficiencyAsync(LedgerGrouping.Agent, LedgerFilter.All),
+            row => AssertRow(row, null, null, null, null, "explore", 2, 1, 5_000, 0.75m),
+            row => AssertRow(row, null, null, null, null, "(none)", 3, 3, 3_500, 0.4571428571428571428571428571m));
+        Assert.Collection(
+            await store.GetCacheEfficiencyAsync(LedgerGrouping.Branch, LedgerFilter.All),
+            row => AssertRow(row, "swigerb/copilot-ledger", "feature/ledger", null, null, null, 2, 2, 6_000, 0.5833333333333333333333333333m),
+            row => AssertRow(row, "swigerb/copilot-ledger", "fix/login", null, null, null, 1, 1, 1_000, 1m),
+            row => AssertRow(row, "swigerb/copilot-ledger", "main", null, null, null, 1, 0, 1_000, null),
+            row => AssertRow(row, "(none)", "(none)", null, null, null, 1, 1, 500, 0.2m));
+        Assert.Collection(
+            await store.GetCacheEfficiencyAsync(LedgerGrouping.PullRequest, LedgerFilter.All),
+            row => AssertRow(row, "swigerb/copilot-ledger", null, 42, null, null, 2, 2, 6_000, 0.5833333333333333333333333333m),
+            row => AssertRow(row, "swigerb/copilot-ledger", "fix/login", null, null, null, 1, 1, 1_000, 1m),
+            row => AssertRow(row, "swigerb/copilot-ledger", "main", null, null, null, 1, 0, 1_000, null),
+            row => AssertRow(row, "(none)", "(none)", null, null, null, 1, 1, 500, 0.2m));
+        Assert.Collection(
+            await store.GetCacheEfficiencyAsync(LedgerGrouping.Repository, LedgerFilter.All),
+            row => AssertRow(row, "swigerb/copilot-ledger", null, null, null, null, 4, 3, 8_000, 0.6428571428571428571428571429m),
+            row => AssertRow(row, "(none)", null, null, null, null, 1, 1, 500, 0.2m));
+        Assert.Collection(
+            await store.GetCacheEfficiencyAsync(
+                LedgerGrouping.Model,
+                new LedgerFilter { PullRequestNumber = 42, Agent = "(none)" }),
+            row => AssertRow(row, null, null, null, "mai-code-2", null, 1, 1, 2_000, 0.25m));
+    }
+
+    [Fact]
+    public async Task CE5_UnsupportedGroupings_Throw()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => store.GetCacheEfficiencyAsync(LedgerGrouping.ChannelModel, LedgerFilter.All));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => store.GetRollupAsync(LedgerGrouping.PullRequest, LedgerFilter.All));
+    }
+
+    private static async Task<SqliteLedgerStore> StoreAsync(TempDirectory temp)
+    {
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "ledger.db"));
+        await store.InitializeAsync();
+        return store;
+    }
+
+    // A chat span in trace 0e0e...0e<id>; a nonzero cache counter is Reported and a zero one is Absent unless a state is given.
+    private static LedgerEntry Entry(
+        string id,
+        string model = "mai-code-2",
+        string? agent = null,
+        GitWorkspaceContext? git = null,
+        long input = 0,
+        long output = 0,
+        long cacheRead = 0,
+        long cacheWrite = 0,
+        CacheCounterState? readState = null)
+    {
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            requestModel: model,
+            agentName: agent,
+            inputTokens: input,
+            outputTokens: output,
+            cacheReadInputTokens: cacheRead,
+            cacheWriteInputTokens: cacheWrite,
+            cacheReadState: readState) with
+        {
+            TraceId = "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e" + id.PadLeft(2, '0'),
+            SpanId = "0e0e0e0e0e0e0e" + id.PadLeft(2, '0'),
+        };
+        return new LedgerEntry(span, Calculator.Calculate(span), git);
+    }
+
+    private static void AssertRow(
+        CacheEfficiencyRow row,
+        string? repository,
+        string? branch,
+        int? pullRequest,
+        string? model,
+        string? agent,
+        long spans,
+        long reported,
+        long input,
+        decimal? hitRatio)
+    {
+        Assert.Equal(repository, row.Repository);
+        Assert.Equal(branch, row.Branch);
+        Assert.Equal(pullRequest, row.PullRequestNumber);
+        Assert.Equal(model, row.Model);
+        Assert.Equal(agent, row.Agent);
+        Assert.Equal(spans, row.SpanCount);
+        Assert.Equal(reported, row.CacheReportedSpanCount);
+        Assert.Equal(input, row.InputTokens);
+        Assert.Equal(hitRatio, row.CacheHitRatio);
+    }
+}
+```
+
+### Tests
+
+- **CE1** (5 `TheoryData<int, decimal>` cases, one row each): all input read → `1`; a reported 0 cache read plus a span that reported only a 500-token write → `0`; 250 of 1,000 with an unreported 3,000-token span → `0.25`; 500 of 3,000 reported input with an unreported span → `0.1666666666666666666666666667`; Copilot CLI's `explore` pair (3,665 with a 3,662 write, then 3,764 with a 3,662 read and a 99 write) → `0.4929331000134607618791223583`.
+- **CE2:** an empty ledger has no rows; two `qwen3.8-27b` spans without counters have 0 reported spans, `null` ratio, `null` observed uncached, and an estimate of 4,000; a `mai-code-2` span with a reported 0 and no input has a `null` ratio and observed uncached 0.
+- **CE3:** one row separates observed and estimated totals: 3 spans, 2 reported, input 1,800, output 70, max 1,000, reported input 1,300, reads 900, writes 100, observed uncached 300, estimate 800, average `600`, ratio `0.6923076923076923076923076923`.
+- **CE4:** the five groupings key and order rows (for example, by pull request: PR 42 with 6,000 input and `0.5833333333333333333333333333`, then `fix/login` and `main` without one, tied at 1,000 and ordered by branch, then `(none)`), and the new filters combine.
+- **CE5:** `GetCacheEfficiencyAsync(ChannelModel, …)` and `GetRollupAsync(PullRequest, …)` throw `ArgumentOutOfRangeException`.
+
+### Acceptance criteria
+
+- Ratios are exact `decimal` from integer sums, `null` when no span reported cache usage or reported input is 0.
+- `dotnet test CopilotLedger.slnx` passes **743** tests (734 + 9).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 6 specification: Turn Breakdown and Context-Bloat Queries
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Storage/TurnSelector.cs` | New |
+| `src/CopilotLedger.Storage/TurnTokenRow.cs` | New |
+| `src/CopilotLedger.Storage/BloatChainRow.cs` | New |
+| `src/CopilotLedger.Storage/InputGrowthRow.cs` | New |
+| `src/CopilotLedger.Storage/ContextBloatReport.cs` | New |
+| `src/CopilotLedger.Storage/SqliteLedgerStore.cs` | `SequenceSql`; new `GetTurnBreakdownAsync`, `GetContextBloatAsync`, `ReadBloatChainsAsync`, and `ToCacheCounterState` |
+| `tests/CopilotLedger.Tests/TestSupport/TurnSeeds.cs` | New: four prompt chains with span links |
+| `tests/CopilotLedger.Tests/Storage/TurnBreakdownTests.cs` | New: TB1–TB4, CB1, CB2 |
+
+### Contracts
+
+```csharp
+public sealed record TurnSelector            // exactly one of TraceId and ConversationId is set
+{
+    public string? TraceId { get; }          // 32 lowercase hexadecimal characters
+    public string? ConversationId { get; }
+    public static TurnSelector ForTrace(string traceId);              // ArgumentNullException; ArgumentException unless 32 hex characters; lowercases
+    public static TurnSelector ForConversation(string conversationId);  // ArgumentNullException; ArgumentException when blank
+}
+
+public sealed record TurnTokenRow
+{
+    // TraceId, SpanId, ParentSpanId?, ConversationId?, AgentSpanId?, StartTime, Repository, Branch, PullRequestNumber?,
+    // Agent?, Model, InputTokens, OutputTokens, CacheReadState, CacheWriteState,
+    // CacheReadInputTokens?, CacheWriteInputTokens?   — null unless CacheMetrics.IsReported for the span
+    // InputDeltaFromPreviousTurn?                     — null for a sequence's first span and when AgentSpanId is null
+    public long? UncachedInputTokens { get; }        // max(input − read − write, 0), or null
+    public decimal? CacheHitRatio { get; }           // CacheMetrics.HitRatio(read, input), or null
+}
+
+public sealed record BloatChainRow     // one trace: TraceId, ConversationId?, StartTime (earliest), Repository, Branch, SpanCount,
+                                       // CacheReportedSpanCount, InputTokens, ReportedInputTokens, ReportedCacheReadInputTokens,
+                                       // ReportedUncachedInputTokens, EstimatedUncachedInputTokens; CacheHitRatio
+public sealed record InputGrowthRow    // a trace's best sequence: TraceId, ConversationId?, AgentSpanId, Agent?, Model, Repository,
+                                       // Branch, StartTime, TurnCount, FirstInputTokens, PeakInputTokens; InputGrowthTokens
+public sealed record ContextBloatReport
+{
+    public required IReadOnlyList<BloatChainRow> ByUncachedInput { get; init; }
+    public required IReadOnlyList<BloatChainRow> ByEstimatedUncachedInput { get; init; }
+    public required IReadOnlyList<InputGrowthRow> ByInputGrowth { get; init; }
+    public required long SpansWithoutAgent { get; init; }
+}
+
+public Task<IReadOnlyList<TurnTokenRow>> GetTurnBreakdownAsync(
+    TurnSelector selector, LedgerFilter filter, CancellationToken cancellationToken = default);   // ArgumentNullException
+public Task<ContextBloatReport> GetContextBloatAsync(
+    LedgerFilter filter, int limit, CancellationToken cancellationToken = default);   // ArgumentOutOfRangeException unless 1 ≤ limit ≤ 1000
+```
+
+### Algorithms
+
+A *sequence* is `SequenceSql`: `trace_id, agent_span_id, COALESCE(repo_slug, repo_root, '(none)'), COALESCE(branch_name, '(none)'), COALESCE(conversation_id, '(none)'), COALESCE(model_id, '(none)')`, ordered by `start_time_unix_ms, span_id`.
+
+`GetTurnBreakdownAsync`:
+
+1. Select the spans of `selector` (trace or conversation) in a CTE, adding `input_delta`: `NULL` when `agent_span_id` is null, otherwise `input_tokens - LAG(input_tokens) OVER (PARTITION BY {SequenceSql} ORDER BY start_time_unix_ms, span_id)`.
+2. Apply `FilterSql` to the CTE's rows, so filtering never changes a delta.
+3. Order by `start_time_unix_ms, span_id, trace_id`.
+4. Map states with `ToCacheCounterState`; when the span isn't `IsReported`, the cache counters are `null`.
+
+`GetContextBloatAsync`:
+
+1. `ByUncachedInput`: traces matching the filter whose reported span count equals their span count, ordered by reported uncached input descending, then trace ID, up to `limit`.
+2. `ByEstimatedUncachedInput`: traces with fewer reported spans than spans, ordered by estimated uncached input descending, then trace ID.
+3. `ByInputGrowth`: over the filtered spans with an `agent_span_id`, each sequence's first input (`FIRST_VALUE`), peak input (`MAX`), request count, and first start; per trace, the sequence with the largest `peak − first`, ties going to the lower agent span ID, then model, repository, branch, and conversation; only growth above 0; ordered by growth descending, then trace ID.
+4. `SpansWithoutAgent`: the filtered spans whose `agent_span_id` is null.
+
+### Test data: `TurnSeeds`
+
+Four prompt chains on 2026-11-21 (UTC), recorded with span links and then back-filled:
+
+| Trace | Span | Start | Agent (invoke_agent span) | Model | Input | Cache read | Cache write |
+|---|---|---|---|---|---:|---:|---:|
+| B1 (`conv-b`, PR 42) | `c100000000000001` | 10:00:00 | default (`a100000000000001`) | claude-opus-5.5 | 10,000 | — | 9,000 |
+| | `5100000000000001` | 10:00:05 | explore (`a100000000000002`) | mai-code-2 | 3,000 | — | — |
+| | `5100000000000002` | 10:00:10 | explore | mai-code-2 | 5,000 | 2,000 | — |
+| | `c100000000000002` | 10:00:10 | default | claude-opus-5.5 | 12,000 | 9,000 | 2,500 |
+| | `c100000000000003` | 10:00:20 | default | claude-opus-5.5 | 11,000 | 11,000 | — |
+| | `0100000000000001` | 10:00:30 | unknown (parent `f100000000000009` never recorded) | claude-opus-5.5 | 20,000 | — | — |
+| B2 (`conv-b`, PR 42) | `d200000000000001` | 10:05:00 | default (`a200000000000001`) | claude-opus-5.5 | 15,000 | 10,000 | — |
+| B3 (`conv-c`, no PR) | `e300000000000001` | 11:00:00 | default (`a300000000000001`) | claude-opus-5.5 | 20,000 | 5,000 | — |
+| | `e300000000000002` | 11:01:00 | default | claude-opus-5.5 | 30,000 | 5,000 | — |
+| B0 (no conversation or Git) | `f000000000000001` | 12:00:00 | unknown (no links) | mai-code-2 | 5,000 | reported 0 | — |
+
+"—" is an absent counter. B1's explore agent's `invoke_agent` span is a child of an `execute_tool` span under the default agent, as in Copilot CLI, and its second request starts in the same millisecond as the default agent's second.
+
+### Code (copy exactly)
+
+New file `src/CopilotLedger.Storage/BloatChainRow.cs`:
+
+```csharp
+using CopilotLedger.Core.Telemetry;
+
+namespace CopilotLedger.Storage;
+
+// One prompt chain (one trace) ranked by uncached input in a ContextBloatReport. Reported* sums cover only the spans that
+// reported cache usage (CacheMetrics.IsReported).
+public sealed record BloatChainRow
+{
+    public required string TraceId { get; init; }
+    public string? ConversationId { get; init; }
+    public required DateTimeOffset StartTime { get; init; }             // earliest span start
+    public required string Repository { get; init; }                    // same key as the Repository rollup
+    public required string Branch { get; init; }                        // same key as the Branch rollup
+    public required long SpanCount { get; init; }
+    public required long CacheReportedSpanCount { get; init; }
+    public required long InputTokens { get; init; }
+    public required long ReportedInputTokens { get; init; }
+    public required long ReportedCacheReadInputTokens { get; init; }
+    public required long ReportedUncachedInputTokens { get; init; }     // input less cache reads and writes, at least 0 a span
+    public required long EstimatedUncachedInputTokens { get; init; }    // the same over all spans, as pricing counts them
+    public decimal? CacheHitRatio => CacheMetrics.HitRatio(ReportedCacheReadInputTokens, ReportedInputTokens);
+}
+```
+
+New file `src/CopilotLedger.Storage/ContextBloatReport.cs`:
+
+```csharp
+namespace CopilotLedger.Storage;
+
+// GetContextBloatAsync's rankings. Each list holds at most the limit given, and ties go to the lower trace ID.
+public sealed record ContextBloatReport
+{
+    public required IReadOnlyList<BloatChainRow> ByUncachedInput { get; init; }            // chains whose spans all reported cache usage, by ReportedUncachedInputTokens
+    public required IReadOnlyList<BloatChainRow> ByEstimatedUncachedInput { get; init; }   // the other chains, by EstimatedUncachedInputTokens
+    public required IReadOnlyList<InputGrowthRow> ByInputGrowth { get; init; }             // each chain's largest sequence growth above 0
+    public required long SpansWithoutAgent { get; init; }                                  // spans left out of growth: no known invoke_agent ancestor
+}
+```
+
+New file `src/CopilotLedger.Storage/InputGrowthRow.cs`:
+
+```csharp
+namespace CopilotLedger.Storage;
+
+// A prompt chain's sequence with the most input growth: one agent invocation's requests to one model in one repository,
+// branch, and conversation.
+public sealed record InputGrowthRow
+{
+    public required string TraceId { get; init; }
+    public string? ConversationId { get; init; }
+    public required string AgentSpanId { get; init; }     // the invoke_agent span of the sequence
+    public string? Agent { get; init; }                   // gen_ai.agent.name; null when the agent has none
+    public required string Model { get; init; }           // model id, or (none)
+    public required string Repository { get; init; }
+    public required string Branch { get; init; }
+    public required DateTimeOffset StartTime { get; init; }   // the sequence's first request
+    public required long TurnCount { get; init; }             // requests in the sequence
+    public required long FirstInputTokens { get; init; }
+    public required long PeakInputTokens { get; init; }
+    public long InputGrowthTokens => PeakInputTokens - FirstInputTokens;
+}
+```
+
+Edit 1 of 4 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+    // A span's input tokens that were neither read from nor written to the cache, never below 0.
+    private const string UncachedSql = "MAX(input_tokens - cache_read_input_tokens - cache_write_input_tokens, 0)";
+
+    private readonly TimeProvider _timeProvider;
+```
+
+with:
+
+```csharp
+    // A span's input tokens that were neither read from nor written to the cache, never below 0.
+    private const string UncachedSql = "MAX(input_tokens - cache_read_input_tokens - cache_write_input_tokens, 0)";
+
+    // A growth sequence: one agent invocation's requests to one model in one repository, branch, and conversation.
+    private const string SequenceSql = """
+        trace_id, agent_span_id, COALESCE(repo_slug, repo_root, '(none)'), COALESCE(branch_name, '(none)'),
+                                 COALESCE(conversation_id, '(none)'), COALESCE(model_id, '(none)')
+        """;
+
+    private readonly TimeProvider _timeProvider;
+```
+
+Edit 2 of 4 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+    }
+
+    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+    {
+        SqliteConnection connection = new(_connectionString);
+```
+
+with:
+
+```csharp
+        return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+    }
+
+    // The selector's inference spans that match filter, by start time, then span ID, then trace ID. invoke_agent spans are
+    // never stored as spans, so they're never listed. A span's input delta compares it with the previous span of its
+    // sequence (SequenceSql); it's null for a sequence's first span and for a span without a known invoke_agent ancestor.
+    // Deltas are computed over all the selector's spans before filter applies.
+    // Throws ArgumentNullException for a null selector or filter.
+    public async Task<IReadOnlyList<TurnTokenRow>> GetTurnBreakdownAsync(
+        TurnSelector selector,
+        LedgerFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        ArgumentNullException.ThrowIfNull(selector);
+        ArgumentNullException.ThrowIfNull(filter);
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"""
+            WITH selected AS (
+                SELECT *,
+                       CASE WHEN agent_span_id IS NULL THEN NULL
+                            ELSE input_tokens - LAG(input_tokens) OVER (
+                                PARTITION BY {SequenceSql}
+                                ORDER BY start_time_unix_ms, span_id)
+                       END AS input_delta
+                FROM spans
+                WHERE (@trace IS NULL OR trace_id = @trace)
+                  AND (@conversation IS NULL OR conversation_id = @conversation)
+            )
+            SELECT trace_id, span_id, parent_span_id, conversation_id, agent_span_id, start_time_unix_ms,
+                   COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                   COALESCE(branch_name, '(none)')          AS branch,
+                   pull_request_number, agent_name,
+                   COALESCE(model_id, '(none)')             AS model,
+                   input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens,
+                   cache_read_state, cache_write_state, input_delta
+            FROM selected
+            WHERE {FilterSql}
+            ORDER BY start_time_unix_ms, span_id, trace_id;
+            """;
+        command.Parameters.AddWithValue("@trace", OrDbNull(selector.TraceId));
+        command.Parameters.AddWithValue("@conversation", OrDbNull(selector.ConversationId));
+        AddFilterParameters(command, filter);
+
+        List<TurnTokenRow> rows = [];
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            CacheCounterState readState = ToCacheCounterState(reader.GetString(15));
+            CacheCounterState writeState = ToCacheCounterState(reader.GetString(16));
+            bool reported = CacheMetrics.IsReported(readState, writeState);
+            rows.Add(new TurnTokenRow
+            {
+                TraceId = reader.GetString(0),
+                SpanId = reader.GetString(1),
+                ParentSpanId = reader.IsDBNull(2) ? null : reader.GetString(2),
+                ConversationId = reader.IsDBNull(3) ? null : reader.GetString(3),
+                AgentSpanId = reader.IsDBNull(4) ? null : reader.GetString(4),
+                StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(5)),
+                Repository = reader.GetString(6),
+                Branch = reader.GetString(7),
+                PullRequestNumber = reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                Agent = reader.IsDBNull(9) ? null : reader.GetString(9),
+                Model = reader.GetString(10),
+                InputTokens = reader.GetInt64(11),
+                OutputTokens = reader.GetInt64(12),
+                CacheReadState = readState,
+                CacheWriteState = writeState,
+                CacheReadInputTokens = reported ? reader.GetInt64(13) : null,
+                CacheWriteInputTokens = reported ? reader.GetInt64(14) : null,
+                InputDeltaFromPreviousTurn = reader.IsDBNull(17) ? null : reader.GetInt64(17),
+            });
+        }
+
+        return rows;
+    }
+
+    // Ranks the prompt chains that match filter, limit of each ranking; see ContextBloatReport. A chain's growth is its
+    // sequence (SequenceSql) with the largest peak input less first input, by start time then span ID, among the spans
+    // with a known invoke_agent ancestor; ties between a chain's sequences go to the lowest agent span ID, then model.
+    // Throws ArgumentOutOfRangeException unless 1 <= limit <= 1000.
+    public async Task<ContextBloatReport> GetContextBloatAsync(
+        LedgerFilter filter,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        if (limit is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        }
+
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        IReadOnlyList<BloatChainRow> complete = await ReadBloatChainsAsync(
+            connection,
+            filter,
+            limit,
+            "=",
+            "reported_uncached_input_tokens",
+            cancellationToken);
+        IReadOnlyList<BloatChainRow> incomplete = await ReadBloatChainsAsync(
+            connection,
+            filter,
+            limit,
+            "<",
+            "estimated_uncached_input_tokens",
+            cancellationToken);
+
+        List<InputGrowthRow> growth = [];
+        await using (SqliteCommand query = connection.CreateCommand())
+        {
+            query.CommandText = $"""
+                WITH turns AS (
+                    SELECT trace_id, agent_span_id, conversation_id, agent_name, start_time_unix_ms, input_tokens,
+                           COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                           COALESCE(branch_name, '(none)')          AS branch,
+                           COALESCE(conversation_id, '(none)')      AS conversation,
+                           COALESCE(model_id, '(none)')             AS model,
+                           FIRST_VALUE(input_tokens) OVER (
+                               PARTITION BY {SequenceSql}
+                               ORDER BY start_time_unix_ms, span_id) AS first_input
+                    FROM spans
+                    WHERE {FilterSql} AND agent_span_id IS NOT NULL
+                ),
+                sequences AS (
+                    SELECT trace_id, agent_span_id, repository, branch, conversation, model,
+                           MAX(conversation_id)    AS conversation_id,
+                           MAX(agent_name)         AS agent,
+                           MIN(start_time_unix_ms) AS start_ms,
+                           COUNT(*)                AS turn_count,
+                           MAX(first_input)        AS first_input,
+                           MAX(input_tokens)       AS peak_input
+                    FROM turns
+                    GROUP BY trace_id, agent_span_id, repository, branch, conversation, model
+                ),
+                ranked AS (
+                    SELECT *,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY trace_id
+                               ORDER BY peak_input - first_input DESC, agent_span_id, model, repository, branch, conversation
+                           ) AS rank_in_trace
+                    FROM sequences
+                )
+                SELECT trace_id, conversation_id, agent_span_id, agent, model, repository, branch,
+                       start_ms, turn_count, first_input, peak_input
+                FROM ranked
+                WHERE rank_in_trace = 1 AND peak_input - first_input > 0
+                ORDER BY peak_input - first_input DESC, trace_id ASC
+                LIMIT @limit;
+                """;
+            AddFilterParameters(query, filter);
+            query.Parameters.AddWithValue("@limit", limit);
+            await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                growth.Add(new InputGrowthRow
+                {
+                    TraceId = reader.GetString(0),
+                    ConversationId = reader.IsDBNull(1) ? null : reader.GetString(1),
+                    AgentSpanId = reader.GetString(2),
+                    Agent = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    Model = reader.GetString(4),
+                    Repository = reader.GetString(5),
+                    Branch = reader.GetString(6),
+                    StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(7)),
+                    TurnCount = reader.GetInt64(8),
+                    FirstInputTokens = reader.GetInt64(9),
+                    PeakInputTokens = reader.GetInt64(10),
+                });
+            }
+        }
+
+        long withoutAgent;
+        await using (SqliteCommand query = connection.CreateCommand())
+        {
+            query.CommandText = $"""
+                SELECT COUNT(*) FROM spans WHERE {FilterSql} AND agent_span_id IS NULL;
+                """;
+            AddFilterParameters(query, filter);
+            withoutAgent = (long)(await query.ExecuteScalarAsync(cancellationToken))!;
+        }
+
+        return new ContextBloatReport
+        {
+            ByUncachedInput = complete,
+            ByEstimatedUncachedInput = incomplete,
+            ByInputGrowth = growth,
+            SpansWithoutAgent = withoutAgent,
+        };
+    }
+
+    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+    {
+        SqliteConnection connection = new(_connectionString);
+```
+
+Edit 3 of 4 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                SpentAiCredits =
+                    PicoUsd.ToUsd(reader.GetInt64(6)) / AiCreditMath.UsdPerAiCredit,
+            });
+        }
+
+        return rows;
+```
+
+with:
+
+```csharp
+                SpentAiCredits =
+                    PicoUsd.ToUsd(reader.GetInt64(6)) / AiCreditMath.UsdPerAiCredit,
+            });
+        }
+
+        return rows;
+    }
+
+    // Chains whose reported span count compares to their span count with comparison ("=" or "<"), ordered by orderBy
+    // (a column alias) descending, then trace ID.
+    private static async Task<IReadOnlyList<BloatChainRow>> ReadBloatChainsAsync(
+        SqliteConnection connection,
+        LedgerFilter filter,
+        int limit,
+        string comparison,
+        string orderBy,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand query = connection.CreateCommand();
+        query.CommandText = $"""
+            SELECT trace_id,
+                   MIN(start_time_unix_ms)                                                 AS start_ms,
+                   MAX(conversation_id)                                                    AS conversation_id,
+                   MAX(COALESCE(repo_slug, repo_root, '(none)'))                           AS repository,
+                   MAX(COALESCE(branch_name, '(none)'))                                    AS branch,
+                   COUNT(*)                                                                AS span_count,
+                   SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END)                          AS cache_reported_span_count,
+                   SUM(input_tokens)                                                       AS input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN input_tokens ELSE 0 END)               AS reported_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_read_input_tokens ELSE 0 END)    AS reported_cache_read_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN {UncachedSql} ELSE 0 END)              AS reported_uncached_input_tokens,
+                   SUM({UncachedSql})                                                      AS estimated_uncached_input_tokens
+            FROM spans
+            WHERE {FilterSql}
+            GROUP BY trace_id
+            HAVING SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END) {comparison} COUNT(*)
+            ORDER BY {orderBy} DESC, trace_id ASC
+            LIMIT @limit;
+            """;
+        AddFilterParameters(query, filter);
+        query.Parameters.AddWithValue("@limit", limit);
+        List<BloatChainRow> rows = [];
+        await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new BloatChainRow
+            {
+                TraceId = reader.GetString(0),
+                StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)),
+                ConversationId = reader.IsDBNull(2) ? null : reader.GetString(2),
+                Repository = reader.GetString(3),
+                Branch = reader.GetString(4),
+                SpanCount = reader.GetInt64(5),
+                CacheReportedSpanCount = reader.GetInt64(6),
+                InputTokens = reader.GetInt64(7),
+                ReportedInputTokens = reader.GetInt64(8),
+                ReportedCacheReadInputTokens = reader.GetInt64(9),
+                ReportedUncachedInputTokens = reader.GetInt64(10),
+                EstimatedUncachedInputTokens = reader.GetInt64(11),
+            });
+        }
+
+        return rows;
+```
+
+Edit 4 of 4 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
+    };
+
+    private static object OrDbNull<T>(T? value) where T : struct =>
+        value.HasValue ? value.Value : DBNull.Value;
+```
+
+with:
+
+```csharp
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
+    };
+
+    private static CacheCounterState ToCacheCounterState(string value) => value switch
+    {
+        "reported" => CacheCounterState.Reported,
+        "absent" => CacheCounterState.Absent,
+        "legacy_unknown" => CacheCounterState.LegacyUnknown,
+        _ => throw new InvalidDataException($"Unknown cache counter state '{value}'."),
+    };
+
+    private static object OrDbNull<T>(T? value) where T : struct =>
+        value.HasValue ? value.Value : DBNull.Value;
+```
+
+New file `src/CopilotLedger.Storage/TurnSelector.cs`:
+
+```csharp
+namespace CopilotLedger.Storage;
+
+// The inference spans of one trace, or of one conversation, for GetTurnBreakdownAsync.
+public sealed record TurnSelector
+{
+    private TurnSelector(string? traceId, string? conversationId)
+    {
+        TraceId = traceId;
+        ConversationId = conversationId;
+    }
+
+    public string? TraceId { get; }          // 32 lowercase hexadecimal characters; null when ConversationId is set
+    public string? ConversationId { get; }   // null when TraceId is set
+
+    // Throws ArgumentNullException for null, and ArgumentException unless traceId is 32 hexadecimal characters.
+    // Matches the lowercase trace ID that the ledger stores.
+    public static TurnSelector ForTrace(string traceId)
+    {
+        ArgumentNullException.ThrowIfNull(traceId);
+        if (traceId.Length != 32 || !traceId.All(char.IsAsciiHexDigit))
+        {
+            throw new ArgumentException("A trace ID is 32 hexadecimal characters.", nameof(traceId));
+        }
+
+        return new TurnSelector(traceId.ToLowerInvariant(), null);
+    }
+
+    // Throws ArgumentNullException for null, and ArgumentException for a blank conversationId.
+    public static TurnSelector ForConversation(string conversationId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        return new TurnSelector(null, conversationId);
+    }
+}
+```
+
+New file `src/CopilotLedger.Storage/TurnTokenRow.cs`:
+
+```csharp
+using CopilotLedger.Core.Telemetry;
+
+namespace CopilotLedger.Storage;
+
+// One inference span, that is one model request, in a turn breakdown. The cache properties are null when the span
+// reported no cache usage (CacheMetrics.IsReported); on a span that did, a counter it left out is 0.
+public sealed record TurnTokenRow
+{
+    public required string TraceId { get; init; }
+    public required string SpanId { get; init; }
+    public string? ParentSpanId { get; init; }
+    public string? ConversationId { get; init; }
+    public string? AgentSpanId { get; init; }                  // the nearest invoke_agent ancestor in the trace; null when unknown
+    public required DateTimeOffset StartTime { get; init; }
+    public required string Repository { get; init; }           // same key as the Repository rollup
+    public required string Branch { get; init; }               // same key as the Branch rollup
+    public int? PullRequestNumber { get; init; }
+    public string? Agent { get; init; }                        // gen_ai.agent.name; null when the span has none
+    public required string Model { get; init; }                // model id, or (none)
+    public required long InputTokens { get; init; }
+    public required long OutputTokens { get; init; }
+    public required CacheCounterState CacheReadState { get; init; }
+    public required CacheCounterState CacheWriteState { get; init; }
+    public long? CacheReadInputTokens { get; init; }
+    public long? CacheWriteInputTokens { get; init; }
+
+    // InputTokens less the previous span's in the same sequence; null for a sequence's first span and when AgentSpanId is null.
+    public long? InputDeltaFromPreviousTurn { get; init; }
+
+    public long? UncachedInputTokens => CacheReadInputTokens is null
+        ? null
+        : Math.Max(InputTokens - CacheReadInputTokens.Value - CacheWriteInputTokens.GetValueOrDefault(), 0);
+
+    public decimal? CacheHitRatio => CacheReadInputTokens is null
+        ? null
+        : CacheMetrics.HitRatio(CacheReadInputTokens.Value, InputTokens);
+}
+```
+
+New file `tests/CopilotLedger.Tests/Storage/TurnBreakdownTests.cs`:
+
+```csharp
+using System.Globalization;
+using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Storage;
+using CopilotLedger.Tests.TestSupport;
+
+namespace CopilotLedger.Tests.Storage;
+
+public sealed class TurnBreakdownTests
+{
+    private const string Root = "a100000000000001";
+    private const string Explore = "a100000000000002";
+
+    [Fact]
+    public async Task TB1_Trace_ListsRequestsInStartOrderWithDeltasPerSequence()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await SeededStoreAsync(temp);
+
+        IReadOnlyList<TurnTokenRow> rows = await store.GetTurnBreakdownAsync(
+            TurnSelector.ForTrace(TurnSeeds.B1),
+            LedgerFilter.All);
+
+        Assert.Collection(
+            rows,
+            row => AssertTurn(row, "c100000000000001", "10:00:00", Root, null, "claude-opus-5.5", 10_000, 500, CacheCounterState.Absent, CacheCounterState.Reported, 0, 9_000, 1_000, 0m, null),
+            row => AssertTurn(row, "5100000000000001", "10:00:05", Explore, "explore", "mai-code-2", 3_000, 100, CacheCounterState.Absent, CacheCounterState.Absent, null, null, null, null, null),
+            row => AssertTurn(row, "5100000000000002", "10:00:10", Explore, "explore", "mai-code-2", 5_000, 100, CacheCounterState.Reported, CacheCounterState.Absent, 2_000, 0, 3_000, 0.4m, 2_000),
+            row => AssertTurn(row, "c100000000000002", "10:00:10", Root, null, "claude-opus-5.5", 12_000, 500, CacheCounterState.Reported, CacheCounterState.Reported, 9_000, 2_500, 500, 0.75m, 2_000),
+            row => AssertTurn(row, "c100000000000003", "10:00:20", Root, null, "claude-opus-5.5", 11_000, 500, CacheCounterState.Reported, CacheCounterState.Absent, 11_000, 0, 0, 1m, -1_000),
+            row => AssertTurn(row, "0100000000000001", "10:00:30", null, null, "claude-opus-5.5", 20_000, 500, CacheCounterState.Absent, CacheCounterState.Absent, null, null, null, null, null));
+        TurnTokenRow first = rows[0];
+        Assert.Equal(TurnSeeds.B1, first.TraceId);
+        Assert.Equal(Root, first.ParentSpanId);
+        Assert.Equal("conv-b", first.ConversationId);
+        Assert.Equal("swigerb/copilot-ledger", first.Repository);
+        Assert.Equal("feature/ledger", first.Branch);
+        Assert.Equal(42, first.PullRequestNumber);
+        Assert.Equal("f100000000000009", rows[5].ParentSpanId);
+    }
+
+    [Fact]
+    public async Task TB2_Conversation_KeepsEachPromptsAgentSeparate()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await SeededStoreAsync(temp);
+
+        IReadOnlyList<TurnTokenRow> rows = await store.GetTurnBreakdownAsync(
+            TurnSelector.ForConversation("conv-b"),
+            LedgerFilter.All);
+
+        Assert.Equal(
+            ["c100000000000001", "5100000000000001", "5100000000000002", "c100000000000002", "c100000000000003", "0100000000000001", "d200000000000001"],
+            rows.Select(row => row.SpanId));
+        TurnTokenRow next = rows[6];
+        AssertTurn(next, "d200000000000001", "10:05:00", "a200000000000001", null, "claude-opus-5.5", 15_000, 500, CacheCounterState.Reported, CacheCounterState.Absent, 10_000, 0, 5_000, 0.6666666666666666666666666667m, null);
+        Assert.Equal(TurnSeeds.B2, next.TraceId);
+        Assert.Empty(await store.GetTurnBreakdownAsync(TurnSelector.ForConversation("conv-none"), LedgerFilter.All));
+    }
+
+    [Fact]
+    public async Task TB3_Filter_AppliesAfterDeltasAreComputed()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await SeededStoreAsync(temp);
+
+        IReadOnlyList<TurnTokenRow> explore = await store.GetTurnBreakdownAsync(
+            TurnSelector.ForTrace(TurnSeeds.B1.ToUpperInvariant()),
+            new LedgerFilter { Agent = "explore" });
+        IReadOnlyList<TurnTokenRow> later = await store.GetTurnBreakdownAsync(
+            TurnSelector.ForTrace(TurnSeeds.B1),
+            new LedgerFilter { From = DateTimeOffset.Parse("2026-11-21T10:00:10Z", CultureInfo.InvariantCulture) });
+
+        Assert.Equal([null, 2_000], explore.Select(row => row.InputDeltaFromPreviousTurn));
+        Assert.Equal(
+            ["5100000000000002", "c100000000000002", "c100000000000003", "0100000000000001"],
+            later.Select(row => row.SpanId));
+        Assert.Equal([2_000, 2_000, -1_000, null], later.Select(row => row.InputDeltaFromPreviousTurn));
+    }
+
+    [Fact]
+    public void TB4_Selectors_ValidateTheirIds()
+    {
+        Assert.Equal(TurnSeeds.B1, TurnSelector.ForTrace(TurnSeeds.B1.ToUpperInvariant()).TraceId);
+        Assert.Null(TurnSelector.ForTrace(TurnSeeds.B1).ConversationId);
+        Assert.Equal("conv-b", TurnSelector.ForConversation("conv-b").ConversationId);
+        Assert.Null(TurnSelector.ForConversation("conv-b").TraceId);
+        Assert.Throws<ArgumentException>(() => TurnSelector.ForTrace("b1"));
+        Assert.Throws<ArgumentException>(() => TurnSelector.ForTrace(new string('g', 32)));
+        Assert.Throws<ArgumentNullException>(() => TurnSelector.ForTrace(null!));
+        Assert.Throws<ArgumentException>(() => TurnSelector.ForConversation(" "));
+        Assert.Throws<ArgumentNullException>(() => TurnSelector.ForConversation(null!));
+    }
+
+    [Fact]
+    public async Task CB1_Bloat_RanksChainsByUncachedInputAndGrowth()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await SeededStoreAsync(temp);
+
+        ContextBloatReport report = await store.GetContextBloatAsync(LedgerFilter.All, 10);
+
+        Assert.Collection(
+            report.ByUncachedInput,
+            row => AssertChain(row, TurnSeeds.B3, "11:00:00", 2, 2, 50_000, 40_000, 40_000, 0.2m),
+            row => AssertChain(row, TurnSeeds.B0, "12:00:00", 1, 1, 5_000, 5_000, 5_000, 0m),
+            row => AssertChain(row, TurnSeeds.B2, "10:05:00", 1, 1, 15_000, 5_000, 5_000, 0.6666666666666666666666666667m));
+        BloatChainRow incomplete = Assert.Single(report.ByEstimatedUncachedInput);
+        AssertChain(incomplete, TurnSeeds.B1, "10:00:00", 6, 4, 61_000, 4_500, 27_500, 0.5789473684210526315789473684m);
+        Assert.Equal("conv-b", incomplete.ConversationId);
+        Assert.Equal("swigerb/copilot-ledger", incomplete.Repository);
+        Assert.Equal("feature/ledger", incomplete.Branch);
+        Assert.Equal(38_000, incomplete.ReportedInputTokens);
+        Assert.Equal(22_000, incomplete.ReportedCacheReadInputTokens);
+        Assert.Collection(
+            report.ByInputGrowth,
+            row => AssertGrowth(row, TurnSeeds.B3, "a300000000000001", null, "11:00:00", 2, 20_000, 30_000, 10_000),
+            row => AssertGrowth(row, TurnSeeds.B1, Root, null, "10:00:00", 3, 10_000, 12_000, 2_000));
+        Assert.Equal("conv-c", report.ByInputGrowth[0].ConversationId);
+        Assert.Equal("claude-opus-5.5", report.ByInputGrowth[1].Model);
+        Assert.Equal("swigerb/copilot-ledger", report.ByInputGrowth[1].Repository);
+        Assert.Equal("feature/ledger", report.ByInputGrowth[1].Branch);
+        Assert.Equal(2, report.SpansWithoutAgent);
+    }
+
+    [Fact]
+    public async Task CB2_Bloat_HonorsLimitAndFilter()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await SeededStoreAsync(temp);
+
+        ContextBloatReport one = await store.GetContextBloatAsync(LedgerFilter.All, 1);
+        ContextBloatReport explore = await store.GetContextBloatAsync(new LedgerFilter { Agent = "explore" }, 10);
+
+        Assert.Equal([TurnSeeds.B3], one.ByUncachedInput.Select(row => row.TraceId));
+        Assert.Equal([TurnSeeds.B1], one.ByEstimatedUncachedInput.Select(row => row.TraceId));
+        Assert.Equal([TurnSeeds.B3], one.ByInputGrowth.Select(row => row.TraceId));
+        Assert.Empty(explore.ByUncachedInput);
+        AssertChain(Assert.Single(explore.ByEstimatedUncachedInput), TurnSeeds.B1, "10:00:05", 2, 1, 8_000, 3_000, 6_000, 0.4m);
+        AssertGrowth(Assert.Single(explore.ByInputGrowth), TurnSeeds.B1, Explore, "explore", "10:00:05", 2, 3_000, 5_000, 2_000);
+        Assert.Equal(0, explore.SpansWithoutAgent);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.GetContextBloatAsync(LedgerFilter.All, 0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.GetContextBloatAsync(LedgerFilter.All, 1001));
+    }
+
+    private static async Task<SqliteLedgerStore> SeededStoreAsync(TempDirectory temp)
+    {
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "ledger.db"));
+        await store.InitializeAsync();
+        await TurnSeeds.SeedAsync(store, temp.Path);
+        return store;
+    }
+
+    private static void AssertTurn(
+        TurnTokenRow row,
+        string spanId,
+        string start,
+        string? agentSpanId,
+        string? agent,
+        string model,
+        long input,
+        long output,
+        CacheCounterState readState,
+        CacheCounterState writeState,
+        long? cacheRead,
+        long? cacheWrite,
+        long? uncached,
+        decimal? hitRatio,
+        long? delta)
+    {
+        Assert.Equal(spanId, row.SpanId);
+        Assert.Equal(DateTimeOffset.Parse($"2026-11-21T{start}Z", CultureInfo.InvariantCulture), row.StartTime);
+        Assert.Equal(agentSpanId, row.AgentSpanId);
+        Assert.Equal(agent, row.Agent);
+        Assert.Equal(model, row.Model);
+        Assert.Equal(input, row.InputTokens);
+        Assert.Equal(output, row.OutputTokens);
+        Assert.Equal(readState, row.CacheReadState);
+        Assert.Equal(writeState, row.CacheWriteState);
+        Assert.Equal(cacheRead, row.CacheReadInputTokens);
+        Assert.Equal(cacheWrite, row.CacheWriteInputTokens);
+        Assert.Equal(uncached, row.UncachedInputTokens);
+        Assert.Equal(hitRatio, row.CacheHitRatio);
+        Assert.Equal(delta, row.InputDeltaFromPreviousTurn);
+    }
+
+    private static void AssertChain(
+        BloatChainRow row,
+        string traceId,
+        string start,
+        long spans,
+        long reported,
+        long input,
+        long reportedUncached,
+        long estimatedUncached,
+        decimal? hitRatio)
+    {
+        Assert.Equal(traceId, row.TraceId);
+        Assert.Equal(DateTimeOffset.Parse($"2026-11-21T{start}Z", CultureInfo.InvariantCulture), row.StartTime);
+        Assert.Equal(spans, row.SpanCount);
+        Assert.Equal(reported, row.CacheReportedSpanCount);
+        Assert.Equal(input, row.InputTokens);
+        Assert.Equal(reportedUncached, row.ReportedUncachedInputTokens);
+        Assert.Equal(estimatedUncached, row.EstimatedUncachedInputTokens);
+        Assert.Equal(hitRatio, row.CacheHitRatio);
+    }
+
+    private static void AssertGrowth(
+        InputGrowthRow row,
+        string traceId,
+        string agentSpanId,
+        string? agent,
+        string start,
+        long turns,
+        long first,
+        long peak,
+        long growth)
+    {
+        Assert.Equal(traceId, row.TraceId);
+        Assert.Equal(agentSpanId, row.AgentSpanId);
+        Assert.Equal(agent, row.Agent);
+        Assert.Equal(DateTimeOffset.Parse($"2026-11-21T{start}Z", CultureInfo.InvariantCulture), row.StartTime);
+        Assert.Equal(turns, row.TurnCount);
+        Assert.Equal(first, row.FirstInputTokens);
+        Assert.Equal(peak, row.PeakInputTokens);
+        Assert.Equal(growth, row.InputGrowthTokens);
+    }
+}
+```
+
+New file `tests/CopilotLedger.Tests/TestSupport/TurnSeeds.cs`:
+
+```csharp
+using System.Globalization;
+using CopilotLedger.Core.Git;
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Storage;
+
+namespace CopilotLedger.Tests.TestSupport;
+
+// Four prompt chains on 2026-11-21 (UTC) for turn and context-bloat tests, with their span links back-filled.
+// B1 (conversation conv-b, swigerb/copilot-ledger feature/ledger, pull request 42): the default agent's claude-opus-5.5
+// requests c1, c2, and c3, and an explore subagent's mai-code-2 requests s1 and s2, interleaved with them; s2 starts at the
+// same millisecond as c2. o1's parent was never recorded. B2 (conv-b, pull request 42): one request after B1. B3 (conv-c,
+// feature/ledger): two growing requests. B0 (no conversation or Git): one request without span links.
+public static class TurnSeeds
+{
+    public const string B0 = "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0";
+    public const string B1 = "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1";
+    public const string B2 = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
+    public const string B3 = "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3";
+
+    public static async Task SeedAsync(SqliteLedgerStore store, string root)
+    {
+        JsonRateCardCalculator rates = JsonRateCardCalculator.LoadEmbedded();
+        GitWorkspaceContext pullRequest = GitFixture.Feature(root) with { PullRequestNumber = 42 };
+        GitWorkspaceContext feature = GitFixture.Feature(root);
+        (NormalizedGenAiSpan Span, GitWorkspaceContext? Git)[] spans =
+        [
+            (Chat(B1, "c100000000000001", "a100000000000001", "10:00:00", "claude-opus-5.5", 10_000, cacheWrite: 9_000), pullRequest),
+            (Chat(B1, "5100000000000001", "a100000000000002", "10:00:05", "mai-code-2", 3_000), pullRequest),
+            (Chat(B1, "5100000000000002", "a100000000000002", "10:00:10", "mai-code-2", 5_000, cacheRead: 2_000), pullRequest),
+            (Chat(B1, "c100000000000002", "a100000000000001", "10:00:10", "claude-opus-5.5", 12_000, cacheRead: 9_000, cacheWrite: 2_500), pullRequest),
+            (Chat(B1, "c100000000000003", "a100000000000001", "10:00:20", "claude-opus-5.5", 11_000, cacheRead: 11_000), pullRequest),
+            (Chat(B1, "0100000000000001", "f100000000000009", "10:00:30", "claude-opus-5.5", 20_000), pullRequest),
+            (Chat(B2, "d200000000000001", "a200000000000001", "10:05:00", "claude-opus-5.5", 15_000, cacheRead: 10_000), pullRequest),
+            (Chat(B3, "e300000000000001", "a300000000000001", "11:00:00", "claude-opus-5.5", 20_000, cacheRead: 5_000, conversation: "conv-c"), feature),
+            (Chat(B3, "e300000000000002", "a300000000000001", "11:01:00", "claude-opus-5.5", 30_000, cacheRead: 5_000, conversation: "conv-c"), feature),
+            (Chat(B0, "f000000000000001", null, "12:00:00", "mai-code-2", 5_000, conversation: null) with
+            {
+                CacheReadState = CacheCounterState.Reported,
+            }, null),
+        ];
+        await store.RecordAsync(
+            spans.Select(item => new LedgerEntry(item.Span, rates.Calculate(item.Span), item.Git)).ToArray());
+        await store.RecordSpanLinksAsync(
+        [
+            Link(B1, "a100000000000001", null, "invoke_agent", "10:00:00"),
+            Link(B1, "e100000000000001", "a100000000000001", "execute_tool", "10:00:04"),
+            Link(B1, "a100000000000002", "e100000000000001", "invoke_agent", "10:00:04", "explore"),
+            .. spans.Where(item => item.Span.ParentSpanId is not null).Select(item => Link(
+                item.Span.TraceId,
+                item.Span.SpanId,
+                item.Span.ParentSpanId,
+                "chat",
+                item.Span.StartTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+                conversation: item.Span.ConversationId)),
+            Link(B2, "a200000000000001", null, "invoke_agent", "10:05:00"),
+            Link(B3, "a300000000000001", null, "invoke_agent", "11:00:00", conversation: "conv-c"),
+        ]);
+        await store.BackfillFromAgentSpansAsync([B0, B1, B2, B3]);
+    }
+
+    private static NormalizedGenAiSpan Chat(
+        string trace,
+        string span,
+        string? parent,
+        string time,
+        string model,
+        long input,
+        long cacheRead = 0,
+        long cacheWrite = 0,
+        string? conversation = "conv-b") =>
+        TestSpans.Chat(
+            parentSpanId: parent,
+            startTime: At(time),
+            requestModel: model,
+            conversationId: conversation,
+            inputTokens: input,
+            outputTokens: model == "mai-code-2" ? 100 : 500,
+            cacheReadInputTokens: cacheRead,
+            cacheWriteInputTokens: cacheWrite) with
+        {
+            TraceId = trace,
+            SpanId = span,
+        };
+
+    private static GenAiSpanLink Link(
+        string trace,
+        string span,
+        string? parent,
+        string operation,
+        string time,
+        string? agent = null,
+        string? conversation = "conv-b") => new()
+    {
+        TraceId = trace,
+        SpanId = span,
+        ParentSpanId = parent,
+        OperationName = operation,
+        AgentName = agent,
+        ConversationId = conversation,
+        StartTime = At(time),
+    };
+
+    private static DateTimeOffset At(string time) =>
+        DateTimeOffset.Parse($"2026-11-21T{time}Z", CultureInfo.InvariantCulture);
+}
+```
+
+### Tests
+
+- **TB1** (trace B1): six rows in start order, with deltas `null`, `null`, `+2,000` (explore), `+2,000` (default, despite the explore request at the same millisecond), `-1,000`, and `null` (unknown agent); per-row states, observed counters, uncached (1,000, n/a, 3,000, 500, 0, n/a), and ratios `0`, `null`, `0.4`, `0.75`, `1`, `null`.
+- **TB2** (conversation `conv-b`): B1's six rows, then B2's, whose delta is `null` because it's another prompt's agent; ratio `0.6666666666666666666666666667`. An unknown conversation is empty.
+- **TB3:** filters apply after deltas: agent `explore` gives deltas `null` and `2,000`; `From` 10:00:10 gives four rows with deltas `2,000`, `2,000`, `-1,000`, and `null`. An uppercase trace ID is accepted.
+- **TB4:** selector validation, including uppercase IDs being lowercased.
+- **CB1:** `ByUncachedInput` is B3 (40,000, ratio `0.2`), B0 (5,000, `0`), and B2 (5,000, `0.6666666666666666666666666667`), the tie at 5,000 going to the lower trace ID; `ByEstimatedUncachedInput` is B1 (6 spans, 4 reported, input 61,000, observed 4,500, estimate 27,500, ratio `0.5789473684210526315789473684`); `ByInputGrowth` is B3 (10,000) and then B1's default agent (10,000 → 12,000), which wins its tie with the explore agent's 2,000 growth on the lower agent span ID; `SpansWithoutAgent` is 2.
+- **CB2:** `limit` 1 keeps the first of each ranking; agent `explore` leaves only B1's explore requests (estimate 6,000, ratio `0.4`, growth 2,000); limits 0 and 1001 throw.
+
+### Acceptance criteria
+
+- Turns are inference spans in start order (`invoke_agent` spans are never `spans` rows), with exact per-turn values and deltas that never mix interleaved agents or equal timestamps.
+- Bloat rankings are deterministic, rank unknown totals separately, and break ties by trace ID.
+- `dotnet test CopilotLedger.slnx` passes **749** tests (743 + 6).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 7 specification: Cache Hit in status, branch, and agents
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Cli/Reporting/LedgerFormat.cs` | New `Percent`, `WriteDecimal`, and `WriteCacheCoverage` |
+| `src/CopilotLedger.Cli/Reporting/ReportCommands.cs` | Plain `status` prints the cache table and writes each period's `cache` object; `branch` and `agents` JSON rows end with the cache coverage; new `Spans` helper |
+| `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs` | `StatusText` gains the cache table; new RP14 and RP15, and the helpers `AssertCache` and `AssertCoverage` |
+| `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs` | Spans get explicit states; the first prompt reads 20,000 tokens from the cache |
+| `docs/guide.md` | The `status-first` and `status` samples |
+
+### Contracts
+
+```csharp
+// LedgerFormat
+public static string Percent(decimal? ratio);   // "n/a", or Round(ratio × 100, 1, AwayFromZero) as "0.0" + "%"
+public static void WriteDecimal(Utf8JsonWriter writer, string name, decimal? value);   // every digit, or null
+public static void WriteCacheCoverage(Utf8JsonWriter writer, LedgerRollupRow row);    // cacheReportedSpans, cacheUnreportedSpans, cacheHitRatio
+```
+
+Plain `status`, after the spend table, prints a blank line and a second table:
+
+```text
+Period        Cache hit  Cache reported
+Today             53.7%  6 of 8 spans
+Last 7 days       52.7%  8 of 10 spans
+Last 30 days      48.8%  9 of 11 spans
+```
+
+`Cache reported` is `<reported> of <spans> span(s)`, with `span` for exactly 1. `status --json` ends each period object with:
+
+```json
+"cache": {
+  "cacheReportedSpans": 6,
+  "cacheUnreportedSpans": 2,
+  "reportedInputTokens": 2700000,
+  "reportedCacheReadInputTokens": 1450000,
+  "cacheHitRatio": 0.537037037037037037037037037
+}
+```
+
+`branch --json` and `agents --json` rows add `cacheReportedSpans`, `cacheUnreportedSpans`, and `cacheHitRatio` after `localSavedUsd`. Tables of `branch` and `agents`, `top-prompts`, and receipts don't change.
+
+`GuideWorld` marks a span `Reported` for both counters when it has no `serverAddress` (GitHub-hosted) and `Absent` otherwise (this example's Foundry BYOK and local endpoints), and its first prompt now reads 20,000 of its 30,000 input tokens from the cache, so the guide's first `status` sample shows a typical cache hit (66.7%) rather than a first-run 0.0% that could look like a fault. That prompt now costs 7.40 AI credits ($0.07) instead of 15.00; the Month state's money doesn't change.
+
+### Code (copy exactly)
+
+Edit 1 of 3 in `src/CopilotLedger.Cli/Reporting/LedgerFormat.cs`, replace:
+
+```csharp
+        value.ToString("N0", CultureInfo.InvariantCulture);
+
+    public static string LocalTime(DateTimeOffset value, TimeZoneInfo zone) =>
+        TimeZoneInfo.ConvertTime(value, zone)
+```
+
+with:
+
+```csharp
+        value.ToString("N0", CultureInfo.InvariantCulture);
+
+    // ratio as a percentage with one decimal place, rounded half away from zero; n/a for null, never 0.0%.
+    public static string Percent(decimal? ratio) =>
+        ratio is null
+            ? "n/a"
+            : decimal.Round(ratio.Value * 100m, 1, MidpointRounding.AwayFromZero)
+                .ToString("0.0", CultureInfo.InvariantCulture) + "%";
+
+    public static string LocalTime(DateTimeOffset value, TimeZoneInfo zone) =>
+        TimeZoneInfo.ConvertTime(value, zone)
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Cli/Reporting/LedgerFormat.cs`, replace:
+
+```csharp
+        writer.WritePropertyName(name);
+        writer.WriteRawValue(value.ToString("0.############", CultureInfo.InvariantCulture));
+    }
+
+    public static void WriteTime(
+```
+
+with:
+
+```csharp
+        writer.WritePropertyName(name);
+        writer.WriteRawValue(value.ToString("0.############", CultureInfo.InvariantCulture));
+    }
+
+    // value with every digit decimal division gave it, or null. Used for ratios and averages.
+    public static void WriteDecimal(
+        Utf8JsonWriter writer,
+        string name,
+        decimal? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNull(name);
+            return;
+        }
+
+        writer.WritePropertyName(name);
+        writer.WriteRawValue(value.Value.ToString(CultureInfo.InvariantCulture));
+    }
+
+    public static void WriteTime(
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Cli/Reporting/LedgerFormat.cs`, replace:
+
+```csharp
+        WriteMoney(writer, "localSavedUsd", row.LocalSavedUsd);
+    }
+
+    public static void WriteTotals(
+        Utf8JsonWriter writer,
+```
+
+with:
+
+```csharp
+        WriteMoney(writer, "localSavedUsd", row.LocalSavedUsd);
+    }
+
+    // The cache fields that branch and agents rows end with. Receipts don't write them.
+    public static void WriteCacheCoverage(
+        Utf8JsonWriter writer,
+        LedgerRollupRow row)
+    {
+        writer.WriteNumber("cacheReportedSpans", row.CacheReportedSpanCount);
+        writer.WriteNumber("cacheUnreportedSpans", row.CacheUnreportedSpanCount);
+        WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
+    }
+
+    public static void WriteTotals(
+        Utf8JsonWriter writer,
+```
+
+Edit 1 of 4 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+            totals.Select(item =>
+                (IReadOnlyList<string>)[item.Label, .. MoneyCells(item.Total)]).ToArray());
+        return 0;
+    }
+
+    private static async Task<int> BranchAsync(
+```
+
+with:
+
+```csharp
+            totals.Select(item =>
+                (IReadOnlyList<string>)[item.Label, .. MoneyCells(item.Total)]).ToArray());
+        context.Out.WriteLine();
+        TableWriter.Write(
+            context.Out,
+            [new("Period", false), new("Cache hit", true), new("Cache reported", false)],
+            totals.Select(item =>
+                (IReadOnlyList<string>)
+                [
+                    item.Label,
+                    LedgerFormat.Percent(item.Total.CacheHitRatio),
+                    $"{LedgerFormat.Count(item.Total.CacheReportedSpanCount)} of {Spans(item.Total.SpanCount)}",
+                ]).ToArray());
+        return 0;
+    }
+
+    private static async Task<int> BranchAsync(
+```
+
+Edit 2 of 4 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+            LedgerFormat.WriteTime(writer, "from", period.From);
+            LedgerFormat.WriteTotals(writer, total);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+```
+
+with:
+
+```csharp
+            LedgerFormat.WriteTime(writer, "from", period.From);
+            LedgerFormat.WriteTotals(writer, total);
+            writer.WritePropertyName("cache");
+            writer.WriteStartObject();
+            writer.WriteNumber("cacheReportedSpans", total.CacheReportedSpanCount);
+            writer.WriteNumber("cacheUnreportedSpans", total.CacheUnreportedSpanCount);
+            writer.WriteNumber("reportedInputTokens", total.ReportedInputTokens);
+            writer.WriteNumber("reportedCacheReadInputTokens", total.ReportedCacheReadInputTokens);
+            LedgerFormat.WriteDecimal(writer, "cacheHitRatio", total.CacheHitRatio);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+```
+
+Edit 3 of 4 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+                writer.WriteString("agent", row.Agent);
+            }
+
+            LedgerFormat.WriteTotals(writer, row);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+```
+
+with:
+
+```csharp
+                writer.WriteString("agent", row.Agent);
+            }
+
+            LedgerFormat.WriteTotals(writer, row);
+            LedgerFormat.WriteCacheCoverage(writer, row);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+```
+
+Edit 4 of 4 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+        values.Count == 0 ? "-" : string.Join(", ", values);
+
+    private static bool IsOtelEnabled(Func<string, string?> lookup)
+    {
+        string? enabled = lookup("COPILOT_OTEL_ENABLED");
+```
+
+with:
+
+```csharp
+        values.Count == 0 ? "-" : string.Join(", ", values);
+
+    private static string Spans(long count) =>
+        $"{LedgerFormat.Count(count)} {(count == 1 ? "span" : "spans")}";
+
+    private static bool IsOtelEnabled(Func<string, string?> lookup)
+    {
+        string? enabled = lookup("COPILOT_OTEL_ENABLED");
+```
+
+Edit 1 of 3 in `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs`, replace:
+
+```csharp
+            document.RootElement.GetProperty("warnings").EnumerateArray().Select(item => item.GetString()));
+    }
+
+    private static async Task<CliHarness> SeededHarnessAsync(
+        string root,
+```
+
+with:
+
+```csharp
+            document.RootElement.GetProperty("warnings").EnumerateArray().Select(item => item.GetString()));
+    }
+
+    [Fact]
+    public async Task RP14_StatusJsonHasEachPeriodsCacheCoverage()
+    {
+        using TempDirectory temp = new();
+        using TempDirectory empty = new();
+        await using CliHarness harness = await SeededHarnessAsync(temp.Path);
+        await using CliHarness emptyHarness = new(empty.Path, new FakeCliPlatform(), Time);
+
+        CliRun run = await harness.RunAsync("status", "--json");
+        CliRun emptyRun = await emptyHarness.RunAsync("status", "--json");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Contains("\"cacheHitRatio\": 0.5454545454545454545454545455\n", run.Out);
+        using JsonDocument json = JsonDocument.Parse(run.Out);
+        JsonElement[] periods = json.RootElement.GetProperty("periods").EnumerateArray().ToArray();
+        AssertCache(periods[0], 2, 1, 2_200_000, 1_200_000, 0.5454545454545454545454545455m);
+        AssertCache(periods[1], 2, 2, 2_200_000, 1_200_000, 0.5454545454545454545454545455m);
+        AssertCache(periods[2], 2, 2, 2_200_000, 1_200_000, 0.5454545454545454545454545455m);
+        Assert.Equal("cache", periods[0].EnumerateObject().Last().Name);
+        Assert.Equal(0, emptyRun.ExitCode);
+        using JsonDocument emptyJson = JsonDocument.Parse(emptyRun.Out);
+        foreach (JsonElement period in emptyJson.RootElement.GetProperty("periods").EnumerateArray())
+        {
+            AssertCache(period, 0, 0, 0, 0, null);
+        }
+    }
+
+    [Fact]
+    public async Task RP15_BranchAndAgentRowsEndWithCacheCoverage()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await SeededHarnessAsync(temp.Path);
+
+        CliRun branch = await harness.RunAsync("branch", "--all-repos", "--json");
+        CliRun agents = await harness.RunAsync("agents", "--since", "all", "--json");
+
+        Assert.Equal(0, branch.ExitCode);
+        using JsonDocument branchJson = JsonDocument.Parse(branch.Out);
+        JsonElement[] branchRows = branchJson.RootElement.GetProperty("rows").EnumerateArray().ToArray();
+        Assert.Equal(3, branchRows.Length);
+        AssertCoverage(branchRows[0], 1, 0, 0.6666666666666666666666666667m);
+        AssertCoverage(branchRows[1], 1, 1, 0.4m);
+        AssertCoverage(branchRows[2], 0, 1, null);
+        Assert.Equal(0, agents.ExitCode);
+        using JsonDocument agentJson = JsonDocument.Parse(agents.Out);
+        JsonElement[] agentRows = agentJson.RootElement.GetProperty("rows").EnumerateArray().ToArray();
+        Assert.Equal(["ledger-architect", "ledger-builder", "(none)"], agentRows.Select(row => row.GetProperty("agent").GetString()));
+        AssertCoverage(agentRows[0], 1, 0, 0.6666666666666666666666666667m);
+        AssertCoverage(agentRows[1], 1, 2, 0.4m);
+        AssertCoverage(agentRows[2], 0, 1, null);
+    }
+
+    private static async Task<CliHarness> SeededHarnessAsync(
+        string root,
+```
+
+Edit 2 of 3 in `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs`, replace:
+
+```csharp
+        Assert.Equal(saved, item.GetProperty("localSavedUsd").GetDecimal());
+    }
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+
+    private static void AssertRollup(
+```
+
+with:
+
+```csharp
+        Assert.Equal(saved, item.GetProperty("localSavedUsd").GetDecimal());
+    }
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+
+    private static void AssertCache(
+        JsonElement period,
+        long reported,
+        long unreported,
+        long reportedInput,
+        long reportedCacheRead,
+        decimal? hitRatio)
+    {
+        JsonElement cache = period.GetProperty("cache");
+        Assert.Equal(
+            ["cacheReportedSpans", "cacheUnreportedSpans", "reportedInputTokens", "reportedCacheReadInputTokens", "cacheHitRatio"],
+            cache.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(reported, cache.GetProperty("cacheReportedSpans").GetInt64());
+        Assert.Equal(unreported, cache.GetProperty("cacheUnreportedSpans").GetInt64());
+        Assert.Equal(reportedInput, cache.GetProperty("reportedInputTokens").GetInt64());
+        Assert.Equal(reportedCacheRead, cache.GetProperty("reportedCacheReadInputTokens").GetInt64());
+        JsonElement ratio = cache.GetProperty("cacheHitRatio");
+        Assert.Equal(hitRatio, ratio.ValueKind == JsonValueKind.Null ? null : ratio.GetDecimal());
+    }
+
+    private static void AssertCoverage(
+        JsonElement row,
+        long reported,
+        long unreported,
+        decimal? hitRatio)
+    {
+        Assert.Equal(
+            ["localSavedUsd", "cacheReportedSpans", "cacheUnreportedSpans", "cacheHitRatio"],
+            row.EnumerateObject().Select(property => property.Name).TakeLast(4));
+        Assert.Equal(reported, row.GetProperty("cacheReportedSpans").GetInt64());
+        Assert.Equal(unreported, row.GetProperty("cacheUnreportedSpans").GetInt64());
+        JsonElement ratio = row.GetProperty("cacheHitRatio");
+        Assert.Equal(hitRatio, ratio.ValueKind == JsonValueKind.Null ? null : ratio.GetDecimal());
+    }
+
+    private static void AssertRollup(
+```
+
+Edit 3 of 3 in `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs`, replace:
+
+```csharp
+        Last 30 days      4         0      342.00       $3.42     $0.32        $0.23
+
+        """);
+}
+```
+
+with:
+
+```csharp
+        Last 30 days      4         0      342.00       $3.42     $0.32        $0.23
+
+        Period        Cache hit  Cache reported
+        Today             54.5%  2 of 3 spans
+        Last 7 days       54.5%  2 of 4 spans
+        Last 30 days      54.5%  2 of 4 spans
+
+        """);
+}
+```
+
+Edit 1 of 3 in `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`, replace:
+
+```csharp
+        if (state == GuideState.FirstPrompt)
+        {
+            JsonRateCardCalculator builtIn = JsonRateCardCalculator.LoadEmbedded();
+            NormalizedGenAiSpan first = Chat("1f", "c1", "2026-11-21T21:25:00Z", "claude-opus-5.5", null, null, 30_000, 1_500);
+            await store.RecordAsync([new LedgerEntry(first, builtIn.Calculate(first), Context("feature/search"))]);
+            return;
+```
+
+with:
+
+```csharp
+        if (state == GuideState.FirstPrompt)
+        {
+            JsonRateCardCalculator builtIn = JsonRateCardCalculator.LoadEmbedded();
+            NormalizedGenAiSpan first = Chat("1f", "c1", "2026-11-21T21:25:00Z", "claude-opus-5.5", null, null, 30_000, 1_500, 20_000);
+            await store.RecordAsync([new LedgerEntry(first, builtIn.Calculate(first), Context("feature/search"))]);
+            return;
+```
+
+Edit 2 of 3 in `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`, replace:
+
+```csharp
+        Slug);
+
+    // trace and span are the last characters of 32- and 16-character IDs.
+    private static NormalizedGenAiSpan Chat(
+        string trace,
+```
+
+with:
+
+```csharp
+        Slug);
+
+    // trace and span are the last characters of 32- and 16-character IDs. GitHub-hosted models report cache counters, and
+    // this example's Foundry BYOK and local endpoints (the spans with a serverAddress) don't.
+    private static NormalizedGenAiSpan Chat(
+        string trace,
+```
+
+Edit 3 of 3 in `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`, replace:
+
+```csharp
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            cacheReadInputTokens: cacheReadInputTokens) with
+        {
+            TraceId = "0f3c9a7e5d1b4f2a8c6e0d9b7a5c" + trace.PadLeft(4, '0'),
+```
+
+with:
+
+```csharp
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            cacheReadInputTokens: cacheReadInputTokens,
+            cacheReadState: serverAddress is null ? CacheCounterState.Reported : CacheCounterState.Absent,
+            cacheWriteState: serverAddress is null ? CacheCounterState.Reported : CacheCounterState.Absent) with
+        {
+            TraceId = "0f3c9a7e5d1b4f2a8c6e0d9b7a5c" + trace.PadLeft(4, '0'),
+```
+
+Edit 1 of 2 in `docs/guide.md`, replace:
 
 ````markdown
-# CopilotLedger user guide
-
-CopilotLedger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
-
-The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). After setup, every sample starts from the same state: a month of spend, a rates overlay with Foundry BYOK prices, a budget for `feature/search`, and an open circuit-breaker trip, so early samples show things that later sections explain. A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
-
-- [Set up CopilotLedger](#set-up-copilotledger)
-- [See what you spent](#see-what-you-spent)
-- [Find the most expensive prompts](#find-the-most-expensive-prompts)
-- [Compare agents](#compare-agents)
-- [Set a budget for a branch](#set-a-budget-for-a-branch)
-- [Catch a runaway loop](#catch-a-runaway-loop)
-- [Post a receipt on a pull request](#post-a-receipt-on-a-pull-request)
-- [Price Foundry BYOK and local models](#price-foundry-byok-and-local-models)
-- [Ask Copilot about spend](#ask-copilot-about-spend)
-- [Update rates](#update-rates)
-- [Upgrade or uninstall](#upgrade-or-uninstall)
-
-## Set up CopilotLedger
-
-**Goal:** record what Copilot spends from now on.
-
-```shell
-gh extension install swigerb/gh-ledger
-```
-
-<!-- sample: install -->
-```shell
-gh ledger install
-```
-
-```text
-Set COPILOT_OTEL_ENABLED=true for your user account.
-gh ledger runs this GitHub CLI extension, so no alias is needed.
-gh-ledger will start when you sign in.
-gh-ledger daemon started (pid 4242) on http://localhost:4318.
-CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
-```
-<!-- /sample -->
-
-On macOS and Linux, `install` sets the variable in your shell profile instead. Restart the apps and terminals as it says, send Copilot a prompt, and check that the prompt was recorded:
-
-<!-- sample: status-first -->
-```shell
-gh ledger status
-```
-
-```text
-gh-ledger 0.4.1 (GitHub CLI extension)
-Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 16:20
-Ledger:  C:\Users\you\.copilot-ledger\ledger.db
-Rates:   2026-11-20
 Copilot: OTel export enabled (COPILOT_OTEL_ENABLED=true)
 
 Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
@@ -1138,1075 +4772,3532 @@ Last 7 days       1         0       15.00       $0.15     $0.00        $0.00
 Last 30 days      1         0       15.00       $0.15     $0.00        $0.00
 ```
 <!-- /sample -->
+````
 
-If no spans appear, fix any warnings that `status` shows, and see [Troubleshooting](cli.md#troubleshooting).
+with:
 
-## See what you spent
-
-**Goal:** see today's spend, and each branch's spend.
-
-<!-- sample: status -->
-```shell
-gh ledger status
-```
-
-```text
-gh-ledger 0.4.1 (GitHub CLI extension)
-Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 08:02
-Ledger:  C:\Users\you\.copilot-ledger\ledger.db
-Rates:   2026-11-20+contoso-2026-11
+````markdown
 Copilot: OTel export enabled (COPILOT_OTEL_ENABLED=true)
 
 Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-Today             8         0      617.75       $6.18     $0.49        $0.17
+Today             1         0        7.40       $0.07     $0.00        $0.00
+Last 7 days       1         0        7.40       $0.07     $0.00        $0.00
+Last 30 days      1         0        7.40       $0.07     $0.00        $0.00
+
+Period        Cache hit  Cache reported
+Today             66.7%  1 of 1 span
+Last 7 days       66.7%  1 of 1 span
+Last 30 days      66.7%  1 of 1 span
+```
+<!-- /sample -->
+````
+
+Edit 2 of 2 in `docs/guide.md`, replace:
+
+````markdown
 Last 7 days      10         0      764.00       $7.64     $0.49        $0.17
 Last 30 days     11         0      908.00       $9.08     $0.49        $0.17
 ```
 <!-- /sample -->
-
-<!-- sample: branch -->
-```shell
-gh ledger branch
-```
-
-```text
-Branches in contoso/webapp (last 30 days)
-
-Branch             Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-feature/search         8         0      617.75       $6.18     $0.49        $0.17
-main                   2         0      170.25       $1.70     $0.00        $0.00
-fix/login-timeout      1         0      120.00       $1.20     $0.00        $0.00
-```
-<!-- /sample -->
-
-- `AI credits` and `GitHub USD` are what GitHub bills; 1 AI credit is $0.01. `BYOK USD` is what Microsoft Foundry bills you directly, and `Local saved` is what local models saved you. `Unpriced` counts requests that have no price.
-- `branch` covers the current repository. Add `--all-repos` for every repository, `--since` for another period, such as `today`, `7d`, `all`, or a date, and `--json` for exact amounts.
-
-## Find the most expensive prompts
-
-**Goal:** find the prompts that cost the most.
-
-<!-- sample: top-prompts -->
-```shell
-gh ledger top-prompts --limit 3
-```
-
-```text
-Top 3 prompts by cost in all repositories (last 30 days)
-
-#  Started           Repository      Agents       Models           Spans  AI credits  GitHub USD  BYOK USD  Local saved  Trace
-1  2026-11-21 11:20  contoso/webapp  -            claude-opus-5.5      4      504.00       $5.04     $0.00        $0.00  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
-2  2026-11-03 10:30  contoso/webapp  explore      claude-opus-5.5      1      144.00       $1.44     $0.00        $0.00  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00a7
-3  2026-11-19 10:00  contoso/webapp  code-review  claude-opus-5.5      1      120.00       $1.20     $0.00        $0.00  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00e5
-```
-<!-- /sample -->
-
-Each row is one prompt you sent, with every model request Copilot made for it (`Spans`). `Agents` lists the named agents that worked on it, or `-` when only Copilot's default agent did. `top-prompts` and `agents` cover every repository unless you add `--repo`, for example `--repo contoso/webapp`.
-
-## Compare agents
-
-**Goal:** see how much each agent spends.
-
-<!-- sample: agents -->
-```shell
-gh ledger agents
-```
-
-```text
-Agents in all repositories (last 30 days)
-
-Agent        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-(none)           8         0      625.25       $6.25     $0.49        $0.17
-explore          2         0      162.75       $1.63     $0.00        $0.00
-code-review      1         0      120.00       $1.20     $0.00        $0.00
-```
-<!-- /sample -->
-
-`(none)` is Copilot's default agent, which reports no name. Subagents such as `explore`, and your custom agents, report their own names.
-
-## Set a budget for a branch
-
-**Goal:** get an alert when a branch spends more than you planned.
-
-<!-- sample: budget-set -->
-```shell
-gh ledger budget set 750
-```
-
-```text
-Budget for contoso/webapp @ feature/search: 750.00 AI credits. Spent so far: 666.75.
-```
-<!-- /sample -->
-
-<!-- sample: budget-list -->
-```shell
-gh ledger budget list
-```
-
-```text
-contoso/webapp @ feature/search: 666.75 of 750.00 AI credits
-```
-<!-- /sample -->
-
-Budgets count Foundry BYOK spend at $0.01 per AI credit, so the branch's 617.75 GitHub AI credits and $0.49 of BYOK spend make 666.75. When the branch passes its budget, the daemon shows a desktop notification once and writes this line to `daemon.log`:
-
-<!-- sample: budget-alert -->
-```text
-2026-11-21T21:30:00.0000000+00:00 ALERT CopilotLedger branch budget exceeded: contoso/webapp @ feature/search: 766.75 of 750.00 AI credits spent. Run: gh-ledger budget list
-```
-<!-- /sample -->
-
-A budget doesn't block anything. Set it again to re-arm the alert, or remove it with `gh ledger budget clear`.
-
-## Catch a runaway loop
-
-**Goal:** notice when an agent burns credits in a loop.
-
-The daemon trips the circuit breaker when one prompt spends more than 150 AI credits in 5 minutes, or makes 5 failed tool calls in a row. A trip shows a desktop notification and writes an `ALERT` line to `daemon.log`; it doesn't stop the agent. To see what tripped:
-
-<!-- sample: breaker-status -->
-```shell
-gh ledger breaker status
-```
-
-```text
-Circuit breaker: open (1 trip)
-Rules: more than 150.00 AI credits in 5 minutes on one prompt; 5 failed tool calls in a row on one prompt
-Flag file: off. Notifications: on.
-
-Trip 1 at 2026-11-21 11:21: contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt
-  rule credit_velocity, trace 0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2, session 7d4e1c2a-5b3f-4e8d-9a6c-0000000000b2
-Reset a trip with: gh-ledger breaker reset --id <id>
-```
-<!-- /sample -->
-
-When you've dealt with the loop, close the branch's open trips:
-
-<!-- sample: breaker-reset -->
-```shell
-gh ledger breaker reset
-```
-
-```text
-Reset 1 trip.
-```
-<!-- /sample -->
-
-To change the limits, or to have the daemon write a flag file that a wrapper script can watch, see [Circuit breaker](cli.md#circuit-breaker).
-
-## Post a receipt on a pull request
-
-**Goal:** show a branch's AI spend on its pull request.
-
-Add this workflow to the repository as `.github/workflows/copilot-ledger-receipt.yml`:
-
-```yaml
-name: CopilotLedger receipt
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  contents: read
-  pull-requests: write
-
-concurrency:
-  group: copilot-ledger-receipt-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
-jobs:
-  receipt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: swigerb/copilot-ledger-action@v1
-```
-
-On the pull request's branch, write the branch's receipt, then commit and push it:
-
-<!-- sample: export-pr -->
-```shell
-gh ledger export-pr
-```
-
-```text
-Wrote .github/copilot-ledger/receipts/feature-search-38e7a3a2.md for feature/search.
-Commit it on the branch and push; the CopilotLedger action posts it on the pull request.
-```
-<!-- /sample -->
-
-```shell
-git add .github/copilot-ledger/receipts
-git commit -m "Add CopilotLedger receipt"
-git push
-```
-
-The action posts the receipt as a comment on the pull request:
-
-<!-- sample: receipt -->
-> <!-- copilot-ledger-receipt -->
-> ### CopilotLedger receipt for `feature/search`
->
-> - **GitHub AI Credits:** 617.75 credits ($6.18) across 6 turns: `claude-opus-5.5` 599.00, `mai-code-2` 18.75
-> - **Foundry BYOK:** $0.49 across 1 turn: `gpt-6.1-sol` $0.49
-> - **Local offload:** 309,000 tokens across 1 turn ($0.00 billed • $0.17 cloud spend avoided): `qwen3.8-27b` 309,000
-> - **Circuit breaker:** 1 trip • max single-prompt burn: 504.00 credits
->
-> <details>
-> <summary>Details and data</summary>
->
-> | Billing | Model | Turns | Unpriced | Input tokens | Output tokens | Cost | Cloud spend avoided |
-> | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-> | GitHub AI Credits | `claude-opus-5.5` | 5 | 0 | 2,400,000 | 95,000 | 599.00 credits ($5.99) | $0.00 |
-> | Foundry BYOK | `gpt-6.1-sol` | 1 | 0 | 200,000 | 10,000 | $0.49 | $0.00 |
-> | GitHub AI Credits | `mai-code-2` | 1 | 0 | 300,000 | 15,000 | 18.75 credits ($0.19) | $0.00 |
-> | Local | `qwen3.8-27b` | 1 | 0 | 300,000 | 9,000 | $0.00 | $0.17 |
->
-> Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.4.1
->
-> To check these totals, run `gh ledger branch --since all --json` in the repository and compare the `feature/search` row.
->
-> ```json
-> {
->   "schemaVersion": 1,
->   "repository": "contoso/webapp",
->   "branch": "feature/search",
->   "commit": "4f9c2e1d8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d",
->   "generatedAt": "2026-11-21T21:30:00.0000000+00:00",
->   "generator": "gh-ledger 0.4.1",
->   "totals": {
->     "spans": 8,
->     "unpricedSpans": 0,
->     "inputTokens": 3200000,
->     "outputTokens": 129000,
->     "cacheReadInputTokens": 1450000,
->     "cacheWriteInputTokens": 0,
->     "aiCredits": 617.75,
->     "aiCreditsUsd": 6.1775,
->     "foundryByokUsd": 0.49,
->     "localSavedUsd": 0.1725
->   },
->   "prompts": 4,
->   "maxPromptCredits": 504,
->   "breakerTrips": 1,
->   "models": [
->     {
->       "channel": "github_ai_credits",
->       "model": "claude-opus-5.5",
->       "spans": 5,
->       "unpricedSpans": 0,
->       "inputTokens": 2400000,
->       "outputTokens": 95000,
->       "cacheReadInputTokens": 1450000,
->       "cacheWriteInputTokens": 0,
->       "aiCredits": 599,
->       "aiCreditsUsd": 5.99,
->       "foundryByokUsd": 0,
->       "localSavedUsd": 0
->     },
->     {
->       "channel": "foundry_byok",
->       "model": "gpt-6.1-sol",
->       "spans": 1,
->       "unpricedSpans": 0,
->       "inputTokens": 200000,
->       "outputTokens": 10000,
->       "cacheReadInputTokens": 0,
->       "cacheWriteInputTokens": 0,
->       "aiCredits": 0,
->       "aiCreditsUsd": 0,
->       "foundryByokUsd": 0.49,
->       "localSavedUsd": 0
->     },
->     {
->       "channel": "github_ai_credits",
->       "model": "mai-code-2",
->       "spans": 1,
->       "unpricedSpans": 0,
->       "inputTokens": 300000,
->       "outputTokens": 15000,
->       "cacheReadInputTokens": 0,
->       "cacheWriteInputTokens": 0,
->       "aiCredits": 18.75,
->       "aiCreditsUsd": 0.1875,
->       "foundryByokUsd": 0,
->       "localSavedUsd": 0
->     },
->     {
->       "channel": "local",
->       "model": "qwen3.8-27b",
->       "spans": 1,
->       "unpricedSpans": 0,
->       "inputTokens": 300000,
->       "outputTokens": 9000,
->       "cacheReadInputTokens": 0,
->       "cacheWriteInputTokens": 0,
->       "aiCredits": 0,
->       "aiCreditsUsd": 0,
->       "foundryByokUsd": 0,
->       "localSavedUsd": 0.1725
->     }
->   ]
-> }
-> ```
->
-> </details>
-<!-- /sample -->
-
-Before you merge, run `gh ledger export-pr` again and push, so the receipt includes the latest spend; the action updates the same comment. See the [action's README](https://github.com/swigerb/copilot-ledger-action) for its inputs and the checks it makes.
-
-## Price Foundry BYOK and local models
-
-**Goal:** see what your Microsoft Foundry BYOK models cost, and what local models save you.
-
-CopilotLedger records requests to local runtimes, such as Foundry Local and Ollama, at $0.00 and estimates what they saved. Foundry bills BYOK requests to you directly, not through GitHub, so CopilotLedger records them unpriced until you add your prices. Create a rates overlay:
-
-```shell
-gh ledger rates init
-```
-
-Then edit `rates.json` in your data directory, `C:\Users\you\.copilot-ledger` here or `~/.copilot-ledger` on macOS and Linux, and list your models with the prices from your Azure pricing or invoice:
-
-<!-- sample: rates-overlay -->
-```json
-{
-  "schemaVersion": 1,
-  "ratesVersion": "contoso-2026-11",
-  "foundryByok": {
-    "models": [
-      {
-        "id": "gpt-6.1-sol",
-        "aliases": ["contoso-gpt61-prod"],
-        "windows": [
-          { "tiers": [ { "name": "default", "inputPer1M": 1.75, "cachedInputPer1M": 0.175, "outputPer1M": 14.00 } ] }
-        ]
-      }
-    ]
-  }
-}
-```
-<!-- /sample -->
-
-List your deployment names as `aliases`, because Foundry requests often report them instead of the model name. Check the file:
-
-<!-- sample: rates-validate -->
-```shell
-gh ledger rates validate
-```
-
-```text
-C:\Users\you\.copilot-ledger\rates.json is valid. Rates version: 2026-11-20+contoso-2026-11.
-```
-<!-- /sample -->
-
-Restart the daemon, with `gh ledger daemon stop` and then `gh ledger daemon start`, so it prices new requests with your rates. BYOK spend then shows under `BYOK USD`, as in [See what you spent](#see-what-you-spent). For custom endpoints and local model names, see [configuration.md](configuration.md).
-
-## Ask Copilot about spend
-
-**Goal:** let Copilot check the branch's spend, budget, and circuit breaker while it works.
-
-Register gh-ledger's MCP server with Copilot CLI. In PowerShell on Windows:
-
-```powershell
-copilot mcp add ledger -- "$env:LOCALAPPDATA\GitHub CLI\extensions\gh-ledger\gh-ledger.exe" mcp
-```
-
-On macOS and Linux:
-
-```shell
-copilot mcp add ledger -- ~/.local/share/gh/extensions/gh-ledger/gh-ledger mcp
-```
-
-Then ask Copilot, for example, "How much has this branch cost so far?" Copilot calls the `get_branch_ledger` tool. While the breaker is open or the branch is over its budget, the result starts with a `WARNING:` line; the data follows as JSON, indented here:
-
-<!-- sample: mcp -->
-```text
-WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1
-{
-  "repository": "contoso/webapp",
-  "branch": "feature/search",
-  "spans": 8,
-  "unpricedSpans": 0,
-  "inputTokens": 3200000,
-  "outputTokens": 129000,
-  "cacheReadInputTokens": 1450000,
-  "cacheWriteInputTokens": 0,
-  "aiCredits": 617.75,
-  "aiCreditsUsd": 6.1775,
-  "foundryByokUsd": 0.49,
-  "localSavedUsd": 0.1725,
-  "billedAiCredits": 666.75,
-  "topModel": "claude-opus-5.5",
-  "budget": {
-    "aiCredits": 750,
-    "spentAiCredits": 666.75,
-    "exceeded": false
-  },
-  "circuitBreaker": {
-    "state": "open",
-    "openTrips": [
-      {
-        "id": 1,
-        "rule": "credit_velocity",
-        "repository": "contoso/webapp",
-        "branch": "feature/search",
-        "traceId": "0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2",
-        "conversationId": "7d4e1c2a-5b3f-4e8d-9a6c-0000000000b2",
-        "currentSession": false,
-        "trippedAt": "2026-11-21T16:21:32.0000000+00:00",
-        "detail": "252.00 AI credits in 5 minutes",
-        "resetCommand": "gh-ledger breaker reset --id 1"
-      }
-    ]
-  },
-  "warnings": [
-    "WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1"
-  ]
-}
-```
-<!-- /sample -->
-
-The warning tells Copilot to stop and ask you before it continues. No tool can reset the breaker, and Copilot asks before it changes a budget. For the other tools, and for VS Code, see [MCP server](cli.md#mcp-server).
-
-## Update rates
-
-**Goal:** price new requests with GitHub's latest prices before the next gh-ledger release.
-
-<!-- sample: rates-update -->
-```shell
-gh ledger rates update
-```
-
-```text
-Updated rates from 2026-11-20 to 2026-12-15.
-Restart the daemon to price new spans with them: gh ledger daemon stop, then gh ledger daemon start.
-```
-<!-- /sample -->
-
-Restart the daemon as it says. Requests already recorded keep the prices they were recorded with, and your overlay applies on top of the new rates.
-
-## Upgrade or uninstall
-
-**Goal:** move to a new gh-ledger release, or remove CopilotLedger.
-
-The daemon runs the extension's binary, and so does every Copilot session that uses the `ledger` MCP server. Windows can't replace that file while either runs it, so before you upgrade, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code if they use the MCP server, and stop the daemon:
-
-<!-- sample: daemon-stop -->
-```shell
-gh ledger daemon stop
-```
-
-```text
-gh-ledger daemon stopped.
-```
-<!-- /sample -->
-
-```shell
-gh extension upgrade ledger
-```
-
-Then start the daemon again, and reopen your Copilot apps:
-
-<!-- sample: daemon-start -->
-```shell
-gh ledger daemon start
-```
-
-```text
-gh-ledger daemon started (pid 4242) on http://localhost:4318.
-```
-<!-- /sample -->
-
-To remove CopilotLedger, undo `install`:
-
-<!-- sample: uninstall -->
-```shell
-gh ledger uninstall
-```
-
-```text
-gh-ledger daemon stopped.
-gh-ledger will no longer start when you sign in.
-Removed COPILOT_OTEL_ENABLED from your user account.
-CopilotLedger is uninstalled. Your ledger data is still in C:\Users\you\.copilot-ledger.
-```
-<!-- /sample -->
-
-If you registered the MCP server, remove it, and remove the `ledger` entry from VS Code's `mcp.json` if you added one:
-
-```shell
-copilot mcp remove ledger
-```
-
-Then close the Copilot sessions and apps that still run it, and remove the extension:
-
-```shell
-gh extension remove ledger
-```
-
-Your ledger stays in your data directory; delete the directory to remove it too.
 ````
 
-### `GuideWorld.cs` (copy exactly)
-
-New file `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`:
-
-```csharp
-using System.Globalization;
-using System.Text.Json;
-using CopilotLedger.Cli;
-using CopilotLedger.Core.Git;
-using CopilotLedger.Core.Pricing;
-using CopilotLedger.Core.Telemetry;
-using CopilotLedger.Otlp.Breaker;
-using CopilotLedger.Storage;
-
-namespace CopilotLedger.Tests.TestSupport;
-
-public enum GuideState
-{
-    Fresh,          // nothing installed and no ledger yet
-    FirstPrompt,    // installed at 16:20, the daemon running, one prompt at 16:25
-    Month,          // installed, the daemon running since 08:02, a month of spend, one breaker trip, a budget, and an overlay
-}
-
-// The setup behind the samples in docs/guide.md: gh-ledger as the GitHub CLI extension on Windows, run in the
-// contoso/webapp repository on branch feature/search at 16:30 on 2026-11-21, UTC-5. The daemon is a stand-in that
-// writes daemon.json with process 4242, holds daemon.lock, and exits when daemon stop writes daemon.stop.
-public sealed class GuideWorld : IAsyncDisposable
-{
-    public const string ExtensionPath = @"C:\Users\you\AppData\Local\GitHub CLI\extensions\gh-ledger\gh-ledger.exe";
-    public const string ShownDataDirectory = @"C:\Users\you\.copilot-ledger";
-    public const string Slug = "contoso/webapp";
-    public const string Commit = "4f9c2e1d8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d";
-    public const int DaemonProcessId = 4242;
-
-    public static readonly DateTimeOffset Now = Utc("2026-11-21T21:30:00Z");
-
-    private readonly ManualTimeProvider _clock;
-    private readonly List<(CancellationTokenSource Stop, Task Run)> _daemons = [];
-
-    private GuideWorld(string root, ManualTimeProvider clock)
-    {
-        _clock = clock;
-        Repository = Path.Combine(root, "webapp");
-        Platform = new FakeCliPlatform
-        {
-            IsWindows = true,
-            ProcessPath = ExtensionPath,
-        };
-        Platform.ExistingFiles.Add(
-            @"C:\Users\you\AppData\Local\GitHub CLI\extensions\gh-ledger\manifest.yml");
-        Platform.RunningProcesses.Add(DaemonProcessId);
-        Harness = new CliHarness(root, Platform, clock);
-        Platform.StartDetachedHandler = (_, _, _) =>
-        {
-            StartDaemon();
-            return DaemonProcessId;
-        };
-    }
-
-    public CliHarness Harness { get; }
-    public FakeCliPlatform Platform { get; }
-    public string Repository { get; }
-    public ManualTimeProvider Clock => _clock;
-
-    // Creates the repository and the state; overlay is the rates overlay the Month state saves and prices with.
-    public static async Task<GuideWorld> CreateAsync(string root, GuideState state, string overlay)
-    {
-        DateTimeOffset start = state switch
-        {
-            GuideState.Fresh => Now,
-            GuideState.FirstPrompt => Utc("2026-11-21T21:20:00Z"),
-            _ => Utc("2026-11-21T13:02:00Z"),
-        };
-        GuideWorld world = new(root, new ManualTimeProvider(start, ManualTimeProvider.UtcMinus5));
-        world.CreateRepository();
-        if (state != GuideState.Fresh)
-        {
-            CliRun install = await world.Harness.RunAsync("install");
-            Assert.Equal(0, install.ExitCode);
-        }
-
-        world._clock.Advance(Now - start);
-        if (state != GuideState.Fresh)
-        {
-            await world.SeedAsync(state, overlay);
-        }
-
-        return world;
-    }
-
-    // Runs "gh ledger <arguments>" in the repository.
-    public Task<CliRun> RunAsync(string command)
-    {
-        Assert.StartsWith("gh ledger ", command);
-        return Harness.RunInAsync(Repository, command["gh ledger ".Length..].Split(' '));
-    }
-
-    // Shows the test's data directory as C:\Users\you\.copilot-ledger.
-    public string Display(string text)
-    {
-        string data = Harness.Context.DataDirectory;
-        return text
-            .Replace(data + Path.DirectorySeparatorChar, ShownDataDirectory + @"\", StringComparison.Ordinal)
-            .Replace(data, ShownDataDirectory, StringComparison.Ordinal);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        foreach ((CancellationTokenSource stop, Task run) in _daemons)
-        {
-            await stop.CancelAsync();
-            await run;
-            stop.Dispose();
-        }
-
-        await Harness.DisposeAsync();
-    }
-
-    private static DateTimeOffset Utc(string value) =>
-        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture);
-
-    private void CreateRepository()
-    {
-        string git = Path.Combine(Repository, ".git");
-        string branch = Path.Combine(git, "refs", "heads", "feature", "search");
-        Directory.CreateDirectory(Path.GetDirectoryName(branch)!);
-        File.WriteAllText(Path.Combine(git, "HEAD"), "ref: refs/heads/feature/search\n");
-        File.WriteAllText(branch, Commit + "\n");
-        File.WriteAllText(
-            Path.Combine(git, "config"),
-            "[remote \"origin\"]\n\turl = https://github.com/contoso/webapp.git\n");
-        _ = FileRetry.ReadAllText(Path.Combine(git, "HEAD"));
-        _ = FileRetry.ReadAllText(branch);
-        _ = FileRetry.ReadAllText(Path.Combine(git, "config"));
-    }
-
-    // Each start holds its own lock until daemon stop writes daemon.stop or the world is disposed, then removes
-    // daemon.json and daemon.stop and releases the lock, as the real daemon does.
-    private void StartDaemon()
-    {
-        string data = Harness.Context.DataDirectory;
-        FileStream daemonLock = new(
-            Path.Combine(data, "daemon.lock"),
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None);
-        File.WriteAllText(
-            Path.Combine(data, "daemon.json"),
-            JsonSerializer.Serialize(new
-            {
-                schemaVersion = 1,
-                processId = DaemonProcessId,
-                startedAt = _clock.GetUtcNow(),
-                endpoint = "http://localhost:4318",
-                version = GhLedgerCli.Version,
-                databasePath = Harness.Context.DatabasePath,
-            }));
-        _ = FileRetry.ReadAllText(Path.Combine(data, "daemon.json"));
-        CancellationTokenSource stop = new();
-        _daemons.Add((stop, RunDaemonAsync(data, daemonLock, stop.Token)));
-    }
-
-    private static async Task RunDaemonAsync(
-        string data,
-        FileStream daemonLock,
-        CancellationToken cancellationToken)
-    {
-        string stopPath = Path.Combine(data, "daemon.stop");
-        while (!cancellationToken.IsCancellationRequested && !File.Exists(stopPath))
-        {
-            await Task.Delay(25, CancellationToken.None);
-        }
-
-        try
-        {
-            FileRetry.Delete(Path.Combine(data, "daemon.json"));
-            FileRetry.Delete(stopPath);
-        }
-        finally
-        {
-            await daemonLock.DisposeAsync();
-        }
-    }
-
-    private async Task SeedAsync(GuideState state, string overlay)
-    {
-        SqliteLedgerStore store = new(Harness.Context.DatabasePath, _clock);
-        await store.InitializeAsync();
-        if (state == GuideState.FirstPrompt)
-        {
-            JsonRateCardCalculator builtIn = JsonRateCardCalculator.LoadEmbedded();
-            NormalizedGenAiSpan first = Chat("1f", "c1", "2026-11-21T21:25:00Z", "claude-opus-5.5", null, null, 30_000, 1_500);
-            await store.RecordAsync([new LedgerEntry(first, builtIn.Calculate(first), Context("feature/search"))]);
-            return;
-        }
-
-        string overlayPath = Path.Combine(Harness.Context.DataDirectory, "rates.json");
-        await File.WriteAllTextAsync(overlayPath, overlay);
-        _ = await FileRetry.ReadAllTextAsync(overlayPath);
-        JsonRateCardCalculator rates = JsonRateCardCalculator.LoadEmbeddedWithOverlay(overlayPath);
-        (NormalizedGenAiSpan Span, string Branch)[] spans =
-        [
-            (Chat("a1", "c1", "2026-11-21T14:05:00Z", "claude-opus-5.5", null, null, 400_000, 15_000, 250_000), "feature/search"),
-            (Chat("a1", "c2", "2026-11-21T14:07:00Z", "mai-code-2", null, "explore", 300_000, 15_000), "feature/search"),
-            (Chat("b2", "c1", "2026-11-21T16:20:00Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
-            (Chat("b2", "c2", "2026-11-21T16:21:30Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
-            (Chat("b2", "c3", "2026-11-21T16:23:00Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
-            (Chat("b2", "c4", "2026-11-21T16:24:30Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
-            (Chat("c3", "c1", "2026-11-21T19:10:00Z", "gpt-6.1-sol", "contoso.openai.azure.com", null, 200_000, 10_000), "feature/search"),
-            (Chat("d4", "c1", "2026-11-21T20:40:00Z", "qwen3.8-27b", "127.0.0.1", null, 300_000, 9_000), "feature/search"),
-            (Chat("e5", "c1", "2026-11-19T15:00:00Z", "claude-opus-5.5", null, "code-review", 200_000, 20_000), "fix/login-timeout"),
-            (Chat("f6", "c1", "2026-11-18T18:00:00Z", "mai-code-2", null, null, 800_000, 40_000, 500_000), "main"),
-            (Chat("a7", "c1", "2026-11-03T15:30:00Z", "claude-opus-5.5", null, "explore", 300_000, 12_000), "main"),
-        ];
-        await store.RecordAsync(
-            spans.Select(item => new LedgerEntry(item.Span, rates.Calculate(item.Span), Context(item.Branch))).ToArray());
-        await new CircuitBreakerMonitor(store, new RecordingAlertSink()).EvaluateAsync(
-            spans.Select(item => item.Span.TraceId));
-        foreach (BreakerTrip trip in await store.GetOpenBreakerTripsAsync(BreakerTripFilter.All))
-        {
-            Assert.True(await store.MarkBreakerTripNotifiedAsync(trip.Id));
-        }
-
-        await store.SetBranchBudgetAsync(Slug, "feature/search", 750m);
-    }
-
-    private GitWorkspaceContext Context(string branch) => new(
-        Repository,
-        Path.Combine(Repository, ".git"),
-        branch,
-        Commit,
-        "https://github.com/contoso/webapp.git",
-        Slug);
-
-    // trace and span are the last characters of 32- and 16-character IDs.
-    private static NormalizedGenAiSpan Chat(
-        string trace,
-        string span,
-        string start,
-        string model,
-        string? serverAddress,
-        string? agent,
-        long inputTokens,
-        long outputTokens,
-        long cacheReadInputTokens = 0) =>
-        TestSpans.Chat(
-            startTime: Utc(start),
-            requestModel: model,
-            serverAddress: serverAddress,
-            agentName: agent,
-            conversationId: "7d4e1c2a-5b3f-4e8d-9a6c-" + trace.PadLeft(12, '0'),
-            inputTokens: inputTokens,
-            outputTokens: outputTokens,
-            cacheReadInputTokens: cacheReadInputTokens) with
-        {
-            TraceId = "0f3c9a7e5d1b4f2a8c6e0d9b7a5c" + trace.PadLeft(4, '0'),
-            SpanId = "5e8a1c3f7b9d" + trace.PadLeft(2, '0') + span,
-        };
-}
-```
-
-### `FileRetry.Delete` (copy exactly)
-
-Add `Delete` at the end of `FileRetry`, after `ReadAllText`:
-
-In `tests/CopilotLedger.Tests/TestSupport/FileRetry.cs`, replace:
-
-```csharp
-            }
-        }
-    }
-}
-```
-
 with:
 
-```csharp
-            }
-        }
-    }
+````markdown
+Last 7 days      10         0      764.00       $7.64     $0.49        $0.17
+Last 30 days     11         0      908.00       $9.08     $0.49        $0.17
 
-    // Deletes the file, retrying every 25 ms for up to 10 seconds while Windows reports it in use
-    // or pending deletion.
-    public static void Delete(string path)
-    {
-        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-        while (true)
-        {
-            try
-            {
-                File.Delete(path);
-                return;
-            }
-            catch (Exception ex) when (
-                (ex is IOException or UnauthorizedAccessException) && DateTime.UtcNow < deadline)
-            {
-                Thread.Sleep(25);
-            }
-        }
-    }
-}
+Period        Cache hit  Cache reported
+Today             53.7%  6 of 8 spans
+Last 7 days       52.7%  8 of 10 spans
+Last 30 days      48.8%  9 of 11 spans
 ```
+<!-- /sample -->
+````
 
-### Test project (copy exactly)
+### Tests
 
-In `tests/CopilotLedger.Tests/CopilotLedger.Tests.csproj`, replace:
-
-```xml
-  <ItemGroup>
-    <None Include="..\..\docs\configuration.md" Link="docs\configuration.md" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <ItemGroup>
-```
-
-with:
-
-```xml
-  <ItemGroup>
-    <None Include="..\..\docs\configuration.md" Link="docs\configuration.md" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\docs\guide.md" Link="docs\guide.md" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <ItemGroup>
-```
-
-The test project file starts with a UTF-8 byte order mark and has no line break after `</Project>`. Keep both as they are.
+- **StatusText** ends with the cache table: `54.5%` for each period, `2 of 3 spans`, `2 of 4 spans`, `2 of 4 spans`.
+- **RP14:** each `status --json` period's `cache` object has exactly the five properties in order, with 2 reported spans, 1 or 2 unreported, reported input 2,200,000, reads 1,200,000, and ratio `0.5454545454545454545454545455`, written with every digit; `cache` is the period's last property; an empty ledger gives 0, 0, 0, 0, and `null`.
+- **RP15:** the last four properties of every `branch --json` and `agents --json` row are `localSavedUsd`, `cacheReportedSpans`, `cacheUnreportedSpans`, and `cacheHitRatio`, with ratios `0.6666666666666666666666666667`, `0.4`, and `null`.
+- **GS2** (`status-first`, `status`): the guide samples above.
 
 ### Acceptance criteria
 
-- The files match this section and "Task 3 tests" exactly.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 671 tests: the 651 from before plus GS1, GS2's 14 cases, and GS3–GS7. 0 failed, 0 skipped.
-- Five runs of the guide tests in a row each pass all 20.
+- Plain `status` keeps its daemon and configuration lines and all three spend periods, and adds the cache table and JSON `cache` object; a period without reported spans shows `n/a` and `null`, never `0.0%`.
+- The CI smoke test's greps still match: `"spans": 1,` and `"aiCredits": 50,` are followed by other properties.
+- `dotnet test CopilotLedger.slnx` passes **751** tests (749 + 2).
 
 ### Verify
 
 ```shell
 dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
-dotnet test CopilotLedger.slnx --filter "FullyQualifiedName~GuideSamplesTests"
 ```
 
-Run the last command five times. Each run passes 20 tests.
-## Task 4 specification: Documentation Sweep
+## Task 8 specification: status --cache
 
 ### Files
 
 | File | Change |
 |---|---|
-| `README.md` | Replace, copy exactly |
-| `docs/cli.md` | Replace, copy exactly |
-| `docs/configuration.md` | Three edits, copy exactly |
-| `docs/releasing.md` | Replace, copy exactly |
+| `src/CopilotLedger.Cli/Reporting/ReportCommands.cs` | `status` gains `--cache`, `--by`, `--repo`, `--branch`, `--pr`, and `--since`, a validator, and the cache report: `CacheColumns`, `CacheAsync`, `CacheCells`, `Observed`, `Scope`, and `WriteCacheJson` |
+| `src/CopilotLedger.Cli/Reporting/LedgerFormat.cs` | New `WriteNullable(writer, name, string?)` and `WriteNullable(writer, name, long?)` |
+| `tests/CopilotLedger.Tests/Cli/CacheReportTests.cs` | New: CR1–CR6 |
 
-`docs/action.md` stays until Task 5 deletes it. After this task, no document links to it.
+### Grammar
 
-What changes, for review:
-
-- **`README.md`** is the front door: what CopilotLedger does, its features and requirements, a quick start (`gh extension install`, `gh ledger install`, `status`, `branch`), and links. The workflow YAML and the upgrade steps move to the guide, the action's README, and `docs/cli.md`; building from source points to `docs/cli.md` and adds the build and test commands.
-- **`docs/cli.md`** is the reference. It states the naming rule once; gives the extension's binary path on each OS, and for a binary built from source, moving it to a permanent folder and running `<folder>/gh-ledger install`; merges install, uninstall, and upgrading into one section (the shell profile `install` edits, when it sets the alias, every warning, the `install.json` mismatch, removing the MCP registration after `uninstall`, and why the daemon and Copilot's MCP servers must stop before `gh extension upgrade` or `remove`); covers the daemon's options, its null standard handles, and `daemon stop` ending the process after 15 seconds; lists the reports in a table that says which ones default to the current repository; covers the breaker, budgets, and receipts (`uses: swigerb/copilot-ledger-action@v1`); registers the MCP server with the extension's binary path (A3); and adds the `could not record spans` warning to troubleshooting.
-- **`docs/configuration.md`** names commands `gh ledger`, adds `daemon.stop` and `alert-toast.xml` to the files table (A9), says that `daemon.log` is also written when the daemon starts at sign-in, and says to restart the daemon after changing the overlay.
-- **`docs/releasing.md`** adds the guide's samples to the places that hold the version, adds a `ratesVersion` step that lists every sample and test showing the old date (A4), says the dry run checks `ratesVersion`, and explains how to update pinned actions (A7).
-
-### `README.md` (copy exactly)
-
-````markdown
-# CopilotLedger
-
-CopilotLedger shows what GitHub Copilot costs you. Through Copilot's OpenTelemetry export, it records the GitHub AI credits that Copilot CLI, the GitHub Copilot app, and VS Code spend, and attributes them to repository, branch, model, agent, and prompt. It also tracks Microsoft Foundry BYOK spend and what local models save you.
-
-It runs on your machine as the `gh ledger` GitHub CLI extension, with no Docker or cloud service, and it never stores prompt or response content.
-
-## Features
-
-- Reports by branch, agent, and prompt, as tables or JSON
-- A circuit breaker that alerts you when one prompt spends too fast or an agent keeps failing
-- Soft AI-credit budgets for branches
-- Pull request receipts, posted by the [CopilotLedger PR Receipt action](https://github.com/swigerb/copilot-ledger-action)
-- An MCP server, so Copilot can check spend, budgets, and the circuit breaker
-- Foundry BYOK prices, local-model savings, and `rates update` for new prices between releases
-
-## Requirements
-
-- The GitHub CLI (`gh`), or the .NET 10 SDK to build from source
-- Windows, macOS, or Linux, on x64 or Arm64
-- Copilot CLI, the GitHub Copilot app, or VS Code with Copilot
-- Git repositories, for per-branch attribution. CopilotLedger reads `.git` directly and never runs `git`.
-
-## Quick start
-
-```shell
-gh extension install swigerb/gh-ledger
-gh ledger install
+```text
+gh ledger status [--json]
+gh ledger status --cache [--by model|branch|pr|agent] [--repo <key>] [--branch <name>] [--pr <n>] [--since <period>] [--json]
 ```
 
-`install` turns on Copilot's telemetry export, starts the daemon, and registers it to start when you sign in. Restart the GitHub Copilot app, VS Code, and open terminals, send Copilot a prompt, and check what it recorded:
+- `status`'s description becomes "Show daemon, configuration, and recent spend, or prompt-cache efficiency."
+- `--by` defaults to `model`; anything else but `branch`, `pr`, or `agent` is "--by must be model, branch, pr, or agent.". `--pr` below 1 is "--pr must be a positive integer.". `--repo` and `--since` reuse `RepositoryOption()` and `SinceOption(context)` (default `30d`, with its existing message).
+- Without `--cache`, the first of `--by`, `--repo`, `--branch`, `--pr`, and `--since` that the user typed is an error: "<option> requires --cache.". (Task 9 adds `--turns`, `--trace`, `--conversation`, `--bloat`, and `--limit`, and the rest of the rules.)
 
-```shell
-gh ledger status
-gh ledger branch
+### Output
+
+1. Rows come from `GetCacheEfficiencyAsync` with the filter `{ Repository, Branch, PullRequestNumber, From = period.From }`.
+2. No rows: `No spans recorded in <scope> (<period>).`, where `<scope>` is the repository or `all repositories`, then `, branch <name>` and `, pull request #<n>` for those filters.
+3. Otherwise a title, `Cache efficiency by <model|branch|pull request|agent> in <scope> (<period>)`, a blank line, and a table. Its leading columns are `Model`, `Agent`, `Branch`, or `Pull request` (`#<n>`, or `(no PR) <branch>`), with `Repository` first for branches and pull requests when `--repo` isn't given. Then `Spans`, `Cache reported`, `Input`, `Cache read`, `Cache write`, `Uncached`, `Output`, and `Hit %`, right-aligned. `Cache read`, `Cache write`, and `Uncached` are the reported spans' totals: `n/a` when the row has none, with `*` appended when it also has unreported spans.
+4. When any row has unreported spans: a blank line and `<n> of <total> span(s) reported no cache counters. Hit % and the cache columns leave them out; * marks a partial total.`
+5. `--json` writes `period`, `from`, `by`, `repository`, `branch`, `pullRequest` (the filters, or `null`), and `rows`. Each row has its keys (`model`; `agent`; `repository`, `branch`; or `repository`, `pullRequest`, `branch`), then `spans`, `cacheReportedSpans`, `cacheUnreportedSpans`, `inputTokens`, `outputTokens`, `maxInputTokens`, `averageInputTokensPerTurn`, `reportedInputTokens`, `reportedCacheReadInputTokens`, `reportedCacheWriteInputTokens`, `uncachedInputTokens` (observed, or `null`), `estimatedUncachedInputTokens`, and `cacheHitRatio` (exact, or `null`).
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Reporting/LedgerFormat.cs`, replace:
+
+```csharp
+            value.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+    }
+
+    public static void WriteTotals(
+        Utf8JsonWriter writer,
 ```
 
-The [user guide](docs/guide.md) shows the everyday tasks with sample output: reports, budgets, the circuit breaker, pull request receipts, Foundry BYOK and local models, MCP, updates, and uninstalling.
+with:
 
-## Documentation
+```csharp
+            value.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+    }
 
-- [User guide](docs/guide.md): scenarios with sample output
-- [Command reference](docs/cli.md): every command and option, and troubleshooting
-- [Configuration](docs/configuration.md): pricing, the rates overlay, and data files
-- [CopilotLedger PR Receipt action](https://github.com/swigerb/copilot-ledger-action): posting receipts on pull requests
-- [Releasing](docs/releasing.md): for maintainers
+    public static void WriteNullable(
+        Utf8JsonWriter writer,
+        string name,
+        string? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNull(name);
+            return;
+        }
 
-## Build from source
+        writer.WriteString(name, value);
+    }
 
-To publish your own binary instead of the extension, see [Get gh-ledger](docs/cli.md#get-gh-ledger). To build and run the tests:
+    public static void WriteNullable(
+        Utf8JsonWriter writer,
+        string name,
+        long? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNull(name);
+            return;
+        }
+
+        writer.WriteNumber(name, value.Value);
+    }
+
+    public static void WriteTotals(
+        Utf8JsonWriter writer,
+```
+
+Edit 1 of 5 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+        new("Local saved", true),
+    ];
+
+    public static IEnumerable<Command> Create(CliContext context)
+    {
+        yield return CreateStatus(context);
+```
+
+with:
+
+```csharp
+        new("Local saved", true),
+    ];
+
+    private static readonly TableColumn[] CacheColumns =
+    [
+        new("Spans", true),
+        new("Cache reported", true),
+        new("Input", true),
+        new("Cache read", true),
+        new("Cache write", true),
+        new("Uncached", true),
+        new("Output", true),
+        new("Hit %", true),
+    ];
+
+    public static IEnumerable<Command> Create(CliContext context)
+    {
+        yield return CreateStatus(context);
+```
+
+Edit 2 of 5 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+    private static Command CreateStatus(CliContext context)
+    {
+        Command command = new("status", "Show daemon, configuration, and recent spend.");
+        Option<bool> json = JsonOption();
+        command.Add(json);
+        command.SetAction(
+            (ParseResult result, CancellationToken cancellationToken) =>
+                StatusAsync(context, result.GetValue(json), cancellationToken));
+        return command;
+    }
+
+    private static Command CreateBranch(CliContext context)
+```
+
+with:
+
+```csharp
+    private static Command CreateStatus(CliContext context)
+    {
+        Command command = new("status", "Show daemon, configuration, and recent spend, or prompt-cache efficiency.");
+        Option<bool> json = JsonOption();
+        Option<bool> cache = new("--cache")
+        {
+            Description = "Report prompt-cache efficiency instead.",
+        };
+        Option<string> by = new("--by")
+        {
+            Description = "Group --cache rows by model, branch, pr, or agent.",
+            DefaultValueFactory = _ => "model",
+        };
+        by.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<string>() is not ("model" or "branch" or "pr" or "agent"))
+            {
+                result.AddError("--by must be model, branch, pr, or agent.");
+            }
+        });
+        Option<string?> repository = RepositoryOption();
+        Option<string?> branch = new("--branch")
+        {
+            Description = "Limit --cache to this branch, or (none).",
+        };
+        Option<int?> pullRequest = new("--pr")
+        {
+            Description = "Limit --cache to this pull request number.",
+        };
+        pullRequest.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<int?>() is < 1)
+            {
+                result.AddError("--pr must be a positive integer.");
+            }
+        });
+        Option<string> since = SinceOption(context);
+        command.Add(json);
+        command.Add(cache);
+        command.Add(by);
+        command.Add(repository);
+        command.Add(branch);
+        command.Add(pullRequest);
+        command.Add(since);
+        command.Validators.Add(result =>
+        {
+            string[] given = new Option[] { by, repository, branch, pullRequest, since }
+                .Where(option => result.GetResult(option) is { Implicit: false })
+                .Select(option => option.Name)
+                .ToArray();
+            if (!result.GetValue(cache) && given.Length > 0)
+            {
+                result.AddError($"{given[0]} requires --cache.");
+            }
+        });
+        command.SetAction(
+            (ParseResult result, CancellationToken cancellationToken) =>
+                !result.GetValue(cache)
+                    ? StatusAsync(context, result.GetValue(json), cancellationToken)
+                    : CacheAsync(
+                        context,
+                        result.GetValue(by)!,
+                        new LedgerFilter
+                        {
+                            Repository = result.GetValue(repository),
+                            Branch = result.GetValue(branch),
+                            PullRequestNumber = result.GetValue(pullRequest),
+                        },
+                        ParsePeriod(context, result.GetValue(since)),
+                        result.GetValue(json),
+                        cancellationToken));
+        return command;
+    }
+
+    private static Command CreateBranch(CliContext context)
+```
+
+Edit 3 of 5 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+        return 0;
+    }
+
+    private static void WriteStatusJson(
+        CliContext context,
+```
+
+with:
+
+```csharp
+        return 0;
+    }
+
+    private static async Task<int> CacheAsync(
+        CliContext context,
+        string by,
+        LedgerFilter filter,
+        Period period,
+        bool json,
+        CancellationToken cancellationToken)
+    {
+        LedgerGrouping grouping = by switch
+        {
+            "branch" => LedgerGrouping.Branch,
+            "pr" => LedgerGrouping.PullRequest,
+            "agent" => LedgerGrouping.Agent,
+            _ => LedgerGrouping.Model,
+        };
+        SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
+        await store.InitializeAsync(cancellationToken);
+        IReadOnlyList<CacheEfficiencyRow> rows = await store.GetCacheEfficiencyAsync(
+            grouping,
+            filter with { From = period.From },
+            cancellationToken);
+        if (json)
+        {
+            WriteCacheJson(context, period, by, filter, rows);
+            return 0;
+        }
+
+        string scope = Scope(filter);
+        if (rows.Count == 0)
+        {
+            context.Out.WriteLine($"No spans recorded in {scope} ({period.Label}).");
+            return 0;
+        }
+
+        context.Out.WriteLine(
+            $"Cache efficiency by {(by == "pr" ? "pull request" : by)} in {scope} ({period.Label})");
+        context.Out.WriteLine();
+        bool repositoryColumn = filter.Repository is null
+            && grouping is LedgerGrouping.Branch or LedgerGrouping.PullRequest;
+        TableColumn[] leading = grouping switch
+        {
+            LedgerGrouping.Model => [new("Model", false)],
+            LedgerGrouping.Agent => [new("Agent", false)],
+            LedgerGrouping.Branch => repositoryColumn
+                ? [new("Repository", false), new("Branch", false)]
+                : [new("Branch", false)],
+            _ => repositoryColumn
+                ? [new("Repository", false), new("Pull request", false)]
+                : [new("Pull request", false)],
+        };
+        IReadOnlyList<IReadOnlyList<string>> tableRows = rows.Select(row =>
+        {
+            string key = grouping switch
+            {
+                LedgerGrouping.Model => row.Model!,
+                LedgerGrouping.Agent => row.Agent!,
+                LedgerGrouping.Branch => row.Branch!,
+                _ => row.PullRequestNumber is int number
+                    ? "#" + number.ToString(CultureInfo.InvariantCulture)
+                    : $"(no PR) {row.Branch}",
+            };
+            string[] identifiers = repositoryColumn ? [row.Repository!, key] : [key];
+            return (IReadOnlyList<string>)[.. identifiers, .. CacheCells(row)];
+        }).ToArray();
+        TableWriter.Write(context.Out, [.. leading, .. CacheColumns], tableRows);
+        long unreported = rows.Sum(row => row.CacheUnreportedSpanCount);
+        if (unreported > 0)
+        {
+            context.Out.WriteLine();
+            context.Out.WriteLine(
+                $"{LedgerFormat.Count(unreported)} of {Spans(rows.Sum(row => row.SpanCount))} reported no cache counters. Hit % and the cache columns leave them out; * marks a partial total.");
+        }
+
+        return 0;
+    }
+
+    private static void WriteStatusJson(
+        CliContext context,
+```
+
+Edit 4 of 5 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
+    private static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
+        new()
+```
+
+with:
+
+```csharp
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
+    private static void WriteCacheJson(
+        CliContext context,
+        Period period,
+        string by,
+        LedgerFilter filter,
+        IReadOnlyList<CacheEfficiencyRow> rows)
+    {
+        using MemoryStream stream = new();
+        using Utf8JsonWriter writer = new(stream, JsonOptions);
+        writer.WriteStartObject();
+        writer.WriteString("period", period.Label);
+        LedgerFormat.WriteTime(writer, "from", period.From);
+        writer.WriteString("by", by);
+        LedgerFormat.WriteNullable(writer, "repository", filter.Repository);
+        LedgerFormat.WriteNullable(writer, "branch", filter.Branch);
+        LedgerFormat.WriteNullable(writer, "pullRequest", filter.PullRequestNumber);
+        writer.WriteStartArray("rows");
+        foreach (CacheEfficiencyRow row in rows)
+        {
+            writer.WriteStartObject();
+            switch (by)
+            {
+                case "model":
+                    writer.WriteString("model", row.Model);
+                    break;
+                case "agent":
+                    writer.WriteString("agent", row.Agent);
+                    break;
+                case "branch":
+                    writer.WriteString("repository", row.Repository);
+                    writer.WriteString("branch", row.Branch);
+                    break;
+                default:
+                    writer.WriteString("repository", row.Repository);
+                    LedgerFormat.WriteNullable(writer, "pullRequest", row.PullRequestNumber);
+                    LedgerFormat.WriteNullable(writer, "branch", row.Branch);
+                    break;
+            }
+
+            writer.WriteNumber("spans", row.SpanCount);
+            writer.WriteNumber("cacheReportedSpans", row.CacheReportedSpanCount);
+            writer.WriteNumber("cacheUnreportedSpans", row.CacheUnreportedSpanCount);
+            writer.WriteNumber("inputTokens", row.InputTokens);
+            writer.WriteNumber("outputTokens", row.OutputTokens);
+            writer.WriteNumber("maxInputTokens", row.MaxInputTokens);
+            LedgerFormat.WriteDecimal(writer, "averageInputTokensPerTurn", row.AverageInputTokensPerTurn);
+            writer.WriteNumber("reportedInputTokens", row.ReportedInputTokens);
+            writer.WriteNumber("reportedCacheReadInputTokens", row.ReportedCacheReadInputTokens);
+            writer.WriteNumber("reportedCacheWriteInputTokens", row.ReportedCacheWriteInputTokens);
+            LedgerFormat.WriteNullable(writer, "uncachedInputTokens", row.UncachedInputTokens);
+            writer.WriteNumber("estimatedUncachedInputTokens", row.EstimatedUncachedInputTokens);
+            LedgerFormat.WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
+    private static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
+        new()
+```
+
+Edit 5 of 5 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+        LedgerFormat.Usd(row.LocalSavedUsd),
+    ];
+
+    private static string Joined(IReadOnlyList<string> values) =>
+```
+
+with:
+
+```csharp
+        LedgerFormat.Usd(row.LocalSavedUsd),
+    ];
+
+    private static string[] CacheCells(CacheEfficiencyRow row) =>
+    [
+        LedgerFormat.Count(row.SpanCount),
+        LedgerFormat.Count(row.CacheReportedSpanCount),
+        LedgerFormat.Count(row.InputTokens),
+        Observed(row, row.ReportedCacheReadInputTokens),
+        Observed(row, row.ReportedCacheWriteInputTokens),
+        Observed(row, row.ReportedUncachedInputTokens),
+        LedgerFormat.Count(row.OutputTokens),
+        LedgerFormat.Percent(row.CacheHitRatio),
+    ];
+
+    // A total over the spans that reported cache usage: n/a when none did, and marked * when only some did.
+    private static string Observed(CacheEfficiencyRow row, long value) =>
+        row.CacheReportedSpanCount == 0
+            ? "n/a"
+            : LedgerFormat.Count(value) + (row.CacheUnreportedSpanCount > 0 ? "*" : string.Empty);
+
+    private static string Scope(LedgerFilter filter) =>
+        (filter.Repository ?? "all repositories")
+        + (filter.Branch is null ? string.Empty : $", branch {filter.Branch}")
+        + (filter.PullRequestNumber is int number
+            ? ", pull request #" + number.ToString(CultureInfo.InvariantCulture)
+            : string.Empty);
+
+    private static string Joined(IReadOnlyList<string> values) =>
+```
+
+New file `tests/CopilotLedger.Tests/Cli/CacheReportTests.cs`:
+
+```csharp
+using System.Globalization;
+using System.Text.Json;
+using CopilotLedger.Core.Git;
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Otlp.Attribution;
+using CopilotLedger.Otlp.Decoding;
+using CopilotLedger.Otlp.Ingestion;
+using CopilotLedger.Storage;
+using CopilotLedger.Tests.TestSupport;
+using static CopilotLedger.Tests.TestSupport.OtlpRequests;
+
+namespace CopilotLedger.Tests.Cli;
+
+public sealed class CacheReportTests
+{
+    private static ManualTimeProvider Time => new(
+        DateTimeOffset.Parse("2026-11-21T15:00:00Z", CultureInfo.InvariantCulture),
+        ManualTimeProvider.UtcMinus5);
+
+    public static TheoryData<string, string> Groupings => new()
+    {
+        {
+            "status --cache",
+            """
+            Cache efficiency by model in all repositories (last 30 days)
+
+            Model            Spans  Cache reported      Input  Cache read  Cache write  Uncached   Output  Hit %
+            claude-opus-5.5      1               1  1,200,000     800,000      100,000   300,000   50,000  66.7%
+            mai-code-2           1               1  1,000,000     400,000            0   600,000  100,000  40.0%
+            qwen3.8-27b          1               0    400,000         n/a          n/a       n/a   12,000    n/a
+            gpt-6.1-sol          1               0    100,000         n/a          n/a       n/a   10,000    n/a
+
+            2 of 4 spans reported no cache counters. Hit % and the cache columns leave them out; * marks a partial total.
+
+            """
+        },
+        {
+            "status --cache --by branch",
+            """
+            Cache efficiency by branch in all repositories (last 30 days)
+
+            Repository              Branch          Spans  Cache reported      Input  Cache read  Cache write  Uncached   Output  Hit %
+            swigerb/copilot-ledger  feature/ledger      2               1  1,400,000    400,000*           0*  600,000*  112,000  40.0%
+            swigerb/copilot-ledger  main                1               1  1,200,000     800,000      100,000   300,000   50,000  66.7%
+            contoso/api             main                1               0    100,000         n/a          n/a       n/a   10,000    n/a
+
+            2 of 4 spans reported no cache counters. Hit % and the cache columns leave them out; * marks a partial total.
+
+            """
+        },
+        {
+            "status --cache --by pr --since all",
+            """
+            Cache efficiency by pull request in all repositories (all time)
+
+            Repository              Pull request            Spans  Cache reported      Input  Cache read  Cache write  Uncached   Output  Hit %
+            swigerb/copilot-ledger  (no PR) feature/ledger      2               1  1,400,000    400,000*           0*  600,000*  112,000  40.0%
+            swigerb/copilot-ledger  (no PR) main                1               1  1,200,000     800,000      100,000   300,000   50,000  66.7%
+            contoso/api             (no PR) main                1               0    100,000         n/a          n/a       n/a   10,000    n/a
+            (none)                  (no PR) (none)              1               0      1,000         n/a          n/a       n/a      100    n/a
+
+            3 of 5 spans reported no cache counters. Hit % and the cache columns leave them out; * marks a partial total.
+
+            """
+        },
+        {
+            "status --cache --by agent --repo swigerb/copilot-ledger",
+            """
+            Cache efficiency by agent in swigerb/copilot-ledger (last 30 days)
+
+            Agent             Spans  Cache reported      Input  Cache read  Cache write  Uncached   Output  Hit %
+            ledger-builder        2               1  1,400,000    400,000*           0*  600,000*  112,000  40.0%
+            ledger-architect      1               1  1,200,000     800,000      100,000   300,000   50,000  66.7%
+
+            1 of 3 spans reported no cache counters. Hit % and the cache columns leave them out; * marks a partial total.
+
+            """
+        },
+        {
+            "status --cache --by pr --repo swigerb/copilot-ledger --branch main",
+            """
+            Cache efficiency by pull request in swigerb/copilot-ledger, branch main (last 30 days)
+
+            Pull request  Spans  Cache reported      Input  Cache read  Cache write  Uncached  Output  Hit %
+            (no PR) main      1               1  1,200,000     800,000      100,000   300,000  50,000  66.7%
+
+            """
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(Groupings))]
+    public async Task CR1_CacheTablesGroupByModelBranchPullRequestAndAgent(string command, string expected)
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await SeededHarnessAsync(temp.Path);
+
+        CliRun run = await harness.RunAsync(command.Split(' '));
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Equal(string.Empty, run.Error);
+        Assert.Equal(expected.ReplaceLineEndings("\n"), run.Out);
+    }
+
+    [Fact]
+    public async Task CR2_CacheJsonHasExactRowsAndNullsForUnreportedGroups()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await SeededHarnessAsync(temp.Path);
+
+        CliRun run = await harness.RunAsync("status", "--cache", "--json");
+        CliRun pullRequests = await harness.RunAsync("status", "--cache", "--by", "pr", "--pr", "42", "--json");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Contains("\"cacheHitRatio\": 0.6666666666666666666666666667\n", run.Out);
+        using JsonDocument json = JsonDocument.Parse(run.Out);
+        JsonElement root = json.RootElement;
+        Assert.Equal(
+            ["period", "from", "by", "repository", "branch", "pullRequest", "rows"],
+            root.EnumerateObject().Select(property => property.Name));
+        Assert.Equal("last 30 days", root.GetProperty("period").GetString());
+        Assert.Equal("model", root.GetProperty("by").GetString());
+        JsonElement[] rows = root.GetProperty("rows").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["model", "spans", "cacheReportedSpans", "cacheUnreportedSpans", "inputTokens", "outputTokens", "maxInputTokens", "averageInputTokensPerTurn", "reportedInputTokens", "reportedCacheReadInputTokens", "reportedCacheWriteInputTokens", "uncachedInputTokens", "estimatedUncachedInputTokens", "cacheHitRatio"],
+            rows[0].EnumerateObject().Select(property => property.Name));
+        Assert.Equal(["claude-opus-5.5", "mai-code-2", "qwen3.8-27b", "gpt-6.1-sol"], rows.Select(row => row.GetProperty("model").GetString()));
+        Assert.Equal(1_200_000, rows[0].GetProperty("maxInputTokens").GetInt64());
+        Assert.Equal(1_200_000m, rows[0].GetProperty("averageInputTokensPerTurn").GetDecimal());
+        Assert.Equal(800_000, rows[0].GetProperty("reportedCacheReadInputTokens").GetInt64());
+        Assert.Equal(100_000, rows[0].GetProperty("reportedCacheWriteInputTokens").GetInt64());
+        Assert.Equal(300_000, rows[0].GetProperty("uncachedInputTokens").GetInt64());
+        Assert.Equal(0.6666666666666666666666666667m, rows[0].GetProperty("cacheHitRatio").GetDecimal());
+        Assert.Equal(0.4m, rows[1].GetProperty("cacheHitRatio").GetDecimal());
+        foreach (JsonElement unreported in rows[2..])
+        {
+            Assert.Equal(0, unreported.GetProperty("cacheReportedSpans").GetInt64());
+            Assert.Equal(1, unreported.GetProperty("cacheUnreportedSpans").GetInt64());
+            Assert.Equal(JsonValueKind.Null, unreported.GetProperty("uncachedInputTokens").ValueKind);
+            Assert.Equal(JsonValueKind.Null, unreported.GetProperty("cacheHitRatio").ValueKind);
+        }
+
+        Assert.Equal(400_000, rows[2].GetProperty("estimatedUncachedInputTokens").GetInt64());
+        Assert.Equal(0, pullRequests.ExitCode);
+        using JsonDocument pullRequestJson = JsonDocument.Parse(pullRequests.Out);
+        Assert.Equal(42, pullRequestJson.RootElement.GetProperty("pullRequest").GetInt32());
+        Assert.Empty(pullRequestJson.RootElement.GetProperty("rows").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task CR3_PullRequestCheckout_GroupsSpansByItsNumber()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = new(temp.Path, new FakeCliPlatform(), Time);
+        string pullRequestRepo = GitFixture.Create(Path.Combine(temp.Path, "pr"), pullRequest: 42);
+        string plainRepo = GitFixture.Create(Path.Combine(temp.Path, "plain"));
+        SqliteLedgerStore store = new(harness.Context.DatabasePath, harness.TimeProvider);
+        await store.InitializeAsync();
+        LedgerIngestor ingestor = new(
+            store,
+            JsonRateCardCalculator.LoadEmbedded(),
+            new FileSystemGitContextResolver(ceilingDirectory: temp.Path),
+            new CopilotSessionWorkspaceLocator(Path.Combine(temp.Path, "copilot-home")));
+        await ingestor.IngestAsync(ChatIn(pullRequestRepo, "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1", 10_000, 8_000));
+        await ingestor.IngestAsync(ChatIn(pullRequestRepo, "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2", 20_000, 0));
+        await ingestor.IngestAsync(ChatIn(plainRepo, "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3", 5_000, 1_000));
+
+        CliRun run = await harness.RunAsync("status", "--cache", "--by", "pr");
+        CliRun filtered = await harness.RunAsync("status", "--cache", "--pr", "42", "--json");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Equal(
+            """
+            Cache efficiency by pull request in all repositories (last 30 days)
+
+            Repository              Pull request            Spans  Cache reported   Input  Cache read  Cache write  Uncached  Output  Hit %
+            swigerb/copilot-ledger  #42                         2               2  30,000       8,000            0    22,000      20  26.7%
+            swigerb/copilot-ledger  (no PR) feature/ledger      1               1   5,000       1,000            0     4,000      10  20.0%
+
+            """.ReplaceLineEndings("\n"),
+            run.Out);
+        Assert.Equal(0, filtered.ExitCode);
+        using JsonDocument json = JsonDocument.Parse(filtered.Out);
+        JsonElement row = Assert.Single(json.RootElement.GetProperty("rows").EnumerateArray());
+        Assert.Equal("mai-code-2", row.GetProperty("model").GetString());
+        Assert.Equal(2, row.GetProperty("spans").GetInt64());
+        Assert.Equal(0.2666666666666666666666666667m, row.GetProperty("cacheHitRatio").GetDecimal());
+    }
+
+    public static TheoryData<string, string> InvalidOptions => new()
+    {
+        { "status --by model", "--by requires --cache." },
+        { "status --json --repo a/b", "--repo requires --cache." },
+        { "status --branch main", "--branch requires --cache." },
+        { "status --pr 4", "--pr requires --cache." },
+        { "status --since 7d", "--since requires --cache." },
+        { "status --cache --by foo", "--by must be model, branch, pr, or agent." },
+        { "status --cache --pr 0", "--pr must be a positive integer." },
+        { "status --cache --since yesterday", "Invalid --since value yesterday. Use today, all, <N>d (1-3650), or yyyy-MM-dd." },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidOptions))]
+    public async Task CR4_BreakdownOptionsAreValidated(string command, string message)
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = new(temp.Path, new FakeCliPlatform(), Time);
+
+        CliRun run = await harness.RunAsync(command.Split(' '));
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Contains(message, run.Error);
+    }
+
+    [Fact]
+    public async Task CR5_EmptyLedger_ReportsNoSpans()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = new(temp.Path, new FakeCliPlatform(), Time);
+
+        CliRun text = await harness.RunAsync("status", "--cache", "--repo", "contoso/webapp");
+        CliRun json = await harness.RunAsync("status", "--cache", "--json");
+
+        Assert.Equal(0, text.ExitCode);
+        Assert.Equal("No spans recorded in contoso/webapp (last 30 days).\n", text.Out);
+        Assert.Equal(0, json.ExitCode);
+        using JsonDocument document = JsonDocument.Parse(json.Out);
+        Assert.Empty(document.RootElement.GetProperty("rows").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task CR6_OutputIsTheSameUnderGermanCulture()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await SeededHarnessAsync(temp.Path);
+        string[][] commands =
+        [
+            ["status"],
+            ["status", "--json"],
+            ["status", "--cache"],
+            ["status", "--cache", "--json"],
+            ["branch", "--all-repos", "--json"],
+        ];
+        List<string> invariant = [];
+        List<string> german = [];
+        CultureInfo culture = CultureInfo.CurrentCulture;
+        CultureInfo uiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+            CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
+            foreach (string[] command in commands)
+            {
+                invariant.Add((await harness.RunAsync(command)).Out);
+            }
+
+            CultureInfo.CurrentCulture = new CultureInfo("de-DE");
+            CultureInfo.CurrentUICulture = new CultureInfo("de-DE");
+            foreach (string[] command in commands)
+            {
+                german.Add((await harness.RunAsync(command)).Out);
+            }
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = uiCulture;
+        }
+
+        Assert.Equal(invariant, german);
+        Assert.Contains("  66.7%\n", german[2]);
+        Assert.Contains("1,200,000", german[2]);
+        Assert.Contains("\"cacheHitRatio\": 0.6666666666666666666666666667", german[3]);
+        Assert.Contains("54.5%", german[0]);
+    }
+
+    private static async Task<CliHarness> SeededHarnessAsync(string root)
+    {
+        string git = Path.Combine(root, "repo", ".git");
+        Directory.CreateDirectory(git);
+        File.WriteAllText(Path.Combine(git, "HEAD"), "ref: refs/heads/main\n");
+        File.WriteAllText(
+            Path.Combine(git, "config"),
+            "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n");
+        CliHarness harness = new(root, new FakeCliPlatform(), Time);
+        SqliteLedgerStore store = new(
+            Path.Combine(root, "data", "ledger.db"),
+            harness.TimeProvider);
+        await store.InitializeAsync();
+        await LedgerSeeds.SeedChainsAsync(
+            store,
+            Path.Combine(root, "repo"),
+            Path.Combine(root, "api"));
+        return harness;
+    }
+
+    // One mai-code-2 chat span at 2026-11-20T18:33:24.707Z in repo with a cache read, or, when cacheRead is 0, a cache write of
+    // 0, so the span reports its cache usage either way.
+    private static OtlpTraceRequest ChatIn(string repo, string traceId, long input, long cacheRead)
+    {
+        List<OtlpAttribute> attributes =
+        [
+            Str("gen_ai.operation.name", "chat"),
+            Str("gen_ai.request.model", "mai-code-2"),
+            Int("gen_ai.usage.input_tokens", input),
+            Int("gen_ai.usage.output_tokens", 10),
+        ];
+        if (cacheRead > 0)
+        {
+            attributes.Add(Int("gen_ai.usage.cache_read.input_tokens", cacheRead));
+        }
+        else
+        {
+            attributes.Add(Int("gen_ai.usage.cache_write.input_tokens", 0));
+        }
+
+        return Request(
+            [.. CopilotResource, Str("process.working_directory", repo)],
+            Span(traceId: traceId, spanId: traceId[..16], attributes: [.. attributes]));
+    }
+}
+```
+
+### Tests
+
+- **CR1** (5 exact tables over `LedgerSeeds.SeedChainsAsync` at 2026-11-21 15:00 UTC, UTC-5): by model (`66.7%`, `40.0%`, and two `n/a` rows; footnote `2 of 4 spans`); by branch, with `400,000*`, `0*`, and `600,000*` for the half-reported `feature/ledger`; by pull request since `all`, with `(no PR)` rows for every branch, including `(none)`; by agent in one repository; and by pull request in one repository and branch, with no footnote.
+- **CR2:** the JSON property order above, rows ordered by input, `averageInputTokensPerTurn` `1200000`, `cacheHitRatio` `0.6666666666666666666666666667` written with every digit, `null` observed totals and ratios for unreported rows, and an estimate of 400,000; `--by pr --pr 42 --json` echoes `"pullRequest": 42` with no rows.
+- **CR3:** spans ingested by `LedgerIngestor` from a `GitFixture` repository whose config has `refs/pull/42/head` group under `#42` (2 spans, 30,000 input, `26.7%`), and spans from a plain repository under `(no PR) feature/ledger`; `--pr 42 --json` gives one row with ratio `0.2666666666666666666666666667`.
+- **CR4** (8 cases): the "requires --cache" errors for `--by`, `--repo` (with `--json`), `--branch`, `--pr`, and `--since`; a bad `--by`; `--pr 0`; and `--since yesterday`. Each exits 1 with its message on standard error.
+- **CR5:** an empty ledger prints `No spans recorded in contoso/webapp (last 30 days).` and JSON with no rows.
+- **CR6:** `status`, `status --json`, `status --cache`, `status --cache --json`, and `branch --all-repos --json` print the same text under the invariant culture and under `de-DE`, with `66.7%`, `1,200,000`, `54.5%`, and the full-precision ratio.
+
+### Acceptance criteria
+
+- `--by model|branch|pr|agent` all work; a group without reported spans shows `n/a` and `null`, never `0.0%`; partial totals are marked; output is culture-invariant.
+- Plain `status` and `status --json` are unchanged from Task 7.
+- `dotnet test CopilotLedger.slnx` passes **768** tests (751 + 17).
+
+### Verify
 
 ```shell
 dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
-## License
+## Task 9 specification: status --cache --turns and --bloat
 
-MIT. See [LICENSE](LICENSE).
-````
+### Files
 
-### `docs/cli.md` (copy exactly)
-
-````markdown
-# gh-ledger command reference
-
-gh-ledger runs a local OpenTelemetry receiver at `http://localhost:4318`, records GitHub Copilot's usage in a SQLite ledger on your machine, and reports AI spend by repository, branch, model, agent, and prompt. It needs no Docker and no cloud service. For walkthroughs with sample output, see the [user guide](guide.md).
-
-**Command names.** This page writes commands as `gh ledger <command>`, which runs gh-ledger as a GitHub CLI extension. If you built gh-ledger yourself and have no `gh ledger` alias, run the binary by its path instead, as `<folder>/gh-ledger <command>`. `gh-ledger` is the program's own name, so `--help` and gh-ledger's messages say `gh-ledger`; with the extension, run the commands they show as `gh ledger`.
-
-## Get gh-ledger
-
-Install the GitHub CLI extension:
-
-```shell
-gh extension install swigerb/gh-ledger
-```
-
-gh downloads the release binary for your platform to:
-
-- Windows: `%LOCALAPPDATA%\GitHub CLI\extensions\gh-ledger\gh-ledger.exe`
-- macOS and Linux: `~/.local/share/gh/extensions/gh-ledger/gh-ledger`
-
-When `XDG_DATA_HOME` is set, gh uses `$XDG_DATA_HOME/gh/extensions/gh-ledger/` instead. The path stays the same when you upgrade, so the sign-in item and an MCP registration keep working.
-
-To build from source instead, publish one single-file, self-contained binary for your runtime identifier:
-
-```shell
-dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r <rid> -o artifacts/gh-ledger
-```
-
-Use `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, or `osx-arm64`. Move `gh-ledger` (`gh-ledger.exe` on Windows) from `artifacts/gh-ledger` to a permanent folder, then run `<folder>/gh-ledger install`. `install` points the sign-in item and the `gh ledger` alias at that copy; it doesn't add the folder to `PATH`.
-
-## Install and uninstall
-
-`gh ledger install` makes these changes and records them in `install.json`:
-
-- It sets `COPILOT_OTEL_ENABLED=true`: as a user environment variable on Windows, or in a marked block in your shell profile elsewhere (`.zshrc` for zsh, `.bash_profile` for bash on macOS, `.bashrc` for bash on Linux, and `.profile` otherwise).
-- For a binary you built, it sets the `gh ledger` alias when `gh` is on `PATH`. The extension doesn't need one. On Windows, the alias needs `sh.exe` from Git for Windows.
-- It registers the daemon to start when you sign in: the `CopilotLedger` value under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` on Windows, `~/Library/LaunchAgents/io.github.swigerb.copilot-ledger.plist` on macOS, or `copilot-ledger.desktop` in `$XDG_CONFIG_HOME/autostart` (default `~/.config/autostart`) on Linux.
-- It starts the daemon.
-
-It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTelemetry variables. Use `--dry-run` to print the changes without making them. Afterward, restart the GitHub Copilot app, VS Code, and open terminals so they see `COPILOT_OTEL_ENABLED`.
-
-`install` and `status` warn about settings that keep Copilot's telemetry from reaching CopilotLedger:
-
-- `OTEL_EXPORTER_OTLP_ENDPOINT` set to any endpoint other than `http://localhost:4318`.
-- `COPILOT_OTEL_FILE_EXPORTER_PATH`, which makes Copilot write telemetry to a file instead.
-- `COPILOT_OTEL_EXPORTER_TYPE` set to anything other than `otlp-http`.
-- Any of `OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_KEY`, `OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE`, `OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE`, or `OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY`, which turn off export to `http://` endpoints.
-- `OTEL_EXPORTER_OTLP_PROTOCOL` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` set to `grpc`; CopilotLedger accepts only `http/protobuf` and `http/json`.
-
-`install` also warns when `COPILOT_LEDGER_HOME` is set, because the daemon started at sign-in uses it only if your sign-in session sets it too. `status` warns when `install.json` names a different executable, for example after you switch from a binary you built to the extension; run `install` again from the copy you want to keep.
-
-`gh ledger uninstall` stops the daemon, removes the sign-in item, and reverses the environment variable, profile block, and alias changes recorded in `install.json`, restoring the variable's previous value. `--dry-run` prints the changes without making them. Your ledger stays, and so does an MCP registration: remove it with `copilot mcp remove ledger`, and remove the `ledger` entry from VS Code's `mcp.json` if you added one. To remove the extension too, run `gh extension remove ledger` afterward.
-
-**Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server. To upgrade:
-
-```shell
-gh ledger daemon stop
-gh extension upgrade ledger
-gh ledger daemon start
-```
-
-## The daemon
-
-- `gh ledger daemon run [--port <port>] [--log-file <path>]` runs the receiver in the foreground. It logs to standard output, or appends to `--log-file`.
-- `gh ledger daemon start [--port <port>]` starts it as a detached process that logs to `daemon.log`. The daemon gets the null device as its standard input, output, and error, so a script can capture the command's output, for example `started=$(gh ledger daemon start)`.
-- `gh ledger daemon stop` asks the daemon to stop, waits up to 15 seconds, and then ends its process if it's still running.
-
-The port defaults to 4318. Only one daemon runs at a time. Copilot's telemetry is lost while no daemon is running.
-
-## Reports
-
-| Command | Reports |
+| File | Change |
 |---|---|
-| `gh ledger status [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals for today and the last 7 and 30 days |
-| `gh ledger branch [--repo <key> \| --all-repos] [--since <period>] [--json]` | Spend by branch in the current repository, or in another or every repository; outside a Git repository, every repository |
-| `gh ledger agents [--repo <key>] [--since <period>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
-| `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
+| `src/CopilotLedger.Cli/Reporting/ReportCommands.cs` | `status` gains `--turns`, `--trace`, `--conversation`, `--bloat`, and `--limit`, the full option rules, and `TurnsAsync`, `BloatAsync`, `WriteSection`, `WriteTurnsJson`, `WriteBloatJson`, `WriteChains`, `Growth`, `StateName`, and `Requests` |
+| `src/CopilotLedger.Cli/Reporting/LedgerFormat.cs` | New `LocalTimeSeconds` |
+| `tests/CopilotLedger.Tests/Cli/CacheReportTests.cs` | New CR7–CR11 and `TurnHarnessAsync` |
 
-- A repository key is an `owner/repo` slug, a local repository root for a repository whose `origin` has no `owner/repo` path, or `(none)` for spend outside any repository.
-- `--since` takes `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date; the default is `30d`.
-- Tables round money to cents; JSON keeps exact amounts.
-- Spend is split into GitHub AI credits (`AI credits` and `GitHub USD`), Foundry BYOK (`BYOK USD`), and local models, whose `Local saved` is the cloud spend they avoided. `Unpriced` counts requests without a price; see [configuration.md](configuration.md).
-- An agent shows as `(none)` when Copilot reports no agent name, as its default agent does. Built-in subagents such as `explore` report their own names, and a custom agent reports the `name` in its `.agent.md` file, or the file's name without `.agent.md`.
+### Grammar and rules
 
-## Circuit breaker
-
-The daemon checks every prompt against two rules and trips the breaker when one is broken:
-
-- **Credit velocity:** one prompt's billed spend, GitHub AI credits plus Foundry BYOK at $0.01 per credit, exceeds 150 AI credits within 5 minutes.
-- **Retry churn:** one prompt makes 5 failed tool calls in a row, with no successful command and no new commit between them. A failed call is a shell command with a non-zero exit code or a tool call that Copilot reports as an error. Copilot doesn't export the commands themselves, so any failing command counts. VS Code's Local agent harness may not report exit codes, so this rule may not trip there.
-
-A trip writes an `ALERT` line to `daemon.log` and shows a desktop notification: a toast on Windows, a notification on macOS, and `notify-send` on Linux when it's installed. It doesn't stop the agent. Each rule trips at most once per prompt, and a trip stays open until you reset it.
-
-- `gh ledger breaker status [--json]` shows the rules and the open trips.
-- `gh ledger breaker reset` closes the current branch's open trips. Use `--id <id>` for one trip, `--repo <key> --branch <name>` for another branch, or `--all`.
-- `gh ledger breaker config` shows the rules and changes them with `--velocity-credits <credits>` (1 to 1,000,000, with up to 2 decimal places), `--velocity-minutes <minutes>` (1 to 1,440), and `--churn-failures <count>` (2 to 100). `--notifications off` keeps the `ALERT` line but stops desktop notifications.
-
-With `--flag-file on`, the daemon also writes `.copilot-ledger/CIRCUIT_OPEN` in the repository root while a trip is open there, so a wrapper script can stop an agent. The file holds the open trips as JSON, a `.copilot-ledger/.gitignore` keeps it out of commits, and `breaker reset` removes it. Trips outside a local repository get no file. If the daemon logs that it couldn't update the file, run `gh ledger breaker config --flag-file on` again.
-
-## Budgets
-
-A budget is a soft cap in AI credits for one branch. When the branch's billed spend exceeds it, the daemon alerts once, the same way as a breaker trip; nothing is blocked. Foundry BYOK spend counts at $0.01 per credit.
-
-- `gh ledger budget set <credits> [--repo <key> --branch <name>]` sets the current branch's budget, or another branch's. Credits are more than 0 and at most 1,000,000, with up to 2 decimal places. Setting a budget again re-arms its alert.
-- `gh ledger budget clear [--repo <key> --branch <name>]` removes it.
-- `gh ledger budget list [--json]` lists every budget with its spend.
-
-## Pull request receipts
-
-`gh ledger export-pr` writes the current branch's AI spend receipt to `.github/copilot-ledger/receipts/<branch>-<hash>.md` in the repository, where `<branch>` is the branch name with characters other than letters, digits, `.`, `_`, and `-` replaced by `-`. Commit the file on the branch and push it; the [CopilotLedger PR Receipt action](https://github.com/swigerb/copilot-ledger-action), `uses: swigerb/copilot-ledger-action@v1`, posts it on the pull request.
-
-The receipt covers all spend recorded on the branch: GitHub AI credits by model, Foundry BYOK spend, local-model tokens and the cloud spend they avoided, unpriced requests, circuit-breaker trips, and the most expensive prompt, with the data as JSON. A turn is one model request. Its totals equal the branch's row in `gh ledger branch --since all --json`. Branch and model names appear in code spans, so they never become mentions or links.
-
-- `--stdout` writes the Markdown to standard output instead of the file.
-- `--json` writes the JSON data to standard output instead of the file.
-
-`export-pr` needs a branch with at least one commit and a GitHub remote named `origin`, and it refuses a receipt over 65,536 bytes, the most the action posts.
-
-## MCP server
-
-`gh ledger mcp` runs an MCP server on standard input and output, so Copilot can read the ledger and see the circuit breaker. Register it with Copilot CLI using the gh-ledger binary's path, which for the extension is shown under [Get gh-ledger](#get-gh-ledger). In PowerShell on Windows:
-
-```powershell
-copilot mcp add ledger -- "$env:LOCALAPPDATA\GitHub CLI\extensions\gh-ledger\gh-ledger.exe" mcp
+```text
+gh ledger status --cache --turns (--trace <traceId> | --conversation <id>) [--json]
+gh ledger status --cache --bloat [--repo <key>] [--since <period>] [--limit <n>] [--json]
 ```
 
-On macOS and Linux:
+Option validators: `--trace` must be 32 hexadecimal characters ("--trace must be a 32-character hexadecimal trace ID."), `--conversation` can't be blank ("--conversation can't be blank."), and `--limit` is 1 to 100, default 10 ("--limit must be from 1 to 100."). The command validator replaces Task 8's and checks, in order, over the options the user typed (`--json` and `--cache` aside):
+
+1. Without `--cache`, the first one typed: "<option> requires --cache."
+2. `--turns` and `--bloat` together: "Use either --turns or --bloat, not both."
+3. With `--turns`: any option but `--trace` and `--conversation`, "<option> can't be used with --turns."; then neither or both of `--trace` and `--conversation`, "Use --turns with either --trace <traceId> or --conversation <id>."
+4. Without `--turns`: `--trace` or `--conversation`, "<option> requires --turns."; with `--bloat`, any of `--by`, `--branch`, and `--pr`, "<option> can't be used with --bloat."; without `--bloat`, `--limit`, "--limit requires --bloat."
+
+### `--turns` output
+
+- Rows come from `GetTurnBreakdownAsync(TurnSelector.ForTrace(…)` or `ForConversation(…), LedgerFilter.All)`. None: `No model requests recorded for trace <id>.` (or `conversation <id>`).
+- Otherwise `Model requests in trace <id>` (or `conversation <id>`), a blank line, and a table: `#`, `Started` (local time with seconds), `Agent` (`(none)` without a name), `Model`, `Input`, `Cache read`, `Cache write`, `Uncached`, `Output`, `Hit %`, `Growth`, and, for a conversation, `Trace`. Unknown cache values are `n/a`. `Growth` is `-` for a sequence's first request (the span has an agent but no delta), `n/a` without a known agent, and the signed delta otherwise (`+2,000`, `-1,000`).
+- Then a blank line and the footnotes: always `Growth is the change in input from the previous request by the same agent invocation and model; - marks its first request.`; when a row has no agent, `n/a growth: the request's agent invocation isn't recorded, so it isn't compared with others.`; when a row reported no cache counters, `<n> of <total> request(s) reported no cache counters.`
+- `--json`: `traceId`, `conversationId` (the selector), and `turns`, each with `turn` (1-based) and the fields listed in CR8, including `cacheReadState` and `cacheWriteState` (`reported`, `absent`, or `legacy_unknown`) and `inputDeltaFromPreviousTurn`.
+
+### `--bloat` output
+
+- `GetContextBloatAsync` over `{ From = period.From, Repository = --repo }` with `--limit`.
+- `Context bloat in <repository or all repositories> (<period>)`, then three sections, each a title line and a table, or `None.` when it's empty, separated by blank lines: `Prompt chains by uncached input` (`#`, `Started`, `Repository`, `Spans`, `Input`, `Uncached`, `Hit %`, `Trace`); `Prompt chains by input growth within one agent invocation and model` (`#`, `Started`, `Repository`, `Agent`, `Model`, `Requests`, `First input`, `Peak input`, `Growth`, `Trace`); and `Prompt chains with requests that reported no cache counters, by estimated uncached input` (`#`, `Started`, `Repository`, `Spans`, `Cache reported`, `Input`, `Est. uncached`, `Trace`).
+- When the third section has rows: a blank line and `Est. uncached is an estimate: it counts all input of a request without cache counters as uncached, as pricing does.` When spans lack an agent: a blank line and `Input growth leaves out <n> request(s) without a recorded agent invocation.`
+- `--json`: `period`, `from`, `repository`, `limit`, `byUncachedInput`, `byInputGrowth`, `byEstimatedUncachedInput`, and `spansWithoutAgent`, with the row fields listed in CR10.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Reporting/LedgerFormat.cs`, replace:
+
+```csharp
+        TimeZoneInfo.ConvertTime(value, zone)
+            .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+
+    public static void WriteMoney(
+```
+
+with:
+
+```csharp
+        TimeZoneInfo.ConvertTime(value, zone)
+            .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+
+    public static string LocalTimeSeconds(DateTimeOffset value, TimeZoneInfo zone) =>
+        TimeZoneInfo.ConvertTime(value, zone)
+            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    public static void WriteMoney(
+```
+
+Edit 1 of 8 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+using CopilotLedger.Core.Git;
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Storage;
+
+namespace CopilotLedger.Cli.Reporting;
+```
+
+with:
+
+```csharp
+using CopilotLedger.Core.Git;
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Storage;
+
+namespace CopilotLedger.Cli.Reporting;
+```
+
+Edit 2 of 8 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+        });
+        Option<string> since = SinceOption(context);
+        command.Add(json);
+        command.Add(cache);
+```
+
+with:
+
+```csharp
+        });
+        Option<string> since = SinceOption(context);
+        Option<bool> turns = new("--turns")
+        {
+            Description = "With --cache, list the model requests of one trace or conversation.",
+        };
+        Option<string?> trace = new("--trace")
+        {
+            Description = "The trace ID for --turns.",
+        };
+        trace.Validators.Add(result =>
+        {
+            string value = result.GetValueOrDefault<string?>() ?? string.Empty;
+            if (value.Length != 32 || !value.All(char.IsAsciiHexDigit))
+            {
+                result.AddError("--trace must be a 32-character hexadecimal trace ID.");
+            }
+        });
+        Option<string?> conversation = new("--conversation")
+        {
+            Description = "The conversation (Copilot session) ID for --turns.",
+        };
+        conversation.Validators.Add(result =>
+        {
+            if (string.IsNullOrWhiteSpace(result.GetValueOrDefault<string?>()))
+            {
+                result.AddError("--conversation can't be blank.");
+            }
+        });
+        Option<bool> bloat = new("--bloat")
+        {
+            Description = "With --cache, rank prompt chains by uncached input and input growth.",
+        };
+        Option<int> limit = new("--limit")
+        {
+            Description = "Prompt chains in each --bloat ranking.",
+            DefaultValueFactory = _ => 10,
+        };
+        limit.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<int>() is < 1 or > 100)
+            {
+                result.AddError("--limit must be from 1 to 100.");
+            }
+        });
+        command.Add(json);
+        command.Add(cache);
+```
+
+Edit 3 of 8 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+        command.Add(pullRequest);
+        command.Add(since);
+        command.Validators.Add(result =>
+        {
+            string[] given = new Option[] { by, repository, branch, pullRequest, since }
+                .Where(option => result.GetResult(option) is { Implicit: false })
+                .Select(option => option.Name)
+                .ToArray();
+            if (!result.GetValue(cache) && given.Length > 0)
+            {
+                result.AddError($"{given[0]} requires --cache.");
+            }
+        });
+```
+
+with:
+
+```csharp
+        command.Add(pullRequest);
+        command.Add(since);
+        command.Add(turns);
+        command.Add(trace);
+        command.Add(conversation);
+        command.Add(bloat);
+        command.Add(limit);
+        command.Validators.Add(result =>
+        {
+            string[] given = new Option[] { by, repository, branch, pullRequest, since, turns, trace, conversation, bloat, limit }
+                .Where(option => result.GetResult(option) is { Implicit: false })
+                .Select(option => option.Name)
+                .ToArray();
+            if (!result.GetValue(cache))
+            {
+                if (given.Length > 0)
+                {
+                    result.AddError($"{given[0]} requires --cache.");
+                }
+
+                return;
+            }
+
+            bool turnsView = result.GetValue(turns);
+            bool bloatView = result.GetValue(bloat);
+            string? error;
+            if (turnsView && bloatView)
+            {
+                error = "Use either --turns or --bloat, not both.";
+            }
+            else if (turnsView)
+            {
+                string? other = given.FirstOrDefault(name => name is not ("--turns" or "--trace" or "--conversation"));
+                error = other is not null
+                    ? $"{other} can't be used with --turns."
+                    : given.Contains("--trace") == given.Contains("--conversation")
+                        ? "Use --turns with either --trace <traceId> or --conversation <id>."
+                        : null;
+            }
+            else
+            {
+                string? turnsOnly = given.FirstOrDefault(name => name is "--trace" or "--conversation");
+                string? notForBloat = given.FirstOrDefault(name => name is "--by" or "--branch" or "--pr");
+                error = turnsOnly is not null
+                    ? $"{turnsOnly} requires --turns."
+                    : bloatView && notForBloat is not null
+                        ? $"{notForBloat} can't be used with --bloat."
+                        : !bloatView && given.Contains("--limit")
+                            ? "--limit requires --bloat."
+                            : null;
+            }
+
+            if (error is not null)
+            {
+                result.AddError(error);
+            }
+        });
+```
+
+Edit 4 of 8 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+                !result.GetValue(cache)
+                    ? StatusAsync(context, result.GetValue(json), cancellationToken)
+                    : CacheAsync(
+                        context,
+                        result.GetValue(by)!,
+                        new LedgerFilter
+                        {
+                            Repository = result.GetValue(repository),
+                            Branch = result.GetValue(branch),
+                            PullRequestNumber = result.GetValue(pullRequest),
+                        },
+                        ParsePeriod(context, result.GetValue(since)),
+                        result.GetValue(json),
+                        cancellationToken));
+        return command;
+    }
+
+    private static Command CreateBranch(CliContext context)
+```
+
+with:
+
+```csharp
+                !result.GetValue(cache)
+                    ? StatusAsync(context, result.GetValue(json), cancellationToken)
+                    : result.GetValue(turns)
+                        ? TurnsAsync(
+                            context,
+                            result.GetValue(trace) is string traceId
+                                ? TurnSelector.ForTrace(traceId)
+                                : TurnSelector.ForConversation(result.GetValue(conversation)!),
+                            result.GetValue(json),
+                            cancellationToken)
+                        : result.GetValue(bloat)
+                            ? BloatAsync(
+                                context,
+                                result.GetValue(repository),
+                                ParsePeriod(context, result.GetValue(since)),
+                                result.GetValue(limit),
+                                result.GetValue(json),
+                                cancellationToken)
+                            : CacheAsync(
+                                context,
+                                result.GetValue(by)!,
+                                new LedgerFilter
+                                {
+                                    Repository = result.GetValue(repository),
+                                    Branch = result.GetValue(branch),
+                                    PullRequestNumber = result.GetValue(pullRequest),
+                                },
+                                ParsePeriod(context, result.GetValue(since)),
+                                result.GetValue(json),
+                                cancellationToken));
+        return command;
+    }
+
+    private static Command CreateBranch(CliContext context)
+```
+
+Edit 5 of 8 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+        return 0;
+    }
+
+    private static void WriteStatusJson(
+        CliContext context,
+```
+
+with:
+
+```csharp
+        return 0;
+    }
+
+    private static async Task<int> TurnsAsync(
+        CliContext context,
+        TurnSelector selector,
+        bool json,
+        CancellationToken cancellationToken)
+    {
+        SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
+        await store.InitializeAsync(cancellationToken);
+        IReadOnlyList<TurnTokenRow> rows = await store.GetTurnBreakdownAsync(
+            selector,
+            LedgerFilter.All,
+            cancellationToken);
+        if (json)
+        {
+            WriteTurnsJson(context, selector, rows);
+            return 0;
+        }
+
+        string scope = selector.TraceId is string traceId
+            ? $"trace {traceId}"
+            : $"conversation {selector.ConversationId}";
+        if (rows.Count == 0)
+        {
+            context.Out.WriteLine($"No model requests recorded for {scope}.");
+            return 0;
+        }
+
+        bool conversation = selector.ConversationId is not null;
+        context.Out.WriteLine($"Model requests in {scope}");
+        context.Out.WriteLine();
+        TableColumn[] columns =
+        [
+            new("#", true),
+            new("Started", false),
+            new("Agent", false),
+            new("Model", false),
+            new("Input", true),
+            new("Cache read", true),
+            new("Cache write", true),
+            new("Uncached", true),
+            new("Output", true),
+            new("Hit %", true),
+            new("Growth", true),
+            .. conversation ? [new TableColumn("Trace", false)] : Array.Empty<TableColumn>(),
+        ];
+        IReadOnlyList<IReadOnlyList<string>> tableRows = rows.Select((row, index) =>
+            (IReadOnlyList<string>)
+            [
+                (index + 1).ToString(CultureInfo.InvariantCulture),
+                LedgerFormat.LocalTimeSeconds(row.StartTime, context.TimeProvider.LocalTimeZone),
+                row.Agent ?? "(none)",
+                row.Model,
+                LedgerFormat.Count(row.InputTokens),
+                row.CacheReadInputTokens is long read ? LedgerFormat.Count(read) : "n/a",
+                row.CacheWriteInputTokens is long write ? LedgerFormat.Count(write) : "n/a",
+                row.UncachedInputTokens is long uncached ? LedgerFormat.Count(uncached) : "n/a",
+                LedgerFormat.Count(row.OutputTokens),
+                LedgerFormat.Percent(row.CacheHitRatio),
+                Growth(row),
+                .. conversation ? [row.TraceId] : Array.Empty<string>(),
+            ]).ToArray();
+        TableWriter.Write(context.Out, columns, tableRows);
+        context.Out.WriteLine();
+        context.Out.WriteLine(
+            "Growth is the change in input from the previous request by the same agent invocation and model; - marks its first request.");
+        if (rows.Any(row => row.AgentSpanId is null))
+        {
+            context.Out.WriteLine(
+                "n/a growth: the request's agent invocation isn't recorded, so it isn't compared with others.");
+        }
+
+        long unreported = rows.Count(row => row.CacheReadInputTokens is null);
+        if (unreported > 0)
+        {
+            context.Out.WriteLine(
+                $"{LedgerFormat.Count(unreported)} of {Requests(rows.Count)} reported no cache counters.");
+        }
+
+        return 0;
+    }
+
+    private static async Task<int> BloatAsync(
+        CliContext context,
+        string? repository,
+        Period period,
+        int limit,
+        bool json,
+        CancellationToken cancellationToken)
+    {
+        SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
+        await store.InitializeAsync(cancellationToken);
+        ContextBloatReport report = await store.GetContextBloatAsync(
+            new LedgerFilter { From = period.From, Repository = repository },
+            limit,
+            cancellationToken);
+        if (json)
+        {
+            WriteBloatJson(context, period, repository, limit, report);
+            return 0;
+        }
+
+        TimeZoneInfo zone = context.TimeProvider.LocalTimeZone;
+        context.Out.WriteLine($"Context bloat in {repository ?? "all repositories"} ({period.Label})");
+        context.Out.WriteLine();
+        context.Out.WriteLine("Prompt chains by uncached input");
+        WriteSection(
+            context,
+            [
+                new("#", true),
+                new("Started", false),
+                new("Repository", false),
+                new("Spans", true),
+                new("Input", true),
+                new("Uncached", true),
+                new("Hit %", true),
+                new("Trace", false),
+            ],
+            report.ByUncachedInput.Select((row, index) =>
+                (IReadOnlyList<string>)
+                [
+                    (index + 1).ToString(CultureInfo.InvariantCulture),
+                    LedgerFormat.LocalTime(row.StartTime, zone),
+                    row.Repository,
+                    LedgerFormat.Count(row.SpanCount),
+                    LedgerFormat.Count(row.InputTokens),
+                    LedgerFormat.Count(row.ReportedUncachedInputTokens),
+                    LedgerFormat.Percent(row.CacheHitRatio),
+                    row.TraceId,
+                ]).ToArray());
+        context.Out.WriteLine();
+        context.Out.WriteLine("Prompt chains by input growth within one agent invocation and model");
+        WriteSection(
+            context,
+            [
+                new("#", true),
+                new("Started", false),
+                new("Repository", false),
+                new("Agent", false),
+                new("Model", false),
+                new("Requests", true),
+                new("First input", true),
+                new("Peak input", true),
+                new("Growth", true),
+                new("Trace", false),
+            ],
+            report.ByInputGrowth.Select((row, index) =>
+                (IReadOnlyList<string>)
+                [
+                    (index + 1).ToString(CultureInfo.InvariantCulture),
+                    LedgerFormat.LocalTime(row.StartTime, zone),
+                    row.Repository,
+                    row.Agent ?? "(none)",
+                    row.Model,
+                    LedgerFormat.Count(row.TurnCount),
+                    LedgerFormat.Count(row.FirstInputTokens),
+                    LedgerFormat.Count(row.PeakInputTokens),
+                    LedgerFormat.Count(row.InputGrowthTokens),
+                    row.TraceId,
+                ]).ToArray());
+        context.Out.WriteLine();
+        context.Out.WriteLine("Prompt chains with requests that reported no cache counters, by estimated uncached input");
+        WriteSection(
+            context,
+            [
+                new("#", true),
+                new("Started", false),
+                new("Repository", false),
+                new("Spans", true),
+                new("Cache reported", true),
+                new("Input", true),
+                new("Est. uncached", true),
+                new("Trace", false),
+            ],
+            report.ByEstimatedUncachedInput.Select((row, index) =>
+                (IReadOnlyList<string>)
+                [
+                    (index + 1).ToString(CultureInfo.InvariantCulture),
+                    LedgerFormat.LocalTime(row.StartTime, zone),
+                    row.Repository,
+                    LedgerFormat.Count(row.SpanCount),
+                    LedgerFormat.Count(row.CacheReportedSpanCount),
+                    LedgerFormat.Count(row.InputTokens),
+                    LedgerFormat.Count(row.EstimatedUncachedInputTokens),
+                    row.TraceId,
+                ]).ToArray());
+        if (report.ByEstimatedUncachedInput.Count > 0)
+        {
+            context.Out.WriteLine();
+            context.Out.WriteLine(
+                "Est. uncached is an estimate: it counts all input of a request without cache counters as uncached, as pricing does.");
+        }
+
+        if (report.SpansWithoutAgent > 0)
+        {
+            context.Out.WriteLine();
+            context.Out.WriteLine(
+                $"Input growth leaves out {Requests(report.SpansWithoutAgent)} without a recorded agent invocation.");
+        }
+
+        return 0;
+    }
+
+    // A ranking's table, or "None." when it has no rows.
+    private static void WriteSection(
+        CliContext context,
+        IReadOnlyList<TableColumn> columns,
+        IReadOnlyList<IReadOnlyList<string>> rows)
+    {
+        if (rows.Count == 0)
+        {
+            context.Out.WriteLine("None.");
+            return;
+        }
+
+        TableWriter.Write(context.Out, columns, rows);
+    }
+
+    private static void WriteStatusJson(
+        CliContext context,
+```
+
+Edit 6 of 8 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
+    private static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
+        new()
+```
+
+with:
+
+```csharp
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
+    private static void WriteTurnsJson(
+        CliContext context,
+        TurnSelector selector,
+        IReadOnlyList<TurnTokenRow> rows)
+    {
+        using MemoryStream stream = new();
+        using Utf8JsonWriter writer = new(stream, JsonOptions);
+        writer.WriteStartObject();
+        LedgerFormat.WriteNullable(writer, "traceId", selector.TraceId);
+        LedgerFormat.WriteNullable(writer, "conversationId", selector.ConversationId);
+        writer.WriteStartArray("turns");
+        for (int index = 0; index < rows.Count; index++)
+        {
+            TurnTokenRow row = rows[index];
+            writer.WriteStartObject();
+            writer.WriteNumber("turn", index + 1);
+            writer.WriteString("traceId", row.TraceId);
+            writer.WriteString("spanId", row.SpanId);
+            LedgerFormat.WriteNullable(writer, "parentSpanId", row.ParentSpanId);
+            LedgerFormat.WriteNullable(writer, "conversationId", row.ConversationId);
+            LedgerFormat.WriteNullable(writer, "agentSpanId", row.AgentSpanId);
+            LedgerFormat.WriteTime(writer, "startTime", row.StartTime);
+            writer.WriteString("repository", row.Repository);
+            writer.WriteString("branch", row.Branch);
+            LedgerFormat.WriteNullable(writer, "pullRequest", row.PullRequestNumber);
+            LedgerFormat.WriteNullable(writer, "agent", row.Agent);
+            writer.WriteString("model", row.Model);
+            writer.WriteNumber("inputTokens", row.InputTokens);
+            writer.WriteNumber("outputTokens", row.OutputTokens);
+            writer.WriteString("cacheReadState", StateName(row.CacheReadState));
+            writer.WriteString("cacheWriteState", StateName(row.CacheWriteState));
+            LedgerFormat.WriteNullable(writer, "cacheReadInputTokens", row.CacheReadInputTokens);
+            LedgerFormat.WriteNullable(writer, "cacheWriteInputTokens", row.CacheWriteInputTokens);
+            LedgerFormat.WriteNullable(writer, "uncachedInputTokens", row.UncachedInputTokens);
+            LedgerFormat.WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
+            LedgerFormat.WriteNullable(writer, "inputDeltaFromPreviousTurn", row.InputDeltaFromPreviousTurn);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
+    private static void WriteBloatJson(
+        CliContext context,
+        Period period,
+        string? repository,
+        int limit,
+        ContextBloatReport report)
+    {
+        using MemoryStream stream = new();
+        using Utf8JsonWriter writer = new(stream, JsonOptions);
+        writer.WriteStartObject();
+        writer.WriteString("period", period.Label);
+        LedgerFormat.WriteTime(writer, "from", period.From);
+        LedgerFormat.WriteNullable(writer, "repository", repository);
+        writer.WriteNumber("limit", limit);
+        WriteChains(writer, "byUncachedInput", report.ByUncachedInput);
+        writer.WriteStartArray("byInputGrowth");
+        for (int index = 0; index < report.ByInputGrowth.Count; index++)
+        {
+            InputGrowthRow row = report.ByInputGrowth[index];
+            writer.WriteStartObject();
+            writer.WriteNumber("rank", index + 1);
+            writer.WriteString("traceId", row.TraceId);
+            LedgerFormat.WriteNullable(writer, "conversationId", row.ConversationId);
+            writer.WriteString("agentSpanId", row.AgentSpanId);
+            LedgerFormat.WriteNullable(writer, "agent", row.Agent);
+            writer.WriteString("model", row.Model);
+            writer.WriteString("repository", row.Repository);
+            writer.WriteString("branch", row.Branch);
+            LedgerFormat.WriteTime(writer, "startTime", row.StartTime);
+            writer.WriteNumber("turns", row.TurnCount);
+            writer.WriteNumber("firstInputTokens", row.FirstInputTokens);
+            writer.WriteNumber("peakInputTokens", row.PeakInputTokens);
+            writer.WriteNumber("inputGrowthTokens", row.InputGrowthTokens);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        WriteChains(writer, "byEstimatedUncachedInput", report.ByEstimatedUncachedInput);
+        writer.WriteNumber("spansWithoutAgent", report.SpansWithoutAgent);
+        writer.WriteEndObject();
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
+    private static void WriteChains(
+        Utf8JsonWriter writer,
+        string name,
+        IReadOnlyList<BloatChainRow> rows)
+    {
+        writer.WriteStartArray(name);
+        for (int index = 0; index < rows.Count; index++)
+        {
+            BloatChainRow row = rows[index];
+            writer.WriteStartObject();
+            writer.WriteNumber("rank", index + 1);
+            writer.WriteString("traceId", row.TraceId);
+            LedgerFormat.WriteNullable(writer, "conversationId", row.ConversationId);
+            LedgerFormat.WriteTime(writer, "startTime", row.StartTime);
+            writer.WriteString("repository", row.Repository);
+            writer.WriteString("branch", row.Branch);
+            writer.WriteNumber("spans", row.SpanCount);
+            writer.WriteNumber("cacheReportedSpans", row.CacheReportedSpanCount);
+            writer.WriteNumber("cacheUnreportedSpans", row.SpanCount - row.CacheReportedSpanCount);
+            writer.WriteNumber("inputTokens", row.InputTokens);
+            writer.WriteNumber("reportedInputTokens", row.ReportedInputTokens);
+            writer.WriteNumber("reportedCacheReadInputTokens", row.ReportedCacheReadInputTokens);
+            LedgerFormat.WriteNullable(
+                writer,
+                "uncachedInputTokens",
+                row.CacheReportedSpanCount == 0 ? null : row.ReportedUncachedInputTokens);
+            writer.WriteNumber("estimatedUncachedInputTokens", row.EstimatedUncachedInputTokens);
+            LedgerFormat.WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
+        new()
+```
+
+Edit 7 of 8 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+            : string.Empty);
+
+    private static string Joined(IReadOnlyList<string> values) =>
+        values.Count == 0 ? "-" : string.Join(", ", values);
+```
+
+with:
+
+```csharp
+            : string.Empty);
+
+    // + and the input added since the sequence's previous request, the decrease, - for its first request, or n/a when
+    // the request's agent invocation isn't known.
+    private static string Growth(TurnTokenRow row) =>
+        row.AgentSpanId is null
+            ? "n/a"
+            : row.InputDeltaFromPreviousTurn is not long delta
+                ? "-"
+                : delta > 0
+                    ? "+" + LedgerFormat.Count(delta)
+                    : LedgerFormat.Count(delta);
+
+    private static string StateName(CacheCounterState state) => state switch
+    {
+        CacheCounterState.Reported => "reported",
+        CacheCounterState.Absent => "absent",
+        _ => "legacy_unknown",
+    };
+
+    private static string Joined(IReadOnlyList<string> values) =>
+        values.Count == 0 ? "-" : string.Join(", ", values);
+```
+
+Edit 8 of 8 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
+
+```csharp
+    private static string Spans(long count) =>
+        $"{LedgerFormat.Count(count)} {(count == 1 ? "span" : "spans")}";
+
+    private static bool IsOtelEnabled(Func<string, string?> lookup)
+```
+
+with:
+
+```csharp
+    private static string Spans(long count) =>
+        $"{LedgerFormat.Count(count)} {(count == 1 ? "span" : "spans")}";
+
+    private static string Requests(long count) =>
+        $"{LedgerFormat.Count(count)} {(count == 1 ? "request" : "requests")}";
+
+    private static bool IsOtelEnabled(Func<string, string?> lookup)
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/CacheReportTests.cs`, replace:
+
+```csharp
+        Assert.Contains("54.5%", german[0]);
+    }
+
+    private static async Task<CliHarness> SeededHarnessAsync(string root)
+    {
+        string git = Path.Combine(root, "repo", ".git");
+```
+
+with:
+
+```csharp
+        Assert.Contains("54.5%", german[0]);
+    }
+
+    [Fact]
+    public async Task CR7_Turns_ListRequestsInStartOrderWithGrowthPerAgentAndModel()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await TurnHarnessAsync(temp.Path);
+
+        CliRun trace = await harness.RunAsync("status", "--cache", "--turns", "--trace", TurnSeeds.B1);
+        CliRun conversation = await harness.RunAsync("status", "--cache", "--turns", "--conversation", "conv-b");
+        CliRun growing = await harness.RunAsync("status", "--cache", "--turns", "--trace", TurnSeeds.B3.ToUpperInvariant());
+        CliRun none = await harness.RunAsync("status", "--cache", "--turns", "--trace", new string('0', 32));
+
+        Assert.Equal(0, trace.ExitCode);
+        Assert.Equal(
+            """
+            Model requests in trace b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+
+            #  Started              Agent    Model             Input  Cache read  Cache write  Uncached  Output   Hit %  Growth
+            1  2026-11-21 05:00:00  (none)   claude-opus-5.5  10,000           0        9,000     1,000     500    0.0%       -
+            2  2026-11-21 05:00:05  explore  mai-code-2        3,000         n/a          n/a       n/a     100     n/a       -
+            3  2026-11-21 05:00:10  explore  mai-code-2        5,000       2,000            0     3,000     100   40.0%  +2,000
+            4  2026-11-21 05:00:10  (none)   claude-opus-5.5  12,000       9,000        2,500       500     500   75.0%  +2,000
+            5  2026-11-21 05:00:20  (none)   claude-opus-5.5  11,000      11,000            0         0     500  100.0%  -1,000
+            6  2026-11-21 05:00:30  (none)   claude-opus-5.5  20,000         n/a          n/a       n/a     500     n/a     n/a
+
+            Growth is the change in input from the previous request by the same agent invocation and model; - marks its first request.
+            n/a growth: the request's agent invocation isn't recorded, so it isn't compared with others.
+            2 of 6 requests reported no cache counters.
+
+            """.ReplaceLineEndings("\n"),
+            trace.Out);
+        Assert.Equal(0, conversation.ExitCode);
+        Assert.Equal(
+            """
+            Model requests in conversation conv-b
+
+            #  Started              Agent    Model             Input  Cache read  Cache write  Uncached  Output   Hit %  Growth  Trace
+            1  2026-11-21 05:00:00  (none)   claude-opus-5.5  10,000           0        9,000     1,000     500    0.0%       -  b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+            2  2026-11-21 05:00:05  explore  mai-code-2        3,000         n/a          n/a       n/a     100     n/a       -  b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+            3  2026-11-21 05:00:10  explore  mai-code-2        5,000       2,000            0     3,000     100   40.0%  +2,000  b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+            4  2026-11-21 05:00:10  (none)   claude-opus-5.5  12,000       9,000        2,500       500     500   75.0%  +2,000  b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+            5  2026-11-21 05:00:20  (none)   claude-opus-5.5  11,000      11,000            0         0     500  100.0%  -1,000  b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+            6  2026-11-21 05:00:30  (none)   claude-opus-5.5  20,000         n/a          n/a       n/a     500     n/a     n/a  b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+            7  2026-11-21 05:05:00  (none)   claude-opus-5.5  15,000      10,000            0     5,000     500   66.7%       -  b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+
+            Growth is the change in input from the previous request by the same agent invocation and model; - marks its first request.
+            n/a growth: the request's agent invocation isn't recorded, so it isn't compared with others.
+            2 of 7 requests reported no cache counters.
+
+            """.ReplaceLineEndings("\n"),
+            conversation.Out);
+        Assert.Equal(0, growing.ExitCode);
+        Assert.Equal(
+            """
+            Model requests in trace b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3
+
+            #  Started              Agent   Model             Input  Cache read  Cache write  Uncached  Output  Hit %   Growth
+            1  2026-11-21 06:00:00  (none)  claude-opus-5.5  20,000       5,000            0    15,000     500  25.0%        -
+            2  2026-11-21 06:01:00  (none)  claude-opus-5.5  30,000       5,000            0    25,000     500  16.7%  +10,000
+
+            Growth is the change in input from the previous request by the same agent invocation and model; - marks its first request.
+
+            """.ReplaceLineEndings("\n"),
+            growing.Out);
+        Assert.Equal(0, none.ExitCode);
+        Assert.Equal("No model requests recorded for trace 00000000000000000000000000000000.\n", none.Out);
+    }
+
+    [Fact]
+    public async Task CR8_TurnsJson_HasEveryRequestsCounterStatesAndDelta()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await TurnHarnessAsync(temp.Path);
+
+        CliRun run = await harness.RunAsync("status", "--cache", "--turns", "--trace", TurnSeeds.B1, "--json");
+
+        Assert.Equal(0, run.ExitCode);
+        using JsonDocument json = JsonDocument.Parse(run.Out);
+        Assert.Equal(TurnSeeds.B1, json.RootElement.GetProperty("traceId").GetString());
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("conversationId").ValueKind);
+        JsonElement[] turns = json.RootElement.GetProperty("turns").EnumerateArray().ToArray();
+        Assert.Equal(6, turns.Length);
+        Assert.Equal(
+            ["turn", "traceId", "spanId", "parentSpanId", "conversationId", "agentSpanId", "startTime", "repository", "branch", "pullRequest", "agent", "model", "inputTokens", "outputTokens", "cacheReadState", "cacheWriteState", "cacheReadInputTokens", "cacheWriteInputTokens", "uncachedInputTokens", "cacheHitRatio", "inputDeltaFromPreviousTurn"],
+            turns[0].EnumerateObject().Select(property => property.Name));
+        Assert.Equal([1, 2, 3, 4, 5, 6], turns.Select(turn => turn.GetProperty("turn").GetInt32()));
+        Assert.Equal(
+            ["absent", "absent", "reported", "reported", "reported", "absent"],
+            turns.Select(turn => turn.GetProperty("cacheReadState").GetString()));
+        Assert.Equal(
+            ["reported", "absent", "absent", "reported", "absent", "absent"],
+            turns.Select(turn => turn.GetProperty("cacheWriteState").GetString()));
+        Assert.Equal(
+            [null, null, 2_000L, 2_000L, -1_000L, null],
+            turns.Select(turn => turn.GetProperty("inputDeltaFromPreviousTurn") is { ValueKind: JsonValueKind.Number } delta
+                ? (long?)delta.GetInt64()
+                : null));
+        Assert.Equal(42, turns[0].GetProperty("pullRequest").GetInt32());
+        Assert.Equal("2026-11-21T10:00:00.0000000+00:00", turns[0].GetProperty("startTime").GetString());
+        Assert.Equal(0m, turns[0].GetProperty("cacheHitRatio").GetDecimal());
+        Assert.Equal(9_000, turns[0].GetProperty("cacheWriteInputTokens").GetInt64());
+        Assert.Equal(JsonValueKind.Null, turns[1].GetProperty("cacheReadInputTokens").ValueKind);
+        Assert.Equal(JsonValueKind.Null, turns[1].GetProperty("cacheHitRatio").ValueKind);
+        Assert.Equal("explore", turns[1].GetProperty("agent").GetString());
+        Assert.Equal(0.75m, turns[3].GetProperty("cacheHitRatio").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, turns[5].GetProperty("agentSpanId").ValueKind);
+    }
+
+    [Fact]
+    public async Task CR9_Bloat_RanksChainsAndLabelsTheEstimate()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await TurnHarnessAsync(temp.Path);
+
+        CliRun all = await harness.RunAsync("status", "--cache", "--bloat");
+        CliRun one = await harness.RunAsync("status", "--cache", "--bloat", "--limit", "1", "--repo", "swigerb/copilot-ledger");
+        CliRun empty = await harness.RunAsync("status", "--cache", "--bloat", "--repo", "contoso/webapp");
+
+        Assert.Equal(0, all.ExitCode);
+        Assert.Equal(
+            """
+            Context bloat in all repositories (last 30 days)
+
+            Prompt chains by uncached input
+            #  Started           Repository              Spans   Input  Uncached  Hit %  Trace
+            1  2026-11-21 06:00  swigerb/copilot-ledger      2  50,000    40,000  20.0%  b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3
+            2  2026-11-21 07:00  (none)                      1   5,000     5,000   0.0%  b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0
+            3  2026-11-21 05:05  swigerb/copilot-ledger      1  15,000     5,000  66.7%  b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+
+            Prompt chains by input growth within one agent invocation and model
+            #  Started           Repository              Agent   Model            Requests  First input  Peak input  Growth  Trace
+            1  2026-11-21 06:00  swigerb/copilot-ledger  (none)  claude-opus-5.5         2       20,000      30,000  10,000  b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3
+            2  2026-11-21 05:00  swigerb/copilot-ledger  (none)  claude-opus-5.5         3       10,000      12,000   2,000  b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+
+            Prompt chains with requests that reported no cache counters, by estimated uncached input
+            #  Started           Repository              Spans  Cache reported   Input  Est. uncached  Trace
+            1  2026-11-21 05:00  swigerb/copilot-ledger      6               4  61,000         27,500  b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+
+            Est. uncached is an estimate: it counts all input of a request without cache counters as uncached, as pricing does.
+
+            Input growth leaves out 2 requests without a recorded agent invocation.
+
+            """.ReplaceLineEndings("\n"),
+            all.Out);
+        Assert.Equal(0, one.ExitCode);
+        Assert.Equal(
+            """
+            Context bloat in swigerb/copilot-ledger (last 30 days)
+
+            Prompt chains by uncached input
+            #  Started           Repository              Spans   Input  Uncached  Hit %  Trace
+            1  2026-11-21 06:00  swigerb/copilot-ledger      2  50,000    40,000  20.0%  b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3
+
+            Prompt chains by input growth within one agent invocation and model
+            #  Started           Repository              Agent   Model            Requests  First input  Peak input  Growth  Trace
+            1  2026-11-21 06:00  swigerb/copilot-ledger  (none)  claude-opus-5.5         2       20,000      30,000  10,000  b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3
+
+            Prompt chains with requests that reported no cache counters, by estimated uncached input
+            #  Started           Repository              Spans  Cache reported   Input  Est. uncached  Trace
+            1  2026-11-21 05:00  swigerb/copilot-ledger      6               4  61,000         27,500  b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+
+            Est. uncached is an estimate: it counts all input of a request without cache counters as uncached, as pricing does.
+
+            Input growth leaves out 1 request without a recorded agent invocation.
+
+            """.ReplaceLineEndings("\n"),
+            one.Out);
+        Assert.Equal(0, empty.ExitCode);
+        Assert.Equal(
+            """
+            Context bloat in contoso/webapp (last 30 days)
+
+            Prompt chains by uncached input
+            None.
+
+            Prompt chains by input growth within one agent invocation and model
+            None.
+
+            Prompt chains with requests that reported no cache counters, by estimated uncached input
+            None.
+
+            """.ReplaceLineEndings("\n"),
+            empty.Out);
+    }
+
+    [Fact]
+    public async Task CR10_BloatJson_HasTheThreeRankings()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await TurnHarnessAsync(temp.Path);
+
+        CliRun run = await harness.RunAsync("status", "--cache", "--bloat", "--json");
+
+        Assert.Equal(0, run.ExitCode);
+        using JsonDocument json = JsonDocument.Parse(run.Out);
+        JsonElement root = json.RootElement;
+        Assert.Equal(
+            ["period", "from", "repository", "limit", "byUncachedInput", "byInputGrowth", "byEstimatedUncachedInput", "spansWithoutAgent"],
+            root.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(10, root.GetProperty("limit").GetInt32());
+        Assert.Equal(2, root.GetProperty("spansWithoutAgent").GetInt64());
+        JsonElement[] uncached = root.GetProperty("byUncachedInput").EnumerateArray().ToArray();
+        Assert.Equal(
+            [TurnSeeds.B3, TurnSeeds.B0, TurnSeeds.B2],
+            uncached.Select(row => row.GetProperty("traceId").GetString()));
+        Assert.Equal(
+            ["rank", "traceId", "conversationId", "startTime", "repository", "branch", "spans", "cacheReportedSpans", "cacheUnreportedSpans", "inputTokens", "reportedInputTokens", "reportedCacheReadInputTokens", "uncachedInputTokens", "estimatedUncachedInputTokens", "cacheHitRatio"],
+            uncached[0].EnumerateObject().Select(property => property.Name));
+        Assert.Equal(40_000, uncached[0].GetProperty("uncachedInputTokens").GetInt64());
+        Assert.Equal(0.2m, uncached[0].GetProperty("cacheHitRatio").GetDecimal());
+        JsonElement[] growth = root.GetProperty("byInputGrowth").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["rank", "traceId", "conversationId", "agentSpanId", "agent", "model", "repository", "branch", "startTime", "turns", "firstInputTokens", "peakInputTokens", "inputGrowthTokens"],
+            growth[0].EnumerateObject().Select(property => property.Name));
+        Assert.Equal([10_000L, 2_000L], growth.Select(row => row.GetProperty("inputGrowthTokens").GetInt64()));
+        JsonElement estimated = Assert.Single(root.GetProperty("byEstimatedUncachedInput").EnumerateArray());
+        Assert.Equal(TurnSeeds.B1, estimated.GetProperty("traceId").GetString());
+        Assert.Equal(2, estimated.GetProperty("cacheUnreportedSpans").GetInt64());
+        Assert.Equal(4_500, estimated.GetProperty("uncachedInputTokens").GetInt64());
+        Assert.Equal(27_500, estimated.GetProperty("estimatedUncachedInputTokens").GetInt64());
+        Assert.Equal(0.5789473684210526315789473684m, estimated.GetProperty("cacheHitRatio").GetDecimal());
+    }
+
+    public static TheoryData<string, string> InvalidViews => new()
+    {
+        { "status --turns", "--turns requires --cache." },
+        { "status --cache --turns", "Use --turns with either --trace <traceId> or --conversation <id>." },
+        { "status --cache --turns --trace b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1 --conversation conv-b", "Use --turns with either --trace <traceId> or --conversation <id>." },
+        { "status --cache --turns --trace b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1 --by model", "--by can't be used with --turns." },
+        { "status --cache --turns --conversation conv-b --since 7d", "--since can't be used with --turns." },
+        { "status --cache --turns --trace xyz", "--trace must be a 32-character hexadecimal trace ID." },
+        { "status --cache --trace b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1", "--trace requires --turns." },
+        { "status --cache --conversation conv-b", "--conversation requires --turns." },
+        { "status --cache --turns --bloat", "Use either --turns or --bloat, not both." },
+        { "status --cache --bloat --by model", "--by can't be used with --bloat." },
+        { "status --cache --bloat --pr 4", "--pr can't be used with --bloat." },
+        { "status --cache --limit 5", "--limit requires --bloat." },
+        { "status --cache --bloat --limit 0", "--limit must be from 1 to 100." },
+        { "status --cache --bloat --limit 101", "--limit must be from 1 to 100." },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidViews))]
+    public async Task CR11_TurnAndBloatOptionsAreValidated(string command, string message)
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = new(temp.Path, new FakeCliPlatform(), Time);
+
+        CliRun run = await harness.RunAsync(command.Split(' '));
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Contains(message, run.Error);
+    }
+
+    private static async Task<CliHarness> TurnHarnessAsync(string root)
+    {
+        CliHarness harness = new(root, new FakeCliPlatform(), Time);
+        SqliteLedgerStore store = new(harness.Context.DatabasePath, harness.TimeProvider);
+        await store.InitializeAsync();
+        await TurnSeeds.SeedAsync(store, root);
+        return harness;
+    }
+
+    private static async Task<CliHarness> SeededHarnessAsync(string root)
+    {
+        string git = Path.Combine(root, "repo", ".git");
+```
+
+### Tests
+
+All over `TurnSeeds` (Task 6) at 2026-11-21 15:00 UTC, shown in UTC-5.
+
+- **CR7:** the exact `--turns` tables for trace B1 (growth `-`, `-`, `+2,000`, `+2,000`, `-1,000`, `n/a`; ratios `0.0%`, `n/a`, `40.0%`, `75.0%`, `100.0%`, `n/a`; all three footnotes), conversation `conv-b` (with the `Trace` column and B2's request as its own first, `-`), trace B3 given in uppercase (`+10,000`, only the growth footnote), and an unknown trace (`No model requests recorded for trace 000…0.`).
+- **CR8:** `--turns --json` for B1: the 21 property names in order, turn numbers 1–6, read states `absent, absent, reported, reported, reported, absent`, write states `reported, absent, absent, reported, absent, absent`, deltas `null, null, 2000, 2000, -1000, null`, pull request 42, ratio `0` on the first turn and `0.75` on the fourth, and `null` cache values and agent where unknown.
+- **CR9:** the exact `--bloat` report (B3, B0, B2 by uncached input; B3 and B1 by growth; B1 by estimate; both footnotes, with `2 requests`), with `--limit 1 --repo swigerb/copilot-ledger` (one row each, `1 request`), and for a repository without spans (`None.` three times).
+- **CR10:** `--bloat --json`: the root and row property names in order, `limit` 10, `spansWithoutAgent` 2, observed uncached 40,000 and ratio `0.2` for B3, growth 10,000 and 2,000, and B1's estimate row (2 unreported spans, observed 4,500, estimate 27,500, ratio `0.5789473684210526315789473684`).
+- **CR11** (14 cases): every rule and message above, plus `--trace xyz` and `--limit` 0 and 101.
+
+### Acceptance criteria
+
+- `--turns` lists inference spans in start order with per-request values and `InputDeltaFromPreviousTurn`; `--bloat` ranks deterministically, ties by trace ID, with unknown totals ranked separately and the estimate labeled.
+- `status --cache` without `--turns` or `--bloat` behaves as in Task 8, and CR1–CR6 pass unchanged.
+- `dotnet test CopilotLedger.slnx` passes **786** tests (768 + 18).
+
+### Verify
 
 ```shell
-copilot mcp add ledger -- ~/.local/share/gh/extensions/gh-ledger/gh-ledger mcp
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
 ```
 
+## Task 10 specification: MCP get_cache_efficiency
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Storage/LedgerPeriod.cs` | New: the `--since` grammar, moved from the CLI |
+| `src/CopilotLedger.Cli/Reporting/Period.cs` | Delegates to `LedgerPeriod.TryParse`; same signature and results |
+| `src/CopilotLedger.Mcp/LedgerMcpTools.cs` | New tool `get_cache_efficiency`; `get_branch_ledger` and `get_agent_breakdown` add three fields; `ResolveCurrent` |
+| `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs` | MC1, MC2, MC4, MC6, and MC11 expectations; 13 new MC8 cases; new MC13 and MC14 and `SeedPullRequestAsync` |
+| `docs/guide.md` | The `mcp` sample gains the three fields |
+| `docs/cli.md` | "MCP server" lists five tools |
+
+### Contracts
+
+```csharp
+namespace CopilotLedger.Storage;
+
+public sealed record LedgerPeriod(string Label, DateTimeOffset? From)
+{
+    // today, all, Nd (1–3650, counting today), or yyyy-MM-dd, ignoring case and surrounding white space; periods start at
+    // local midnight in timeProvider's time zone. Labels: "today", "all time", "last N days", "since yyyy-MM-dd".
+    public static bool TryParse(string? value, TimeProvider timeProvider, [NotNullWhen(true)] out LedgerPeriod? period);
+}
+```
+
+Tool `get_cache_efficiency` (fourth in `tools/list`, before `set_branch_budget`):
+
+- Title `Cache efficiency`; annotations `ReadOnlyHint = true`, `OpenWorldHint = false`; the description and input schema are in the code below.
+- Arguments: `repository` (non-empty string), `branch` (non-empty string), `pullRequest` (integer ≥ 1), `since` (string, default `30d`), `by` (`model`, `branch`, `pr`, or `agent`, default `model`), and `limit` (integer 1–50, default 10). Any other argument is rejected with "Unknown argument: <name>." (the alphabetically first one).
+- Messages: "repository must be a non-empty string.", "branch must be a non-empty string.", "pullRequest must be an integer of at least 1.", "since must be today, all, <N>d (1-3650), or yyyy-MM-dd.", "by must be model, branch, pr, or agent.", and "limit must be an integer from 1 to 50.".
+- Scope: `repository`, or else the current repository (the slug, or the root without one) of the session directory, found the same way the other tools find it (`ResolveCurrent`). With neither: "No Git repository at <directory>. Pass repository.". `branch` and `pullRequest` filter independently.
+- Result: `repository`, `branch`, `pullRequest`, `period` (label), `from` (round-trip UTC, or `null`), `by`, `limit`, `rows` (the first `limit` rows of `GetCacheEfficiencyAsync`, each with the fields of `status --cache --json`), `circuitBreaker`, and `warnings`. The warnings and trips are those of the current branch, or, outside a repository, only the current session's trips; the text content starts with one `WARNING:` line each, as for the other tools.
+
+`get_branch_ledger` and `get_agent_breakdown` add, after `cacheWriteInputTokens`: `uncachedInputTokens` (the observed sum, or `null` with no reported span), `cacheReportedSpans`, and `cacheHitRatio` (exact, or `null`).
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Reporting/Period.cs`, replace:
+
+```csharp
+using System.Globalization;
+
+namespace CopilotLedger.Cli.Reporting;
+
+internal sealed record Period(string Label, DateTimeOffset? From)
+{
+    public static bool TryParse(
+        string? value,
+        CliContext context,
+        out Period period)
+    {
+        string text = value?.Trim() ?? string.Empty;
+        DateTimeOffset now = context.TimeProvider.GetUtcNow();
+        TimeZoneInfo zone = context.TimeProvider.LocalTimeZone;
+        DateOnly today = DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTime(now, zone).DateTime);
+
+        if (text.Equals("today", StringComparison.OrdinalIgnoreCase))
+        {
+            period = new Period("today", Midnight(today, zone));
+            return true;
+        }
+
+        if (text.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            period = new Period("all time", null);
+            return true;
+        }
+
+        if (text.EndsWith("d", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(
+                text[..^1],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int days) &&
+            days is >= 1 and <= 3650)
+        {
+            period = new Period(
+                days == 1 ? "today" : $"last {days} days",
+                Midnight(today.AddDays(-(days - 1)), zone));
+            return true;
+        }
+
+        if (DateOnly.TryParseExact(
+                text,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out DateOnly date))
+        {
+            period = new Period($"since {text}", Midnight(date, zone));
+            return true;
+        }
+
+        period = null!;
+        return false;
+    }
+
+    private static DateTimeOffset Midnight(DateOnly date, TimeZoneInfo zone)
+    {
+        DateTime local = date.ToDateTime(TimeOnly.MinValue);
+        return new DateTimeOffset(local, zone.GetUtcOffset(local));
+    }
+}
+```
+
+with:
+
+```csharp
+using CopilotLedger.Storage;
+
+namespace CopilotLedger.Cli.Reporting;
+
+internal sealed record Period(string Label, DateTimeOffset? From)
+{
+    // LedgerPeriod.TryParse at the context's clock, which the MCP server's since argument shares.
+    public static bool TryParse(
+        string? value,
+        CliContext context,
+        out Period period)
+    {
+        if (LedgerPeriod.TryParse(value, context.TimeProvider, out LedgerPeriod? parsed))
+        {
+            period = new Period(parsed.Label, parsed.From);
+            return true;
+        }
+
+        period = null!;
+        return false;
+    }
+}
+```
+
+Edit 1 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Pass with branch." },
+            "branch": { "type": "string", "minLength": 1, "description": "Branch name, or (none). Pass with repository." },
+            "aiCredits": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000, "description": "Budget in AI credits (1 AI credit = $0.01), with at most 2 decimal places." }
+          },
+          "required": ["aiCredits"],
+          "additionalProperties": false
+        }
+        """;
+    private static readonly JsonElement BranchSchema = ParseSchema(BranchSchemaJson);
+    private static readonly JsonElement PromptSchema = ParseSchema(PromptSchemaJson);
+    private static readonly JsonElement BudgetSchema = ParseSchema(BudgetSchemaJson);
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+    private static readonly Tool[] Tools =
+    [
+        new()
+        {
+            Name = "get_branch_ledger",
+```
+
+with:
+
+```csharp
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Pass with branch." },
+            "branch": { "type": "string", "minLength": 1, "description": "Branch name, or (none). Pass with repository." },
+            "aiCredits": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000, "description": "Budget in AI credits (1 AI credit = $0.01), with at most 2 decimal places." }
+          },
+          "required": ["aiCredits"],
+          "additionalProperties": false
+        }
+        """;
+    private const string CacheSchemaJson =
+        """
+        {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Defaults to the current repository." },
+            "branch": { "type": "string", "minLength": 1, "description": "Only this branch, or (none)." },
+            "pullRequest": { "type": "integer", "minimum": 1, "description": "Only this pull request number." },
+            "since": { "type": "string", "default": "30d", "description": "Period: today, all, Nd (1 to 3650 days), or yyyy-MM-dd." },
+            "by": { "type": "string", "enum": ["model", "branch", "pr", "agent"], "default": "model", "description": "Group rows by model, branch, pull request, or agent." },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Number of rows, most input first." }
+          },
+          "additionalProperties": false
+        }
+        """;
+    private static readonly JsonElement BranchSchema = ParseSchema(BranchSchemaJson);
+    private static readonly JsonElement PromptSchema = ParseSchema(PromptSchemaJson);
+    private static readonly JsonElement BudgetSchema = ParseSchema(BudgetSchemaJson);
+    private static readonly JsonElement CacheSchema = ParseSchema(CacheSchemaJson);
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+    private static readonly Tool[] Tools =
+    [
+        new()
+        {
+            Name = "get_branch_ledger",
+```
+
+Edit 2 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+            Description = "Spend on one Git branch split by agent (gen_ai.agent.name). Uses the current repository and branch unless you pass both.",
+            InputSchema = BranchSchema.Clone(),
+            Annotations = new ToolAnnotations
+            {
+                ReadOnlyHint = true,
+                OpenWorldHint = false,
+            },
+        },
+        new()
+        {
+            Name = "set_branch_budget",
+            Title = "Set branch budget",
+            Description = "Sets a soft AI-credit budget for one Git branch. CopilotLedger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
+            InputSchema = BudgetSchema.Clone(),
+            Annotations = new ToolAnnotations
+            {
+                ReadOnlyHint = false,
+                DestructiveHint = false,
+                IdempotentHint = true,
+```
+
+with:
+
+```csharp
+            Description = "Spend on one Git branch split by agent (gen_ai.agent.name). Uses the current repository and branch unless you pass both.",
+            InputSchema = BranchSchema.Clone(),
+            Annotations = new ToolAnnotations
+            {
+                ReadOnlyHint = true,
+                OpenWorldHint = false,
+            },
+        },
+        new()
+        {
+            Name = "get_cache_efficiency",
+            Title = "Cache efficiency",
+            Description = "Prompt-cache efficiency in one repository, grouped by model, branch, pull request, or agent: the cache hit ratio, input read from and written to the cache, uncached input, and the largest prompt. Spans that reported no cache counters count as unknown, never as misses. Uses the current repository unless you pass one.",
+            InputSchema = CacheSchema.Clone(),
+            Annotations = new ToolAnnotations
+            {
+                ReadOnlyHint = true,
+                OpenWorldHint = false,
+            },
+        },
+        new()
+        {
+            Name = "set_branch_budget",
+            Title = "Set branch budget",
+            Description = "Sets a soft AI-credit budget for one Git branch. CopilotLedger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
+            InputSchema = BudgetSchema.Clone(),
+            Annotations = new ToolAnnotations
+            {
+                ReadOnlyHint = false,
+                DestructiveHint = false,
+                IdempotentHint = true,
+```
+
+Edit 3 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+    public async ValueTask<CallToolResult> CallAsync(
+        CallToolRequestParams request,
+        CancellationToken cancellationToken)
+    {
+        string name = request.Name;
+        string[] allowed = name switch
+        {
+            "get_branch_ledger" or "get_agent_breakdown" => ["repository", "branch"],
+            "get_top_expensive_prompts" =>
+                ["repository", "branch", "limit", "orderBy"],
+            "set_branch_budget" => ["repository", "branch", "aiCredits"],
+            _ => throw new McpProtocolException(
+                $"Unknown tool: {name}",
+                McpErrorCode.InvalidParams),
+        };
+        IDictionary<string, JsonElement> arguments =
+            request.Arguments ?? new Dictionary<string, JsonElement>();
+        CallToolResult? invalid = Validate(name, allowed, arguments, out ToolArguments values);
+        if (invalid is not null)
+        {
+            return invalid;
+        }
+
+        ScopeResult scope = ResolveScope(values.Repository, values.Branch);
+        if (scope.Error is not null)
+        {
+            return Error(scope.Error);
+        }
+
+        try
+        {
+            SqliteLedgerStore store = await OpenStoreAsync(cancellationToken);
+            JsonObject result = name switch
+            {
+                "get_branch_ledger" => await BranchLedgerAsync(
+                    store,
+                    scope.Repository!,
+```
+
+with:
+
+```csharp
+    public async ValueTask<CallToolResult> CallAsync(
+        CallToolRequestParams request,
+        CancellationToken cancellationToken)
+    {
+        string name = request.Name;
+        string[] allowed = name switch
+        {
+            "get_branch_ledger" or "get_agent_breakdown" => ["repository", "branch"],
+            "get_top_expensive_prompts" =>
+                ["repository", "branch", "limit", "orderBy"],
+            "get_cache_efficiency" =>
+                ["repository", "branch", "pullRequest", "since", "by", "limit"],
+            "set_branch_budget" => ["repository", "branch", "aiCredits"],
+            _ => throw new McpProtocolException(
+                $"Unknown tool: {name}",
+                McpErrorCode.InvalidParams),
+        };
+        IDictionary<string, JsonElement> arguments =
+            request.Arguments ?? new Dictionary<string, JsonElement>();
+        CallToolResult? invalid = Validate(
+            name,
+            allowed,
+            arguments,
+            _context.TimeProvider,
+            out ToolArguments values);
+        if (invalid is not null)
+        {
+            return invalid;
+        }
+
+        // get_cache_efficiency reports one repository, the current one by default, and warns about the current branch.
+        GitWorkspaceContext? current = null;
+        ScopeResult scope;
+        if (name == "get_cache_efficiency")
+        {
+            (string directory, current) = ResolveCurrent();
+            string? repository = values.Repository ?? current?.RepositorySlug ?? current?.RepositoryRoot;
+            if (repository is null)
+            {
+                return Error($"No Git repository at {directory}. Pass repository.");
+            }
+
+            scope = new ScopeResult(repository, values.Branch, null);
+        }
+        else
+        {
+            scope = ResolveScope(values.Repository, values.Branch);
+            if (scope.Error is not null)
+            {
+                return Error(scope.Error);
+            }
+        }
+
+        try
+        {
+            SqliteLedgerStore store = await OpenStoreAsync(cancellationToken);
+            JsonObject result = name switch
+            {
+                "get_branch_ledger" => await BranchLedgerAsync(
+                    store,
+                    scope.Repository!,
+```
+
+Edit 4 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+                    scope.Branch!,
+                    values.OrderBy,
+                    values.Limit,
+                    cancellationToken),
+                "get_agent_breakdown" => await AgentBreakdownAsync(
+                    store,
+                    scope.Repository!,
+                    scope.Branch!,
+                    cancellationToken),
+                "set_branch_budget" => await SetBudgetAsync(
+                    store,
+                    scope.Repository!,
+                    scope.Branch!,
+                    values.AiCredits,
+                    cancellationToken),
+                _ => throw new UnreachableException(),
+```
+
+with:
+
+```csharp
+                    scope.Branch!,
+                    values.OrderBy,
+                    values.Limit,
+                    cancellationToken),
+                "get_agent_breakdown" => await AgentBreakdownAsync(
+                    store,
+                    scope.Repository!,
+                    scope.Branch!,
+                    cancellationToken),
+                "get_cache_efficiency" => await CacheEfficiencyAsync(
+                    store,
+                    scope.Repository!,
+                    current,
+                    values,
+                    cancellationToken),
+                "set_branch_budget" => await SetBudgetAsync(
+                    store,
+                    scope.Repository!,
+                    scope.Branch!,
+                    values.AiCredits,
+                    cancellationToken),
+                _ => throw new UnreachableException(),
+```
+
+Edit 5 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+            or InvalidOperationException)
+        {
+            return Error(
+                $"The ledger at {_context.DatabasePath} is unavailable: {exception.Message}");
+        }
+    }
+
+    private static CallToolResult? Validate(
+        string name,
+        IReadOnlyCollection<string> allowed,
+        IDictionary<string, JsonElement> arguments,
+        out ToolArguments values)
+    {
+        values = ToolArguments.Empty;
+        string? unknown = arguments.Keys
+            .Where(key => !allowed.Contains(key))
+            .Order(StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (unknown is not null)
+        {
+            return Error($"Unknown argument: {unknown}.");
+```
+
+with:
+
+```csharp
+            or InvalidOperationException)
+        {
+            return Error(
+                $"The ledger at {_context.DatabasePath} is unavailable: {exception.Message}");
+        }
+    }
+
+    private static CallToolResult? Validate(
+        string name,
+        IReadOnlyCollection<string> allowed,
+        IDictionary<string, JsonElement> arguments,
+        TimeProvider timeProvider,
+        out ToolArguments values)
+    {
+        values = ToolArguments.Empty;
+        string? unknown = arguments.Keys
+            .Where(key => !allowed.Contains(key))
+            .Order(StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (unknown is not null)
+        {
+            return Error($"Unknown argument: {unknown}.");
+```
+
+Edit 6 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+        if (arguments.TryGetValue("branch", out JsonElement branchElement))
+        {
+            if (branchElement.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(branchElement.GetString()))
+            {
+                return Error("branch must be a non-empty string.");
+            }
+
+            branch = branchElement.GetString();
+        }
+
+        if ((repository is null) != (branch is null))
+        {
+            return Error("Pass repository and branch together, or neither.");
+        }
+
+        int limit = 5;
+        if (arguments.TryGetValue("limit", out JsonElement limitElement)
+            && (limitElement.ValueKind != JsonValueKind.Number
+                || !limitElement.TryGetInt32(out limit)
+                || limit is < 1 or > 20))
+        {
+            return Error("limit must be an integer from 1 to 20.");
+        }
+
+        string orderBy = "cost";
+        if (arguments.TryGetValue("orderBy", out JsonElement orderByElement))
+        {
+            if (orderByElement.ValueKind != JsonValueKind.String)
+            {
+                return Error("orderBy must be cost, outputTokens, or failedToolCalls.");
+            }
+
+            string? requested = orderByElement.GetString();
+```
+
+with:
+
+```csharp
+        if (arguments.TryGetValue("branch", out JsonElement branchElement))
+        {
+            if (branchElement.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(branchElement.GetString()))
+            {
+                return Error("branch must be a non-empty string.");
+            }
+
+            branch = branchElement.GetString();
+        }
+
+        bool cacheTool = name == "get_cache_efficiency";
+        if (!cacheTool && (repository is null) != (branch is null))
+        {
+            return Error("Pass repository and branch together, or neither.");
+        }
+
+        int maximum = cacheTool ? 50 : 20;
+        int limit = cacheTool ? 10 : 5;
+        if (arguments.TryGetValue("limit", out JsonElement limitElement)
+            && (limitElement.ValueKind != JsonValueKind.Number
+                || !limitElement.TryGetInt32(out limit)
+                || limit < 1
+                || limit > maximum))
+        {
+            return Error($"limit must be an integer from 1 to {maximum}.");
+        }
+
+        string orderBy = "cost";
+        if (arguments.TryGetValue("orderBy", out JsonElement orderByElement))
+        {
+            if (orderByElement.ValueKind != JsonValueKind.String)
+            {
+                return Error("orderBy must be cost, outputTokens, or failedToolCalls.");
+            }
+
+            string? requested = orderByElement.GetString();
+```
+
+Edit 7 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+            && (creditElement.ValueKind != JsonValueKind.Number
+                || !creditElement.TryGetDecimal(out aiCredits)
+                || aiCredits <= 0m
+                || aiCredits > 1_000_000m
+                || aiCredits % 0.01m != 0m))
+        {
+            return Error(
+                "aiCredits must be a number greater than 0 and at most 1000000, with at most 2 decimal places.");
+        }
+
+        values = new ToolArguments(repository, branch, limit, orderBy, aiCredits);
+        return null;
+    }
+
+    private ScopeResult ResolveScope(string? repository, string? branch)
+    {
+        if (repository is not null && branch is not null)
+        {
+            return new ScopeResult(repository, branch, null);
+        }
+
+        string sessionDirectory =
+            _context.GetEnvironmentVariable("COPILOT_SESSION_CWD") ?? string.Empty;
+        string directory =
+            !string.IsNullOrWhiteSpace(sessionDirectory)
+            && Path.IsPathFullyQualified(sessionDirectory)
+            && Directory.Exists(sessionDirectory)
+                ? sessionDirectory
+                : _context.WorkingDirectory;
+```
+
+with:
+
+```csharp
+            && (creditElement.ValueKind != JsonValueKind.Number
+                || !creditElement.TryGetDecimal(out aiCredits)
+                || aiCredits <= 0m
+                || aiCredits > 1_000_000m
+                || aiCredits % 0.01m != 0m))
+        {
+            return Error(
+                "aiCredits must be a number greater than 0 and at most 1000000, with at most 2 decimal places.");
+        }
+
+        int? pullRequest = null;
+        if (arguments.TryGetValue("pullRequest", out JsonElement pullRequestElement))
+        {
+            if (pullRequestElement.ValueKind != JsonValueKind.Number
+                || !pullRequestElement.TryGetInt32(out int number)
+                || number < 1)
+            {
+                return Error("pullRequest must be an integer of at least 1.");
+            }
+
+            pullRequest = number;
+        }
+
+        LedgerPeriod? period = null;
+        if (cacheTool)
+        {
+            string since = "30d";
+            if (arguments.TryGetValue("since", out JsonElement sinceElement))
+            {
+                since = sinceElement.ValueKind == JsonValueKind.String
+                    ? sinceElement.GetString()!
+                    : string.Empty;
+            }
+
+            if (!LedgerPeriod.TryParse(since, timeProvider, out period))
+            {
+                return Error("since must be today, all, <N>d (1-3650), or yyyy-MM-dd.");
+            }
+        }
+
+        string by = "model";
+        if (arguments.TryGetValue("by", out JsonElement byElement))
+        {
+            string? requested = byElement.ValueKind == JsonValueKind.String
+                ? byElement.GetString()
+                : null;
+            if (requested is not ("model" or "branch" or "pr" or "agent"))
+            {
+                return Error("by must be model, branch, pr, or agent.");
+            }
+
+            by = requested;
+        }
+
+        values = new ToolArguments(repository, branch, limit, orderBy, aiCredits, pullRequest, period, by);
+        return null;
+    }
+
+    private ScopeResult ResolveScope(string? repository, string? branch)
+    {
+        if (repository is not null && branch is not null)
+        {
+            return new ScopeResult(repository, branch, null);
+        }
+
+        (string directory, GitWorkspaceContext? git) = ResolveCurrent();
+        return git is null
+            ? new ScopeResult(
+                null,
+                null,
+                $"No Git repository at {directory}. Pass repository and branch.")
+            : new ScopeResult(
+                git.RepositorySlug ?? git.RepositoryRoot,
+                git.BranchName ?? "(none)",
+                null);
+    }
+
+    // The session's directory, COPILOT_SESSION_CWD when it's a full path to a directory or else the server's, and its Git
+    // context, null outside a repository.
+    private (string Directory, GitWorkspaceContext? Git) ResolveCurrent()
+    {
+        string sessionDirectory =
+            _context.GetEnvironmentVariable("COPILOT_SESSION_CWD") ?? string.Empty;
+        string directory =
+            !string.IsNullOrWhiteSpace(sessionDirectory)
+            && Path.IsPathFullyQualified(sessionDirectory)
+            && Directory.Exists(sessionDirectory)
+                ? sessionDirectory
+                : _context.WorkingDirectory;
+```
+
+Edit 8 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+        try
+        {
+            git = _context.GitResolver.Resolve(directory);
+        }
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or ArgumentException)
+        {
+        }
+
+        return git is null
+            ? new ScopeResult(
+                null,
+                null,
+                $"No Git repository at {directory}. Pass repository and branch.")
+            : new ScopeResult(
+                git.RepositorySlug ?? git.RepositoryRoot,
+                git.BranchName ?? "(none)",
+                null);
+    }
+
+    private async Task<SqliteLedgerStore> OpenStoreAsync(
+        CancellationToken cancellationToken)
+    {
+        await _storeGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_store is null)
+            {
+                SqliteLedgerStore store = new(
+```
+
+with:
+
+```csharp
+        try
+        {
+            git = _context.GitResolver.Resolve(directory);
+        }
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or ArgumentException)
+        {
+        }
+
+        return (directory, git);
+    }
+
+    private async Task<SqliteLedgerStore> OpenStoreAsync(
+        CancellationToken cancellationToken)
+    {
+        await _storeGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_store is null)
+            {
+                SqliteLedgerStore store = new(
+```
+
+Edit 9 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+            ["repository"] = repository,
+            ["branch"] = branch,
+            ["spans"] = total.SpanCount,
+            ["unpricedSpans"] = total.UnpricedSpanCount,
+            ["inputTokens"] = total.InputTokens,
+            ["outputTokens"] = total.OutputTokens,
+            ["cacheReadInputTokens"] = total.CacheReadInputTokens,
+            ["cacheWriteInputTokens"] = total.CacheWriteInputTokens,
+            ["aiCredits"] = Money(total.AiCredits),
+            ["aiCreditsUsd"] = Money(total.AiCreditsUsd),
+            ["foundryByokUsd"] = Money(total.FoundryByokUsd),
+            ["localSavedUsd"] = Money(total.LocalSavedUsd),
+            ["billedAiCredits"] = Money(
+                BilledAiCredits(total.AiCredits, total.FoundryByokUsd)),
+            ["topModel"] = models.FirstOrDefault()?.Model,
+            ["budget"] = warnings.Budget,
+```
+
+with:
+
+```csharp
+            ["repository"] = repository,
+            ["branch"] = branch,
+            ["spans"] = total.SpanCount,
+            ["unpricedSpans"] = total.UnpricedSpanCount,
+            ["inputTokens"] = total.InputTokens,
+            ["outputTokens"] = total.OutputTokens,
+            ["cacheReadInputTokens"] = total.CacheReadInputTokens,
+            ["cacheWriteInputTokens"] = total.CacheWriteInputTokens,
+            ["uncachedInputTokens"] = Uncached(total),
+            ["cacheReportedSpans"] = total.CacheReportedSpanCount,
+            ["cacheHitRatio"] = Ratio(total.CacheHitRatio),
+            ["aiCredits"] = Money(total.AiCredits),
+            ["aiCreditsUsd"] = Money(total.AiCreditsUsd),
+            ["foundryByokUsd"] = Money(total.FoundryByokUsd),
+            ["localSavedUsd"] = Money(total.LocalSavedUsd),
+            ["billedAiCredits"] = Money(
+                BilledAiCredits(total.AiCredits, total.FoundryByokUsd)),
+            ["topModel"] = models.FirstOrDefault()?.Model,
+            ["budget"] = warnings.Budget,
+```
+
+Edit 10 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+            cancellationToken);
+        JsonArray agents = [];
+        foreach (LedgerRollupRow row in rows)
+        {
+            agents.Add(new JsonObject
+            {
+                ["agent"] = row.Agent,
+                ["spans"] = row.SpanCount,
+                ["unpricedSpans"] = row.UnpricedSpanCount,
+                ["inputTokens"] = row.InputTokens,
+                ["outputTokens"] = row.OutputTokens,
+                ["cacheReadInputTokens"] = row.CacheReadInputTokens,
+                ["cacheWriteInputTokens"] = row.CacheWriteInputTokens,
+                ["aiCredits"] = Money(row.AiCredits),
+                ["aiCreditsUsd"] = Money(row.AiCreditsUsd),
+                ["foundryByokUsd"] = Money(row.FoundryByokUsd),
+                ["localSavedUsd"] = Money(row.LocalSavedUsd),
+                ["billedAiCredits"] = Money(
+                    BilledAiCredits(row.AiCredits, row.FoundryByokUsd)),
+            });
+        }
+
+        return new JsonObject
+        {
+            ["repository"] = repository,
+            ["branch"] = branch,
+            ["agents"] = agents,
+            ["circuitBreaker"] = warnings.CircuitBreaker,
+            ["warnings"] = new JsonArray(
+                warnings.Warnings.Select(message => JsonValue.Create(message)).ToArray()),
+        };
+    }
+
+    private async Task<JsonObject> SetBudgetAsync(
+        SqliteLedgerStore store,
+        string repository,
+        string branch,
+        decimal aiCredits,
+```
+
+with:
+
+```csharp
+            cancellationToken);
+        JsonArray agents = [];
+        foreach (LedgerRollupRow row in rows)
+        {
+            agents.Add(new JsonObject
+            {
+                ["agent"] = row.Agent,
+                ["spans"] = row.SpanCount,
+                ["unpricedSpans"] = row.UnpricedSpanCount,
+                ["inputTokens"] = row.InputTokens,
+                ["outputTokens"] = row.OutputTokens,
+                ["cacheReadInputTokens"] = row.CacheReadInputTokens,
+                ["cacheWriteInputTokens"] = row.CacheWriteInputTokens,
+                ["uncachedInputTokens"] = Uncached(row),
+                ["cacheReportedSpans"] = row.CacheReportedSpanCount,
+                ["cacheHitRatio"] = Ratio(row.CacheHitRatio),
+                ["aiCredits"] = Money(row.AiCredits),
+                ["aiCreditsUsd"] = Money(row.AiCreditsUsd),
+                ["foundryByokUsd"] = Money(row.FoundryByokUsd),
+                ["localSavedUsd"] = Money(row.LocalSavedUsd),
+                ["billedAiCredits"] = Money(
+                    BilledAiCredits(row.AiCredits, row.FoundryByokUsd)),
+            });
+        }
+
+        return new JsonObject
+        {
+            ["repository"] = repository,
+            ["branch"] = branch,
+            ["agents"] = agents,
+            ["circuitBreaker"] = warnings.CircuitBreaker,
+            ["warnings"] = new JsonArray(
+                warnings.Warnings.Select(message => JsonValue.Create(message)).ToArray()),
+        };
+    }
+
+    // current is the session's Git context, whose branch the warnings describe; without one, they come only from trips of
+    // the current Copilot session.
+    private async Task<JsonObject> CacheEfficiencyAsync(
+        SqliteLedgerStore store,
+        string repository,
+        GitWorkspaceContext? current,
+        ToolArguments values,
+        CancellationToken cancellationToken)
+    {
+        LedgerGrouping grouping = values.By switch
+        {
+            "branch" => LedgerGrouping.Branch,
+            "pr" => LedgerGrouping.PullRequest,
+            "agent" => LedgerGrouping.Agent,
+            _ => LedgerGrouping.Model,
+        };
+        IReadOnlyList<CacheEfficiencyRow> rows = await store.GetCacheEfficiencyAsync(
+            grouping,
+            new LedgerFilter
+            {
+                From = values.Period!.From,
+                Repository = repository,
+                Branch = values.Branch,
+                PullRequestNumber = values.PullRequest,
+            },
+            cancellationToken);
+        WarningResult warnings = await WarningsAsync(
+            store,
+            current is null ? null : current.RepositorySlug ?? current.RepositoryRoot,
+            current is null ? null : current.BranchName ?? "(none)",
+            cancellationToken);
+        JsonArray resultRows = [];
+        foreach (CacheEfficiencyRow row in rows.Take(values.Limit))
+        {
+            JsonObject item = grouping switch
+            {
+                LedgerGrouping.Model => new JsonObject { ["model"] = row.Model },
+                LedgerGrouping.Agent => new JsonObject { ["agent"] = row.Agent },
+                LedgerGrouping.Branch => new JsonObject
+                {
+                    ["repository"] = row.Repository,
+                    ["branch"] = row.Branch,
+                },
+                _ => new JsonObject
+                {
+                    ["repository"] = row.Repository,
+                    ["pullRequest"] = row.PullRequestNumber,
+                    ["branch"] = row.Branch,
+                },
+            };
+            item["spans"] = row.SpanCount;
+            item["cacheReportedSpans"] = row.CacheReportedSpanCount;
+            item["cacheUnreportedSpans"] = row.CacheUnreportedSpanCount;
+            item["inputTokens"] = row.InputTokens;
+            item["outputTokens"] = row.OutputTokens;
+            item["maxInputTokens"] = row.MaxInputTokens;
+            item["averageInputTokensPerTurn"] = Ratio(row.AverageInputTokensPerTurn);
+            item["reportedInputTokens"] = row.ReportedInputTokens;
+            item["reportedCacheReadInputTokens"] = row.ReportedCacheReadInputTokens;
+            item["reportedCacheWriteInputTokens"] = row.ReportedCacheWriteInputTokens;
+            item["uncachedInputTokens"] = row.UncachedInputTokens;
+            item["estimatedUncachedInputTokens"] = row.EstimatedUncachedInputTokens;
+            item["cacheHitRatio"] = Ratio(row.CacheHitRatio);
+            resultRows.Add(item);
+        }
+
+        return new JsonObject
+        {
+            ["repository"] = repository,
+            ["branch"] = values.Branch,
+            ["pullRequest"] = values.PullRequest,
+            ["period"] = values.Period.Label,
+            ["from"] = values.Period.From is DateTimeOffset from ? FormatTime(from) : null,
+            ["by"] = values.By,
+            ["limit"] = values.Limit,
+            ["rows"] = resultRows,
+            ["circuitBreaker"] = warnings.CircuitBreaker,
+            ["warnings"] = new JsonArray(
+                warnings.Warnings.Select(message => JsonValue.Create(message)).ToArray()),
+        };
+    }
+
+    private async Task<JsonObject> SetBudgetAsync(
+        SqliteLedgerStore store,
+        string repository,
+        string branch,
+        decimal aiCredits,
+```
+
+Edit 11 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+        return new JsonObject
+        {
+            ["repository"] = repository,
+            ["branch"] = branch,
+            ["budget"] = warnings.Budget,
+            ["circuitBreaker"] = warnings.CircuitBreaker,
+            ["warnings"] = new JsonArray(
+                warnings.Warnings.Select(message => JsonValue.Create(message)).ToArray()),
+        };
+    }
+
+    private async Task<WarningResult> WarningsAsync(
+        SqliteLedgerStore store,
+        string repository,
+        string branch,
+        CancellationToken cancellationToken)
+    {
+        string? sessionId = _context.GetEnvironmentVariable("COPILOT_AGENT_SESSION_ID");
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            sessionId = null;
+        }
+
+        IReadOnlyList<BreakerTrip> allTrips =
+            await store.GetOpenBreakerTripsAsync(
+                BreakerTripFilter.All,
+                cancellationToken);
+        BreakerTrip[] trips = allTrips
+            .Where(trip =>
+                (string.Equals(trip.Repository, repository, StringComparison.Ordinal)
+                    && string.Equals(trip.Branch, branch, StringComparison.Ordinal))
+                || (sessionId is not null
+                    && string.Equals(
+                        trip.ConversationId,
+                        sessionId,
+                        StringComparison.Ordinal)))
+            .ToArray();
+        IReadOnlyList<BranchBudgetRow> budgets =
+            await store.GetBranchBudgetsAsync(
+                repository,
+                branch,
+                cancellationToken);
+        BranchBudgetRow? budget = budgets.SingleOrDefault();
+        List<string> warningText = [];
+        JsonArray openTrips = [];
+        foreach (BreakerTrip trip in trips)
+        {
+            bool currentSession =
+```
+
+with:
+
+```csharp
+        return new JsonObject
+        {
+            ["repository"] = repository,
+            ["branch"] = branch,
+            ["budget"] = warnings.Budget,
+            ["circuitBreaker"] = warnings.CircuitBreaker,
+            ["warnings"] = new JsonArray(
+                warnings.Warnings.Select(message => JsonValue.Create(message)).ToArray()),
+        };
+    }
+
+    // repository and branch are the current branch; when they're null, warnings come only from the current session's trips.
+    private async Task<WarningResult> WarningsAsync(
+        SqliteLedgerStore store,
+        string? repository,
+        string? branch,
+        CancellationToken cancellationToken)
+    {
+        string? sessionId = _context.GetEnvironmentVariable("COPILOT_AGENT_SESSION_ID");
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            sessionId = null;
+        }
+
+        IReadOnlyList<BreakerTrip> allTrips =
+            await store.GetOpenBreakerTripsAsync(
+                BreakerTripFilter.All,
+                cancellationToken);
+        BreakerTrip[] trips = allTrips
+            .Where(trip =>
+                (repository is not null
+                    && string.Equals(trip.Repository, repository, StringComparison.Ordinal)
+                    && string.Equals(trip.Branch, branch, StringComparison.Ordinal))
+                || (sessionId is not null
+                    && string.Equals(
+                        trip.ConversationId,
+                        sessionId,
+                        StringComparison.Ordinal)))
+            .ToArray();
+        IReadOnlyList<BranchBudgetRow> budgets = repository is null || branch is null
+            ? []
+            : await store.GetBranchBudgetsAsync(
+                repository,
+                branch,
+                cancellationToken);
+        BranchBudgetRow? budget = budgets.SingleOrDefault();
+        List<string> warningText = [];
+        JsonArray openTrips = [];
+        foreach (BreakerTrip trip in trips)
+        {
+            bool currentSession =
+```
+
+Edit 12 of 12 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
+
+```csharp
+        return document.RootElement.Clone();
+    }
+
+    private static decimal BilledAiCredits(decimal aiCredits, decimal byokUsd) =>
+        aiCredits + byokUsd / AiCreditMath.UsdPerAiCredit;
+
+    private static JsonNode Money(decimal value) =>
+        JsonNode.Parse(
+            value.ToString("0.############", CultureInfo.InvariantCulture))!;
+
+    private static string Credits(decimal credits) =>
+        decimal.Round(credits, 2, MidpointRounding.AwayFromZero)
+            .ToString("N2", CultureInfo.InvariantCulture);
+
+    private static string FormatTime(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private sealed record ToolArguments(
+        string? Repository,
+        string? Branch,
+        int Limit,
+        string OrderBy,
+        decimal AiCredits)
+    {
+        public static ToolArguments Empty { get; } =
+            new(null, null, 5, "cost", decimal.Zero);
+    }
+
+    private sealed record ScopeResult(
+        string? Repository,
+        string? Branch,
+        string? Error);
+
+    private sealed record WarningResult(
+        JsonObject? Budget,
+        JsonObject CircuitBreaker,
+```
+
+with:
+
+```csharp
+        return document.RootElement.Clone();
+    }
+
+    private static decimal BilledAiCredits(decimal aiCredits, decimal byokUsd) =>
+        aiCredits + byokUsd / AiCreditMath.UsdPerAiCredit;
+
+    private static JsonNode Money(decimal value) =>
+        JsonNode.Parse(
+            value.ToString("0.############", CultureInfo.InvariantCulture))!;
+
+    // value with every digit decimal division gave it, or null.
+    private static JsonNode? Ratio(decimal? value) =>
+        value is null
+            ? null
+            : JsonNode.Parse(value.Value.ToString(CultureInfo.InvariantCulture));
+
+    // Observed uncached input; null when no span reported cache usage.
+    private static long? Uncached(LedgerRollupRow row) =>
+        row.CacheReportedSpanCount == 0 ? null : row.ReportedUncachedInputTokens;
+
+    private static string Credits(decimal credits) =>
+        decimal.Round(credits, 2, MidpointRounding.AwayFromZero)
+            .ToString("N2", CultureInfo.InvariantCulture);
+
+    private static string FormatTime(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private sealed record ToolArguments(
+        string? Repository,
+        string? Branch,
+        int Limit,
+        string OrderBy,
+        decimal AiCredits,
+        int? PullRequest,
+        LedgerPeriod? Period,
+        string By)
+    {
+        public static ToolArguments Empty { get; } =
+            new(null, null, 5, "cost", decimal.Zero, null, null, "model");
+    }
+
+    private sealed record ScopeResult(
+        string? Repository,
+        string? Branch,
+        string? Error);
+
+    private sealed record WarningResult(
+        JsonObject? Budget,
+        JsonObject CircuitBreaker,
+```
+
+New file `src/CopilotLedger.Storage/LedgerPeriod.cs`:
+
+```csharp
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+
+namespace CopilotLedger.Storage;
+
+// A report period and where it starts; From is null for all time.
+public sealed record LedgerPeriod(string Label, DateTimeOffset? From)
+{
+    // value is today, all, Nd (1 to 3650 days, counting today), or a yyyy-MM-dd date, without regard to case or surrounding
+    // white space. Periods start at local midnight in timeProvider's time zone. Returns false for anything else.
+    public static bool TryParse(
+        string? value,
+        TimeProvider timeProvider,
+        [NotNullWhen(true)] out LedgerPeriod? period)
+    {
+        string text = value?.Trim() ?? string.Empty;
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        TimeZoneInfo zone = timeProvider.LocalTimeZone;
+        DateOnly today = DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTime(now, zone).DateTime);
+
+        if (text.Equals("today", StringComparison.OrdinalIgnoreCase))
+        {
+            period = new LedgerPeriod("today", Midnight(today, zone));
+            return true;
+        }
+
+        if (text.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            period = new LedgerPeriod("all time", null);
+            return true;
+        }
+
+        if (text.EndsWith("d", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(
+                text[..^1],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int days) &&
+            days is >= 1 and <= 3650)
+        {
+            period = new LedgerPeriod(
+                days == 1 ? "today" : $"last {days} days",
+                Midnight(today.AddDays(-(days - 1)), zone));
+            return true;
+        }
+
+        if (DateOnly.TryParseExact(
+                text,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out DateOnly date))
+        {
+            period = new LedgerPeriod($"since {text}", Midnight(date, zone));
+            return true;
+        }
+
+        period = null;
+        return false;
+    }
+
+    private static DateTimeOffset Midnight(DateOnly date, TimeZoneInfo zone)
+    {
+        DateTime local = date.ToDateTime(TimeOnly.MinValue);
+        return new DateTimeOffset(local, zone.GetUtcOffset(local));
+    }
+}
+```
+
+Edit 1 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+    private const string T5 = "55555555555555555555555555555555";
+    private const string T6 = "66666666666666666666666666666666";
+    private const string Hash =
+        "c3d1fe831856c77818bb8c1242d32d6efa6c37366eb902e56c5fd0054c1dcbc3/918a44e755cc5eee09b08d214831e8339a645158ef1f831a0fa02bd43999700f";
+```
+
+with:
+
+```csharp
+    private const string T5 = "55555555555555555555555555555555";
+    private const string T6 = "66666666666666666666666666666666";
+    private const string T7 = "77777777777777777777777777777777";
+    private const string Hash =
+        "c3d1fe831856c77818bb8c1242d32d6efa6c37366eb902e56c5fd0054c1dcbc3/918a44e755cc5eee09b08d214831e8339a645158ef1f831a0fa02bd43999700f";
+```
+
+Edit 2 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+          "additionalProperties": false
+        }
+        """;
+    private const string Branch =
+        """
+        {
+          "repository": "swigerb/copilot-ledger",
+```
+
+with:
+
+```csharp
+          "additionalProperties": false
+        }
+        """;
+    private const string CacheSchema =
+        """
+        {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Defaults to the current repository." },
+            "branch": { "type": "string", "minLength": 1, "description": "Only this branch, or (none)." },
+            "pullRequest": { "type": "integer", "minimum": 1, "description": "Only this pull request number." },
+            "since": { "type": "string", "default": "30d", "description": "Period: today, all, Nd (1 to 3650 days), or yyyy-MM-dd." },
+            "by": { "type": "string", "enum": ["model", "branch", "pr", "agent"], "default": "model", "description": "Group rows by model, branch, pull request, or agent." },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Number of rows, most input first." }
+          },
+          "additionalProperties": false
+        }
+        """;
+    private const string Branch =
+        """
+        {
+          "repository": "swigerb/copilot-ledger",
+```
+
+Edit 3 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+          "cacheReadInputTokens": 400000,
+          "cacheWriteInputTokens": 0,
+          "aiCredits": 176.5,
+          "aiCreditsUsd": 1.765,
+```
+
+with:
+
+```csharp
+          "cacheReadInputTokens": 400000,
+          "cacheWriteInputTokens": 0,
+          "uncachedInputTokens": 600000,
+          "cacheReportedSpans": 1,
+          "cacheHitRatio": 0.4,
+          "aiCredits": 176.5,
+          "aiCreditsUsd": 1.765,
+```
+
+Edit 4 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+                "Spend on one Git branch split by agent (gen_ai.agent.name). Uses the current repository and branch unless you pass both.",
+                BranchSchema,
+                readOnly: true,
+                destructive: null,
+```
+
+with:
+
+```csharp
+                "Spend on one Git branch split by agent (gen_ai.agent.name). Uses the current repository and branch unless you pass both.",
+                BranchSchema,
+                readOnly: true,
+                destructive: null,
+                idempotent: null),
+            tool => AssertTool(
+                tool,
+                "get_cache_efficiency",
+                "Cache efficiency",
+                "Prompt-cache efficiency in one repository, grouped by model, branch, pull request, or agent: the cache hit ratio, input read from and written to the cache, uncached input, and the largest prompt. Spans that reported no cache counters count as unknown, never as misses. Uses the current repository unless you pass one.",
+                CacheSchema,
+                readOnly: true,
+                destructive: null,
+```
+
+Edit 5 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+                """{"repository":"contoso/api","branch":"main"}"""),
+            """
+            {"repository":"contoso/api","branch":"main","spans":1,"unpricedSpans":0,"inputTokens":100000,"outputTokens":10000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0.315,"localSavedUsd":0,"billedAiCredits":31.5,"topModel":"gpt-6.1-sol","budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+```
+
+with:
+
+```csharp
+                """{"repository":"contoso/api","branch":"main"}"""),
+            """
+            {"repository":"contoso/api","branch":"main","spans":1,"unpricedSpans":0,"inputTokens":100000,"outputTokens":10000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0.315,"localSavedUsd":0,"billedAiCredits":31.5,"topModel":"gpt-6.1-sol","budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+```
+
+Edit 6 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+                """{"repository":"swigerb/copilot-ledger","branch":"nope"}"""),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":"nope","spans":0,"unpricedSpans":0,"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":0,"topModel":null,"budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+    }
+
+    [Fact]
+```
+
+with:
+
+```csharp
+                """{"repository":"swigerb/copilot-ledger","branch":"nope"}"""),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":"nope","spans":0,"unpricedSpans":0,"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":0,"topModel":null,"budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+    }
+
+    [Fact]
+```
+
+Edit 7 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+            await CallAsync(harness, "get_agent_breakdown", "{}"),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":"feature/ledger","agents":[{"agent":"(none)","spans":2,"unpricedSpans":0,"inputTokens":110000,"outputTokens":250000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"aiCredits":120.5,"aiCreditsUsd":1.205,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":120.5},{"agent":"ledger-builder","spans":2,"unpricedSpans":0,"inputTokens":1400000,"outputTokens":112000,"cacheReadInputTokens":400000,"cacheWriteInputTokens":0,"aiCredits":56,"aiCreditsUsd":0.56,"foundryByokUsd":0,"localSavedUsd":0.23,"billedAiCredits":56}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+    }
+
+    [Fact]
+```
+
+with:
+
+```csharp
+            await CallAsync(harness, "get_agent_breakdown", "{}"),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":"feature/ledger","agents":[{"agent":"(none)","spans":2,"unpricedSpans":0,"inputTokens":110000,"outputTokens":250000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":120.5,"aiCreditsUsd":1.205,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":120.5},{"agent":"ledger-builder","spans":2,"unpricedSpans":0,"inputTokens":1400000,"outputTokens":112000,"cacheReadInputTokens":400000,"cacheWriteInputTokens":0,"uncachedInputTokens":600000,"cacheReportedSpans":1,"cacheHitRatio":0.4,"aiCredits":56,"aiCreditsUsd":0.56,"foundryByokUsd":0,"localSavedUsd":0.23,"billedAiCredits":56}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+    }
+
+    [Fact]
+```
+
+Edit 8 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+        { "set_branch_budget", """{"aiCredits":"5"}""", "aiCredits must be a number greater than 0 and at most 1000000, with at most 2 decimal places." },
+        { "set_branch_budget", """{"aiCredits":5,"repository":"a/b"}""", "Pass repository and branch together, or neither." },
+    };
+
+    [Theory]
+```
+
+with:
+
+```csharp
+        { "set_branch_budget", """{"aiCredits":"5"}""", "aiCredits must be a number greater than 0 and at most 1000000, with at most 2 decimal places." },
+        { "set_branch_budget", """{"aiCredits":5,"repository":"a/b"}""", "Pass repository and branch together, or neither." },
+        { "get_branch_ledger", """{"since":"all"}""", "Unknown argument: since." },
+        { "get_cache_efficiency", """{"orderBy":"cost"}""", "Unknown argument: orderBy." },
+        { "get_cache_efficiency", """{"repository":""}""", "repository must be a non-empty string." },
+        { "get_cache_efficiency", """{"branch":null}""", "branch must be a non-empty string." },
+        { "get_cache_efficiency", """{"pullRequest":0}""", "pullRequest must be an integer of at least 1." },
+        { "get_cache_efficiency", """{"pullRequest":"7"}""", "pullRequest must be an integer of at least 1." },
+        { "get_cache_efficiency", """{"pullRequest":7.5}""", "pullRequest must be an integer of at least 1." },
+        { "get_cache_efficiency", """{"since":"0d"}""", "since must be today, all, <N>d (1-3650), or yyyy-MM-dd." },
+        { "get_cache_efficiency", """{"since":30}""", "since must be today, all, <N>d (1-3650), or yyyy-MM-dd." },
+        { "get_cache_efficiency", """{"by":"Model"}""", "by must be model, branch, pr, or agent." },
+        { "get_cache_efficiency", """{"by":"channel"}""", "by must be model, branch, pr, or agent." },
+        { "get_cache_efficiency", """{"limit":0}""", "limit must be an integer from 1 to 50." },
+        { "get_cache_efficiency", """{"limit":51}""", "limit must be an integer from 1 to 50." },
+    };
+
+    [Theory]
+```
+
+Edit 9 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+                    Version = "1.0",
+                },
+            });
+        Assert.Equal(4, (await client.ListToolsAsync()).Count);
+        Implementation? serverInfo = client.ServerInfo;
+        Assert.NotNull(serverInfo);
+```
+
+with:
+
+```csharp
+                    Version = "1.0",
+                },
+            });
+        Assert.Equal(5, (await client.ListToolsAsync()).Count);
+        Implementation? serverInfo = client.ServerInfo;
+        Assert.NotNull(serverInfo);
+```
+
+Edit 10 of 10 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
+
+```csharp
+            $"The ledger at {databasePath} is unavailable: ",
+            Text(result));
+    }
+
+    private static async Task<McpTestHarness> StartAsync(
+```
+
+with:
+
+```csharp
+            $"The ledger at {databasePath} is unavailable: ",
+            Text(result));
+    }
+
+    [Fact]
+    public async Task MC13_CacheEfficiency()
+    {
+        using TempDirectory temp = new();
+        GitFixture.Create(temp.Path);
+        await SeedAsync(temp.Path);
+        await SeedPullRequestAsync(temp.Path);
+        await using McpTestHarness harness = await StartAsync(
+            Context(temp.Path, []));
+        await AssertResultAsync(
+            await CallAsync(harness, "get_cache_efficiency", "{}"),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":null,"pullRequest":null,"period":"last 30 days","from":"2026-10-23T00:00:00.0000000+00:00","by":"model","limit":10,"rows":[{"model":"claude-opus-5.5","spans":2,"cacheReportedSpans":2,"cacheUnreportedSpans":0,"inputTokens":1250000,"outputTokens":51000,"maxInputTokens":1200000,"averageInputTokensPerTurn":625000,"reportedInputTokens":1250000,"reportedCacheReadInputTokens":840000,"reportedCacheWriteInputTokens":100000,"uncachedInputTokens":310000,"estimatedUncachedInputTokens":310000,"cacheHitRatio":0.672},{"model":"mai-code-2","spans":2,"cacheReportedSpans":1,"cacheUnreportedSpans":1,"inputTokens":1010000,"outputTokens":300000,"maxInputTokens":1000000,"averageInputTokensPerTurn":505000,"reportedInputTokens":1000000,"reportedCacheReadInputTokens":400000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":600000,"estimatedUncachedInputTokens":610000,"cacheHitRatio":0.4},{"model":"qwen3.8-27b","spans":1,"cacheReportedSpans":0,"cacheUnreportedSpans":1,"inputTokens":400000,"outputTokens":12000,"maxInputTokens":400000,"averageInputTokensPerTurn":400000,"reportedInputTokens":0,"reportedCacheReadInputTokens":0,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":null,"estimatedUncachedInputTokens":400000,"cacheHitRatio":null},{"model":"claude-sonnet-5.5","spans":1,"cacheReportedSpans":0,"cacheUnreportedSpans":1,"inputTokens":100000,"outputTokens":50000,"maxInputTokens":100000,"averageInputTokensPerTurn":100000,"reportedInputTokens":0,"reportedCacheReadInputTokens":0,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":null,"estimatedUncachedInputTokens":100000,"cacheHitRatio":null}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+            await CallAsync(harness, "get_cache_efficiency", """{"by":"pr"}"""),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":null,"pullRequest":null,"period":"last 30 days","from":"2026-10-23T00:00:00.0000000+00:00","by":"pr","limit":10,"rows":[{"repository":"swigerb/copilot-ledger","pullRequest":null,"branch":"feature/ledger","spans":4,"cacheReportedSpans":1,"cacheUnreportedSpans":3,"inputTokens":1510000,"outputTokens":362000,"maxInputTokens":1000000,"averageInputTokensPerTurn":377500,"reportedInputTokens":1000000,"reportedCacheReadInputTokens":400000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":600000,"estimatedUncachedInputTokens":1110000,"cacheHitRatio":0.4},{"repository":"swigerb/copilot-ledger","pullRequest":null,"branch":"main","spans":1,"cacheReportedSpans":1,"cacheUnreportedSpans":0,"inputTokens":1200000,"outputTokens":50000,"maxInputTokens":1200000,"averageInputTokensPerTurn":1200000,"reportedInputTokens":1200000,"reportedCacheReadInputTokens":800000,"reportedCacheWriteInputTokens":100000,"uncachedInputTokens":300000,"estimatedUncachedInputTokens":300000,"cacheHitRatio":0.6666666666666666666666666667},{"repository":"swigerb/copilot-ledger","pullRequest":7,"branch":null,"spans":1,"cacheReportedSpans":1,"cacheUnreportedSpans":0,"inputTokens":50000,"outputTokens":1000,"maxInputTokens":50000,"averageInputTokensPerTurn":50000,"reportedInputTokens":50000,"reportedCacheReadInputTokens":40000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":10000,"estimatedUncachedInputTokens":10000,"cacheHitRatio":0.8}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+            await CallAsync(
+                harness,
+                "get_cache_efficiency",
+                """{"repository":"contoso/api","by":"branch","since":"all","limit":1}"""),
+            """
+            {"repository":"contoso/api","branch":null,"pullRequest":null,"period":"all time","from":null,"by":"branch","limit":1,"rows":[{"repository":"contoso/api","branch":"main","spans":1,"cacheReportedSpans":0,"cacheUnreportedSpans":1,"inputTokens":100000,"outputTokens":10000,"maxInputTokens":100000,"averageInputTokensPerTurn":100000,"reportedInputTokens":0,"reportedCacheReadInputTokens":0,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":null,"estimatedUncachedInputTokens":100000,"cacheHitRatio":null}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+            await CallAsync(
+                harness,
+                "get_cache_efficiency",
+                """{"branch":"feature/ledger","by":"agent","since":"today"}"""),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":"feature/ledger","pullRequest":null,"period":"today","from":"2026-11-21T00:00:00.0000000+00:00","by":"agent","limit":10,"rows":[{"agent":"ledger-builder","spans":2,"cacheReportedSpans":1,"cacheUnreportedSpans":1,"inputTokens":1400000,"outputTokens":112000,"maxInputTokens":1000000,"averageInputTokensPerTurn":700000,"reportedInputTokens":1000000,"reportedCacheReadInputTokens":400000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":600000,"estimatedUncachedInputTokens":1000000,"cacheHitRatio":0.4},{"agent":"(none)","spans":3,"cacheReportedSpans":1,"cacheUnreportedSpans":2,"inputTokens":160000,"outputTokens":251000,"maxInputTokens":100000,"averageInputTokensPerTurn":53333.333333333333333333333333,"reportedInputTokens":50000,"reportedCacheReadInputTokens":40000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":10000,"estimatedUncachedInputTokens":120000,"cacheHitRatio":0.8}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+        await AssertResultAsync(
+            await CallAsync(
+                harness,
+                "get_cache_efficiency",
+                """{"pullRequest":7,"since":"2026-11-21"}"""),
+            """
+            {"repository":"swigerb/copilot-ledger","branch":null,"pullRequest":7,"period":"since 2026-11-21","from":"2026-11-21T00:00:00.0000000+00:00","by":"model","limit":10,"rows":[{"model":"claude-opus-5.5","spans":1,"cacheReportedSpans":1,"cacheUnreportedSpans":0,"inputTokens":50000,"outputTokens":1000,"maxInputTokens":50000,"averageInputTokensPerTurn":50000,"reportedInputTokens":50000,"reportedCacheReadInputTokens":40000,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":10000,"estimatedUncachedInputTokens":10000,"cacheHitRatio":0.8}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            """);
+    }
+
+    [Fact]
+    public async Task MC14_CacheEfficiencyScopeAndWarnings()
+    {
+        using TempDirectory temp = new();
+        GitFixture.Create(temp.Path);
+        await SeedAsync(temp.Path);
+        SqliteLedgerStore store = Store(temp.Path);
+        await store.InitializeAsync();
+        await store.RecordBreakerTripAsync(new NewBreakerTrip
+        {
+            Rule = BreakerRule.RetryChurn,
+            TraceId = T5,
+            ConversationId = "conv-5",
+            Repository = "swigerb/copilot-ledger",
+            Branch = "feature/ledger",
+            RepositoryRoot = Path.Combine(temp.Path, "repo"),
+            TrippedAt = DateTimeOffset.Parse(
+                "2026-11-21T15:00:05Z",
+                CultureInfo.InvariantCulture),
+            Detail = "5 failed tool calls in a row",
+            FailureCount = 5,
+        });
+        await store.RecordBreakerTripAsync(new NewBreakerTrip
+        {
+            Rule = BreakerRule.RetryChurn,
+            TraceId = new string('a', 32),
+            ConversationId = "conv-other",
+            Repository = "contoso/api",
+            Branch = "main",
+            TrippedAt = DateTimeOffset.Parse(
+                "2026-11-21T09:00:00Z",
+                CultureInfo.InvariantCulture),
+            Detail = "7 failed tool calls in a row",
+            FailureCount = 7,
+        });
+        await store.SetBranchBudgetAsync(
+            "swigerb/copilot-ledger",
+            "feature/ledger",
+            150m);
+        const string Trip =
+            """{"id":1,"rule":"retry_churn","repository":"swigerb/copilot-ledger","branch":"feature/ledger","traceId":"55555555555555555555555555555555","conversationId":"conv-5","currentSession":CURRENT,"trippedAt":"2026-11-21T15:00:05.0000000+00:00","detail":"5 failed tool calls in a row","resetCommand":"gh-ledger breaker reset --id 1"}""";
+        const string TripWarning =
+            "WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1";
+        const string BudgetWarning =
+            "WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget.";
+
+        await using (McpTestHarness current = await StartAsync(
+            Context(temp.Path, [])))
+        {
+            JsonObject expected = JsonNode.Parse(
+                """
+                {"repository":"contoso/api","branch":null,"pullRequest":null,"period":"all time","from":null,"by":"model","limit":10,"rows":[{"model":"gpt-6.1-sol","spans":1,"cacheReportedSpans":0,"cacheUnreportedSpans":1,"inputTokens":100000,"outputTokens":10000,"maxInputTokens":100000,"averageInputTokensPerTurn":100000,"reportedInputTokens":0,"reportedCacheReadInputTokens":0,"reportedCacheWriteInputTokens":0,"uncachedInputTokens":null,"estimatedUncachedInputTokens":100000,"cacheHitRatio":null}]}
+                """)!.AsObject();
+            expected["circuitBreaker"] = JsonNode.Parse(
+                $$"""{"state":"open","openTrips":[{{Trip.Replace("CURRENT", "false", StringComparison.Ordinal)}}]}""");
+            expected["warnings"] = new JsonArray(TripWarning, BudgetWarning);
+            await AssertResultAsync(
+                await CallAsync(
+                    current,
+                    "get_cache_efficiency",
+                    """{"repository":"contoso/api","since":"all"}"""),
+                expected);
+        }
+
+        Dictionary<string, string> env = [];
+        LedgerMcpContext outside = Context(temp.Path, env) with
+        {
+            WorkingDirectory = temp.Path,
+        };
+        await using (McpTestHarness missing = await StartAsync(outside))
+        {
+            CallToolResult result = await CallAsync(
+                missing,
+                "get_cache_efficiency",
+                "{}");
+            Assert.True(result.IsError);
+            Assert.Equal(
+                $"No Git repository at {temp.Path}. Pass repository.",
+                Text(result));
+            Assert.Null(result.StructuredContent);
+        }
+
+        env["COPILOT_AGENT_SESSION_ID"] = "conv-5";
+        await using McpTestHarness session = await StartAsync(outside);
+        JsonObject expectedSession = JsonNode.Parse(
+            """
+            {"repository":"swigerb/copilot-ledger","branch":null,"pullRequest":null,"period":"last 30 days","from":"2026-10-23T00:00:00.0000000+00:00","by":"model","limit":1,"rows":[{"model":"claude-opus-5.5","spans":1,"cacheReportedSpans":1,"cacheUnreportedSpans":0,"inputTokens":1200000,"outputTokens":50000,"maxInputTokens":1200000,"averageInputTokensPerTurn":1200000,"reportedInputTokens":1200000,"reportedCacheReadInputTokens":800000,"reportedCacheWriteInputTokens":100000,"uncachedInputTokens":300000,"estimatedUncachedInputTokens":300000,"cacheHitRatio":0.6666666666666666666666666667}]}
+            """)!.AsObject();
+        expectedSession["circuitBreaker"] = JsonNode.Parse(
+            $$"""{"state":"open","openTrips":[{{Trip.Replace("CURRENT", "true", StringComparison.Ordinal)}}]}""");
+        expectedSession["warnings"] = new JsonArray(TripWarning);
+        await AssertResultAsync(
+            await CallAsync(
+                session,
+                "get_cache_efficiency",
+                """{"repository":"swigerb/copilot-ledger","limit":1}"""),
+            expectedSession);
+    }
+
+    private static async Task SeedPullRequestAsync(string root)
+    {
+        SqliteLedgerStore store = Store(root);
+        await store.InitializeAsync();
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            startTime: DateTimeOffset.Parse(
+                "2026-11-21T15:30:00Z",
+                CultureInfo.InvariantCulture),
+            requestModel: "claude-opus-5.5",
+            conversationId: "conv-7",
+            inputTokens: 50_000,
+            outputTokens: 1_000,
+            cacheReadInputTokens: 40_000) with
+        {
+            TraceId = T7,
+            SpanId = "7777777777777777",
+        };
+        await store.RecordAsync([
+            new LedgerEntry(
+                span,
+                JsonRateCardCalculator.LoadEmbedded().Calculate(span),
+                GitFixture.Feature(root) with { PullRequestNumber = 7 }),
+        ]);
+    }
+
+    private static async Task<McpTestHarness> StartAsync(
+```
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+```markdown
 That adds `ledger` to `~/.copilot/mcp-config.json`, which VS Code's Copilot agent harness also reads. The GitHub Copilot app runs the same agent runtime; if it doesn't list the server, add it in the app's MCP settings with the same command. For VS Code's Local agent harness, add the server to `mcp.json` under `servers`, with the binary's path as `"command"` and `["mcp"]` as `"args"`.
 
 The server has four tools. Each uses the current repository and branch unless you pass `repository` and `branch`:
@@ -2219,184 +8310,60 @@ The server has four tools. Each uses the current repository and branch unless yo
 The first three are read-only. `set_branch_budget` changes only the budget, so Copilot asks before running it; in prompt mode, allow it with `--allow-tool 'ledger(set_branch_budget)'`. While the breaker is open for the branch or the session, or the branch is over budget, every result starts with a `WARNING:` line. No tool can reset the breaker.
 
 ## Rates
-
-- `gh ledger rates init [--force]` creates a starter rates overlay, `rates.json` in the data directory.
-- `gh ledger rates validate [--file <path>]` checks the overlay, or another file, with the same rules the daemon uses.
-- `gh ledger rates update` downloads `rates.json` from the latest gh-ledger release and keeps it when it's newer than the rates in use and your overlay still applies. It uses your system proxy. Restart the daemon afterward; it reads rates when it starts.
-
-See [configuration.md](configuration.md) for pricing, the overlay format, and where files are kept.
-
-## Privacy
-
-CopilotLedger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped.
-
-## Troubleshooting
-
-- **Nothing is recorded.** Run `gh ledger status`, address its warnings, and restart Copilot.
-- **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example because the disk is full or the database is damaged, and Copilot is told to retry. The warning repeats at most once a minute; fix the cause shown after it.
-- **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
-- **`gh extension upgrade` or `remove` fails on Windows.** A program is running the extension's binary: the daemon, or the MCP server of a Copilot session. Run `gh ledger daemon stop`, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code, then try again.
-- **Apps started from the desktop record nothing.** On macOS and Linux, apps started outside a terminal may not read your shell profile, so they don't see `COPILOT_OTEL_ENABLED`. Start them from a terminal.
-- **Move the data directory.** Set `COPILOT_LEDGER_HOME` before running gh-ledger. The daemon started at sign-in uses it only if your sign-in session sets it too, for example as a Windows user environment variable.
-- **A console window flashes at sign-in.** Windows 11 24H2 and later start gh-ledger without a window; earlier versions show it for about a second.
-````
-
-### `docs/configuration.md` (copy exactly)
-
-Edit 1 of 3 in `docs/configuration.md`, replace:
-
-```markdown
-| `~/.copilot-ledger/` | Data directory (`%USERPROFILE%\.copilot-ledger\` on Windows) |
-| `~/.copilot-ledger/ledger.db` | The local SQLite ledger (WAL mode) |
-| `~/.copilot-ledger/rates.json` | Optional rates overlay, which you create |
-| `~/.copilot-ledger/rates.downloaded.json` | Newer built-in rates saved by `gh-ledger rates update` |
-| `~/.copilot-ledger/daemon.json` | Written while the daemon runs: process ID, endpoint, start time, and database path |
-| `~/.copilot-ledger/daemon.lock` | Held while the daemon runs, so only one daemon runs at a time |
-| `~/.copilot-ledger/daemon.log` | The daemon's log when it's started with `gh-ledger daemon start` |
-| `~/.copilot-ledger/install.json` | What `gh-ledger install` changed, so `gh-ledger uninstall` can undo it |
-
-Set the `COPILOT_LEDGER_HOME` environment variable to keep these files in another directory.
 ```
 
 with:
 
 ```markdown
-| `~/.copilot-ledger/` | Data directory (`%USERPROFILE%\.copilot-ledger\` on Windows) |
-| `~/.copilot-ledger/ledger.db` | The local SQLite ledger (WAL mode) |
-| `~/.copilot-ledger/rates.json` | Optional rates overlay, which you create |
-| `~/.copilot-ledger/rates.downloaded.json` | Newer built-in rates saved by `gh ledger rates update` |
-| `~/.copilot-ledger/daemon.json` | Written while the daemon runs: process ID, endpoint, start time, and database path |
-| `~/.copilot-ledger/daemon.lock` | Held while the daemon runs, so only one daemon runs at a time |
-| `~/.copilot-ledger/daemon.stop` | Written by `gh ledger daemon stop` to ask the daemon to stop; the daemon deletes it |
-| `~/.copilot-ledger/daemon.log` | The daemon's log when it's started with `gh ledger daemon start` or at sign-in |
-| `~/.copilot-ledger/alert-toast.xml` | Windows only: the latest desktop notification, which the daemon passes to PowerShell to show it |
-| `~/.copilot-ledger/install.json` | What `gh ledger install` changed, so `gh ledger uninstall` can undo it |
+That adds `ledger` to `~/.copilot/mcp-config.json`, which VS Code's Copilot agent harness also reads. The GitHub Copilot app runs the same agent runtime; if it doesn't list the server, add it in the app's MCP settings with the same command. For VS Code's Local agent harness, add the server to `mcp.json` under `servers`, with the binary's path as `"command"` and `["mcp"]` as `"args"`.
 
-Set the `COPILOT_LEDGER_HOME` environment variable to keep these files in another directory.
+The server has five tools. All but `get_cache_efficiency` use the current repository and branch unless you pass `repository` and `branch`:
+
+- `get_branch_ledger`: the branch's spend, top model, budget, circuit-breaker state, and prompt-cache hit ratio.
+- `get_top_expensive_prompts`: the branch's most expensive prompt chains, with output tokens and failed tool calls; `limit` (1 to 20, default 5) and `orderBy` (`cost`, `outputTokens`, or `failedToolCalls`).
+- `get_agent_breakdown`: the branch's spend and prompt-cache hit ratio by agent.
+- `get_cache_efficiency`: prompt-cache efficiency in the current repository, or in `repository`, like `status --cache`. `by` groups rows by `model` (the default), `branch`, `pr`, or `agent`; `branch` and `pullRequest` keep one branch or pull request; `since` takes the same periods as `--since`; and `limit` (1 to 50, default 10) keeps the rows with the most input.
+- `set_branch_budget`: sets the branch's budget in AI credits (`aiCredits`).
+
+The first four are read-only. `set_branch_budget` changes only the budget, so Copilot asks before running it; in prompt mode, allow it with `--allow-tool 'ledger(set_branch_budget)'`. While the breaker is open for the branch or the session, or the branch is over budget, every result starts with a `WARNING:` line; for `get_cache_efficiency`, the branch is the current one. No tool can reset the breaker.
+
+## Rates
 ```
 
-Edit 2 of 3 in `docs/configuration.md`, replace:
+Edit 1 of 1 in `docs/guide.md`, replace:
 
 ```markdown
-Until you add prices, BYOK requests are still counted and attributed to repository, branch, model, and agent, with status `byok_unpriced` and $0.00 cost.
-
-## Newer rates between releases: `gh-ledger rates update`
-
-Each gh-ledger release attaches the `rates.json` it was built with. `gh-ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.json`, through your system proxy, and checks it with the same rules as the built-in rates.
-
-Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
-
-CopilotLedger's base rates are `rates.downloaded.json` when that file is valid and newer than the built-in rates, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read is ignored with a warning in `gh-ledger status`, `gh-ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh-ledger status` shows `(downloaded)` after the rates version when the download is in use.
-
-The daemon reads rates when it starts, so restart it after an update. Spans already recorded keep the prices they were recorded with.
+  "cacheReadInputTokens": 1450000,
+  "cacheWriteInputTokens": 0,
+  "aiCredits": 617.75,
+  "aiCreditsUsd": 6.1775,
 ```
 
 with:
 
 ```markdown
-Until you add prices, BYOK requests are still counted and attributed to repository, branch, model, and agent, with status `byok_unpriced` and $0.00 cost.
-
-## Newer rates between releases: `gh ledger rates update`
-
-Each gh-ledger release attaches the `rates.json` it was built with. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.json`, through your system proxy, and checks it with the same rules as the built-in rates.
-
-Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
-
-CopilotLedger's base rates are `rates.downloaded.json` when that file is valid and newer than the built-in rates, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read is ignored with a warning in `gh ledger status`, `gh ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh ledger status` shows `(downloaded)` after the rates version when the download is in use.
-
-The daemon reads rates when it starts, so restart it after an update. Spans already recorded keep the prices they were recorded with.
+  "cacheReadInputTokens": 1450000,
+  "cacheWriteInputTokens": 0,
+  "uncachedInputTokens": 1250000,
+  "cacheReportedSpans": 6,
+  "cacheHitRatio": 0.537037037037037037037037037,
+  "aiCredits": 617.75,
+  "aiCreditsUsd": 6.1775,
 ```
 
-Edit 3 of 3 in `docs/configuration.md`, replace:
+### Tests
 
-```markdown
-To change pricing, create `~/.copilot-ledger/rates.json`. CopilotLedger merges it over the built-in rates when it loads them, so you only write what you want to change.
-
-Run `gh-ledger rates init` to create a starter file, and `gh-ledger rates validate` to check it against the same rules the daemon uses.
-
-- Every section is optional except `"schemaVersion": 1`.
-- A model with a new `id` is added. A model with the same `id` as a built-in one replaces it.
-```
-
-with:
-
-```markdown
-To change pricing, create `~/.copilot-ledger/rates.json`. CopilotLedger merges it over the built-in rates when it loads them, so you only write what you want to change.
-
-Run `gh ledger rates init` to create a starter file, and `gh ledger rates validate` to check it against the same rules the daemon uses. The daemon reads the file when it starts, so restart it after a change: `gh ledger daemon stop`, then `gh ledger daemon start`.
-
-- Every section is optional except `"schemaVersion": 1`.
-- A model with a new `id` is added. A model with the same `id` as a built-in one replaces it.
-```
-
-The three `rates-error-example` blocks don't change; `RateOverlayTests.DocsExamples_MatchRealMessages` reads them.
-
-### `docs/releasing.md` (copy exactly)
-
-````markdown
-# Releasing gh-ledger
-
-Releases are GitHub Releases of this repository. They make `gh extension install swigerb/gh-ledger` work, and `gh ledger rates update` downloads their `rates.json`. The CopilotLedger PR Receipt action is released from [its own repository](https://github.com/swigerb/copilot-ledger-action).
-
-## Cut a release
-
-1. Change the version everywhere it's written, and merge that change:
-   - `<Version>` in `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`;
-   - in `src/CopilotLedger.Cli/GhLedgerCli.cs`, the `AssemblyInformationalVersionAttribute` comment and the fallback after `??`;
-   - the version that the smoke test in `.github/workflows/ci.yml` compares with;
-   - the tests that expect it: `DaemonCommandTests.DM1` and `ReportCommandTests.StatusText`;
-   - the samples in `docs/guide.md` that show it: both `status` samples and the receipt. `GuideSamplesTests` fails until they match.
-2. If `src/CopilotLedger.Core/Pricing/rates.json` changed since the latest release, set its `ratesVersion` to the date of the change (`yyyy-MM-dd`), later than the latest release's. `gh ledger rates update` only takes rates with a later version, and the Release workflow fails when `rates.json` changed but its `ratesVersion` didn't move forward. In the same change, replace the old date wherever it's shown:
-   - the samples in `docs/guide.md` that show it: `status-first`, `status`, `rates-validate`, and `rates-update`. The `rates-update` sample and `GuideSamplesTests.GS4` download version `2026-12-15`; if that isn't later than the new date, change it in both;
-   - the tests that expect it: in `ReportCommandTests` (including `StatusText`), `RatesCommandTests`, `RatesUpdateTests`, `RateOverlayTests`, and `JsonRateCardCalculatorTests`, and in `TestSupport/PublishedRates.cs`. `RatesUpdateTests` downloads versions before, equal to, and after the old date; keep each in the same place relative to the new one.
-
-   `GuideSamplesTests` and the other tests fail until they match.
-3. Optional: run the Release workflow on `main` from the Actions tab. A manual run builds all six binaries, smoke-tests the three that GitHub's runners can run (`win-x64`, `linux-x64`, and `osx-arm64`), checks `ratesVersion`, and uploads the six binaries as workflow artifacts. It never creates a release, even when it's started from a tag.
-4. Tag the merged commit and push the tag:
-
-   ```shell
-   git tag v0.4.1
-   git push origin v0.4.1
-   ```
-
-When a `v*` tag is pushed, the Release workflow checks that the tag equals `v` plus the project version, builds a single-file binary for each platform, smoke-tests the same three, checks `ratesVersion` against the latest release's `rates.json`, and creates the release with these assets:
-
-| Asset | Platform |
-|---|---|
-| `gh-ledger-windows-amd64.exe` | Windows x64 |
-| `gh-ledger-windows-arm64.exe` | Windows Arm64 |
-| `gh-ledger-linux-amd64` | Linux x64 |
-| `gh-ledger-linux-arm64` | Linux Arm64 |
-| `gh-ledger-darwin-amd64` | macOS x64 |
-| `gh-ledger-darwin-arm64` | macOS Apple silicon |
-| `rates.json` | The built-in rates, for `gh ledger rates update` |
-| `gh-ledger-checksums.txt` | SHA-256 checksums of the files above |
-
-GitHub CLI picks a release asset by the `<os>-<arch>` suffix of its name, so keep these names. A tag with a hyphen, such as `v0.5.0-rc.1`, makes a prerelease, which `gh extension install` and `rates update` ignore because they use the latest release.
-
-## Update the pinned actions
-
-Every workflow pins each action to a full commit SHA, with its version in a comment, so a moved tag can't change what runs:
-
-```yaml
-- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-```
-
-Nothing updates the pins automatically. To update one, look up the action's latest release and the commit its tag points to:
-
-```shell
-gh release view --repo actions/checkout --json tagName --jq .tagName
-gh api repos/actions/checkout/commits/v7.0.1 --jq .sha
-```
-
-Read the release notes for breaking changes, then replace the SHA and the comment in every workflow that uses the action, in this repository and in swigerb/copilot-ledger-action.
-````
+- **MC1:** five tools; `get_cache_efficiency` is fourth, with its title, description, schema (`CacheSchema`), and read-only annotations. **MC11:** `gh ledger mcp` lists 5 tools.
+- **MC2, MC4, MC6** and the guide's **GS7** (`mcp` sample): `get_branch_ledger` for `feature/ledger` adds `"uncachedInputTokens": 600000, "cacheReportedSpans": 1, "cacheHitRatio": 0.4`; an unreported branch and an empty one add `null`, `0`, `null`; agent rows add the same fields; the guide's `feature/search` adds 1,250,000, 6, and `0.537037037037037037037037037`.
+- **MC8** (13 new cases): `since` on `get_branch_ledger`; on `get_cache_efficiency`, `orderBy`, an empty `repository`, a `null` `branch`, `pullRequest` 0, `"7"`, and 7.5, `since` `0d` and 30, `by` `Model` and `channel`, and `limit` 0 and 51, each with its message.
+- **MC13:** with the MCP seed plus a pull request 7 span (`SeedPullRequestAsync`): the default call (four model rows, `claude-opus-5.5` first with ratio `0.672`, `qwen3.8-27b` and `claude-sonnet-5.5` with `null` observed values); `by` `pr` (the `(no PR)` rows, then PR 7); another repository by branch since `all` with `limit` 1; one branch by agent `today`, whose `(none)` row has `averageInputTokensPerTurn` `53333.333333333333333333333333`; and `pullRequest` 7 since `2026-11-21`.
+- **MC14:** with a breaker trip on `feature/ledger`, a trip elsewhere, and an exceeded budget: inside the repository, asking about `contoso/api` still returns the current branch's trip and budget warnings, in that order; outside a repository without `repository`, the error above; outside a repository with `repository` and `COPILOT_AGENT_SESSION_ID` `conv-5`, only the session's trip (`currentSession: true`) and no budget warning.
 
 ### Acceptance criteria
 
-- The four files match this section exactly.
-- Every relative link in `README.md` and `docs/*.md` names a file that exists, and every `#anchor` names a heading in it. GitHub makes a heading's anchor by lowercasing it, dropping punctuation other than `-` and `_`, and turning spaces into `-`.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 671 tests (0 failed, 0 skipped).
+- `get_cache_efficiency` validates its arguments, returns the documented fields, is read-only, and keeps the `WARNING:` prefix; the other tools gain the three fields; unknown arguments are rejected everywhere.
+- `Period.TryParse` behaves as before (the existing `--since` tests pass unchanged).
+- `dotnet test CopilotLedger.slnx` passes **801** tests (786 + 15).
 
 ### Verify
 
@@ -2404,1560 +8371,553 @@ Read the release notes for breaking changes, then replace the SHA and the commen
 dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
-## Task 5 specification: Use the Action Repository
 
-**Prerequisite.** Task R's pull request has merged in swigerb/copilot-ledger-action. The orchestrator gives the builder the merge commit's full 40-character SHA, the commit it tags `v1.0.0`. Don't start this task without that SHA.
-
-### Files
-
-| File | Change |
-|---|---|
-| `action/action.yml`, `action/receipt.ps1`, `action/tests/receipt.Tests.ps1` | Delete |
-| `docs/action.md` | Delete |
-| `.github/workflows/ci.yml` | Remove the step that runs the action's tests |
-| `.github/workflows/receipt.yml` | Replace, copy exactly, with the SHA |
-| `src/CopilotLedger.Cli/Receipts/ReceiptMarkdown.cs` | One comment |
-| `docs/releasing.md` | One paragraph added |
-
-### `.github/workflows/ci.yml` (copy exactly)
-
-In `.github/workflows/ci.yml`, replace:
-
-```yaml
-          dotnet-version: 10.0.x
-      - run: dotnet build CopilotLedger.slnx
-      - run: dotnet test CopilotLedger.slnx
-      - name: Test the receipt action
-        shell: pwsh
-        run: pwsh -NoProfile -File action/tests/receipt.Tests.ps1
-      - name: Publish single-file gh-ledger
-        shell: bash
-        env:
-```
-
-with:
-
-```yaml
-          dotnet-version: 10.0.x
-      - run: dotnet build CopilotLedger.slnx
-      - run: dotnet test CopilotLedger.slnx
-      - name: Publish single-file gh-ledger
-        shell: bash
-        env:
-```
-
-The action's own CI runs its tests now.
-
-### `.github/workflows/receipt.yml` (copy exactly)
-
-Replace `<commit SHA>` with the SHA the orchestrator gave, and change nothing else:
-
-```yaml
-name: Receipt
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  contents: read
-  pull-requests: write
-
-concurrency:
-  group: receipt-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
-jobs:
-  receipt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: swigerb/copilot-ledger-action@<commit SHA> # v1.0.0
-```
-
-The checkout step goes: the action reads the receipt through the REST API, so only the local `./action` needed a checkout.
-
-### `ReceiptMarkdown` (copy exactly)
-
-In `src/CopilotLedger.Cli/Receipts/ReceiptMarkdown.cs`, replace:
-
-```csharp
-{
-    public const string Marker = "<!-- copilot-ledger-receipt -->";
-    public const string ReceiptsDirectory = ".github/copilot-ledger/receipts";
-    public const int MaximumBytes = 65536;   // as in action/receipt.ps1; keeps a receipt within GitHub's 65,536-character comment limit
-
-    internal static string ToJson(PullRequestReceipt receipt)
-    {
-```
-
-with:
-
-```csharp
-{
-    public const string Marker = "<!-- copilot-ledger-receipt -->";
-    public const string ReceiptsDirectory = ".github/copilot-ledger/receipts";
-    public const int MaximumBytes = 65536;   // as in receipt.ps1 in swigerb/copilot-ledger-action; keeps a receipt within GitHub's 65,536-character comment limit
-
-    internal static string ToJson(PullRequestReceipt receipt)
-    {
-```
-
-### `docs/releasing.md` (copy exactly)
-
-In `docs/releasing.md`, replace:
-
-````markdown
-```
-
-Read the release notes for breaking changes, then replace the SHA and the comment in every workflow that uses the action, in this repository and in swigerb/copilot-ledger-action.
-````
-
-with:
-
-````markdown
-```
-
-Read the release notes for breaking changes, then replace the SHA and the comment in every workflow that uses the action, in this repository and in swigerb/copilot-ledger-action.
-
-`receipt.yml` pins swigerb/copilot-ledger-action to the commit of one of its releases in the same way. After each release of the action, look up the commit its tag points to, as above, and update the pin.
-````
-
-### Acceptance criteria
-
-- `action/` and `docs/action.md` no longer exist.
-- Outside `.github/plans/`, no file mentions `action/receipt.ps1`, `action/tests`, `docs/action.md`, `uses: ./action`, or `gh-ledger/action`.
-- `receipt.yml` matches the block above with the orchestrator's SHA, and no `ci.yml` step runs `receipt.Tests.ps1`.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings, and `dotnet test CopilotLedger.slnx` passes 671 tests (0 failed, 0 skipped).
-- On the pull request, the Receipt workflow downloads `swigerb/copilot-ledger-action` at that SHA and finishes. A pull request without a receipt gets a notice, not a failure.
-
-### Verify
-
-```shell
-dotnet build CopilotLedger.slnx
-dotnet test CopilotLedger.slnx
-```
-## Task R specification: The Action Repository
-
-**Where.** This task runs in swigerb/copilot-ledger-action, on a branch from `main` (`c18a67b`), with a pull request to that repository's `main`. It changes nothing in gh-ledger. Its builder reads this plan from gh-ledger's `main`. There's no .NET in this repository, so the `dotnet` commands in the builder's instructions don't apply; the verification below replaces them.
+## Task 11 specification: Docs and the Context-Bloat Walkthrough
 
 ### Files
 
 | File | Change |
 |---|---|
-| `action.yml` | New, copy exactly |
-| `receipt.ps1` | New, copy exactly |
-| `tests/receipt.Tests.ps1` | New, copy exactly (see "Task R tests") |
-| `README.md` | Replace GitHub's stub, copy exactly |
-| `.github/workflows/ci.yml` | New, copy exactly |
-| `LICENSE` | Unchanged |
+| `docs/cli.md` | The `status` row and a `status --cache` row in "Reports", a bullet on the new JSON fields, and a new "Prompt-cache efficiency" section |
+| `docs/configuration.md` | New "Cache tokens" section under "How usage is priced" |
+| `docs/guide.md` | New "Find context bloat" section after "Compare agents", with samples `cache`, `cache-bloat`, and `cache-turns`, and its entry in the contents |
+| `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs` | The breaker-tripping prompt's four requests grow; every Month span gets an `invoke_agent` parent and span links, back-filled |
+| `tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs` | `Commands` adds the three samples, in the Month state |
 
-How they relate to gh-ledger's `action/` at `3a0a514`, for review:
+### The example world
 
-- `action.yml` has the same inputs, outputs, and step. Its `description` is new and shorter, and `author` and `branding` are added for Marketplace.
-- `receipt.ps1` is identical except line 3, which points to `README.md` instead of `docs/action.md`.
-- `tests/receipt.Tests.ps1` is identical except lines 2 and 3, which drop the `action/` prefix. Its `$ScriptPath = Join-Path $PSScriptRoot '..' 'receipt.ps1'` already finds `receipt.ps1` at the repository root.
-- `README.md` replaces gh-ledger's `docs/action.md`: how it works, usage (`uses: swigerb/copilot-ledger-action@v1`), inputs, outputs, the checks, versions, development, and releasing.
+`GuideWorld`'s trace `…00b2` (the prompt that trips the credit-velocity breaker) keeps four `claude-opus-5.5` requests of 20,000 output tokens, each costing 126.00 AI credits, but its input now grows:
 
-### `action.yml` (copy exactly)
+| Request | Input | Cache read | Uncached | Cost |
+|---|---:|---:|---:|---:|
+| c1, 16:20:00 UTC | 357,500 | 150,000 | 207,500 | 126.00 |
+| c2, 16:21:30 | 452,500 | 250,000 | 202,500 | 126.00 |
+| c3, 16:23:00 | 547,500 | 350,000 | 197,500 | 126.00 |
+| c4, 16:24:30 | 642,500 | 450,000 | 192,500 | 126.00 |
 
-```yaml
-name: CopilotLedger PR Receipt
-description: Posts the AI spend receipt from gh ledger export-pr as one pull request comment, updated on later pushes.
-author: swigerb
-branding:
-  icon: dollar-sign
-  color: green
+(`claude-opus-5.5` costs $4.00 per million uncached input tokens, $0.20 per million cache reads, and $20.00 per million output tokens. For c1, (207,500 × $4.00 + 150,000 × $0.20) / 1,000,000 = $0.86; every request's input costs the same, and its 20,000 output tokens add $0.40.) The totals stay 2,000,000 input and 1,200,000 cache reads, so every existing sample, the receipt, and the breaker trip are unchanged.
 
-inputs:
-  github-token:
-    description: Token that reads the pull request and writes the comment. Needs contents read and pull-requests write.
-    default: ${{ github.token }}
-  receipts-directory:
-    description: Repository directory where receipts are committed. Change it only if you move them.
-    default: .github/copilot-ledger/receipts
-  comment-author:
-    description: Login that owns the receipt comment. Change it only when github-token belongs to another account.
-    default: 'github-actions[bot]'
+Each Month span's parent is its agent's `invoke_agent` span: `…<trace>a0` for the default agent and `…<trace>e0` for a subagent, which is a child of `…<trace>a0`. After recording the spans, `GuideWorld` records an `invoke_agent` link for each root and subagent and a `chat` link for each span (links already recorded are kept), then calls `BackfillFromAgentSpansAsync` for every trace, as the daemon does. Agent names and conversations don't change, because every span already has them.
 
-outputs:
-  result:
-    description: created, updated, unchanged, no-receipt, or skipped.
-    value: ${{ steps.receipt.outputs.result }}
-  comment-url:
-    description: URL of the receipt comment; empty for no-receipt and skipped.
-    value: ${{ steps.receipt.outputs.comment-url }}
+### Docs
 
-runs:
-  using: composite
-  steps:
-    - id: receipt
-      shell: pwsh
-      env:
-        RECEIPT_TOKEN: ${{ inputs.github-token }}
-        RECEIPTS_DIRECTORY: ${{ inputs.receipts-directory }}
-        COMMENT_AUTHOR: ${{ inputs.comment-author }}
-        EVENT_NAME: ${{ github.event_name }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-      run: '& (Join-Path $env:GITHUB_ACTION_PATH receipt.ps1)'
-```
+The text is in the code below. In short: `docs/cli.md` explains `Input`, `Uncached`, what "reported" means and why a missing counter is 0 on a span that reports the other (D1), `n/a`, `0.0%`, and `*`, the `--by pr` source and its limits, `--turns` and `Growth`, `--bloat` and its estimate, the option rules, and every JSON field; `docs/configuration.md` says that a request without cache counts is priced as all uncached input, as before, and that cache reports treat it as unknown rather than as a miss; and the guide's walkthrough runs `status --cache`, `status --cache --bloat --limit 3`, and `status --cache --turns --trace 0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2`.
 
-### `receipt.ps1` (copy exactly)
+### Code (copy exactly)
 
-````powershell
-#Requires -Version 7.4
-# Posts the CopilotLedger receipt that a pull request commits as one comment, and updates that comment on later runs.
-# action.yml passes the inputs and pull request fields as environment variables. See README.md.
-# Strings are compared with [string]::Equals and an ordinal StringComparison, never -eq or -ceq: PowerShell compares
-# strings with culture rules, which ignore zero-width characters and a byte order mark.
-
-Set-StrictMode -Version 3.0
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-
-$Marker = '<!-- copilot-ledger-receipt -->'
-$MaximumBytes = 65536
-$PageSize = 100
-$MaximumPages = 30
-
-function ConvertTo-CommandValue([string] $Value) {
-    return $Value.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-}
-
-function Write-Notice([string] $Message) {
-    Write-Host "::notice::$(ConvertTo-CommandValue $Message)"
-}
-
-function Stop-WithError([string] $Message) {
-    Write-Host "::error::$(ConvertTo-CommandValue $Message)"
-    exit 1
-}
-
-function Set-ActionOutput([string] $Name, [string] $Value) {
-    [System.IO.File]::AppendAllText(
-        $env:GITHUB_OUTPUT,
-        "$Name=$Value`n",
-        [System.Text.UTF8Encoding]::new($false))
-}
-
-function Invoke-GitHubApi([string] $Method, [string] $Path, [string] $Body = '') {
-    $parameters = @{
-        Uri = "$($env:GITHUB_API_URL.TrimEnd('/'))/$Path"
-        Method = $Method
-        Headers = @{
-            Authorization = "Bearer $($env:RECEIPT_TOKEN)"
-            Accept = 'application/vnd.github+json'
-            'X-GitHub-Api-Version' = '2026-03-10'
-        }
-    }
-    if ($Body.Length -gt 0) {
-        $parameters.Body = [System.Text.Encoding]::UTF8.GetBytes($Body)
-        $parameters.ContentType = 'application/json'
-    }
-
-    $response = Invoke-WebRequest @parameters
-    return [System.Text.Json.JsonDocument]::Parse([string] $response.Content).RootElement.Clone()
-}
-
-function Get-StringProperty([System.Text.Json.JsonElement] $Element, [string] $Name) {
-    $value = [System.Text.Json.JsonElement]::new()
-    if ($Element.ValueKind -eq [System.Text.Json.JsonValueKind]::Object -and
-        $Element.TryGetProperty($Name, [ref] $value) -and
-        $value.ValueKind -eq [System.Text.Json.JsonValueKind]::String) {
-        return $value.GetString()
-    }
-
-    return $null
-}
-
-function Get-Pages([string] $Path) {
-    $items = [System.Collections.Generic.List[System.Text.Json.JsonElement]]::new()
-    for ($page = 1; $page -le $MaximumPages; $page++) {
-        $separator = if ($Path.Contains('?')) { '&' } else { '?' }
-        $array = Invoke-GitHubApi 'GET' "$Path${separator}per_page=$PageSize&page=$page"
-        $count = 0
-        foreach ($item in $array.EnumerateArray()) {
-            $items.Add($item)
-            $count++
-        }
-
-        if ($count -lt $PageSize) {
-            break
-        }
-    }
-
-    return , $items
-}
-
-function Read-Receipt([string] $Repository, [string] $Path, [string] $Sha) {
-    $encodedPath = ($Path.Split('/') | ForEach-Object { [System.Uri]::EscapeDataString($_) }) -join '/'
-    $item = Invoke-GitHubApi 'GET' "repos/$Repository/contents/$($encodedPath)?ref=$Sha"
-    $size = $item.GetProperty('size').GetInt64()
-    if ($size -gt $MaximumBytes) {
-        Stop-WithError "$Path is $size bytes; a receipt can be at most $MaximumBytes bytes."
-    }
-
-    $bytes = [System.Convert]::FromBase64String((Get-StringProperty $item 'content'))
-    try {
-        $text = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
-    }
-    catch [System.Text.DecoderFallbackException] {
-        Stop-WithError "$Path is not valid UTF-8."
-    }
-
-    [string[]] $lines = @($text.Split("`n") | ForEach-Object { $_.TrimEnd("`r") })
-    if (-not [string]::Equals($lines[0], $Marker, [System.StringComparison]::Ordinal)) {
-        Stop-WithError "$Path doesn't start with $Marker, so it isn't a CopilotLedger receipt."
-    }
-
-    $start = [System.Array]::IndexOf($lines, '```json')
-    $end = if ($start -lt 0) { -1 } else { [System.Array]::IndexOf($lines, '```', $start + 1) }
-    if ($start -lt 0 -or $end -le $start + 1) {
-        Stop-WithError "$Path has no JSON data block."
-    }
-
-    try {
-        $data = [System.Text.Json.JsonDocument]::Parse(($lines[($start + 1)..($end - 1)] -join "`n")).RootElement.Clone()
-    }
-    catch [System.Text.Json.JsonException] {
-        Stop-WithError "$Path has invalid JSON data: $($_.Exception.Message)"
-    }
-
-    $version = [System.Text.Json.JsonElement]::new()
-    if ($data.ValueKind -ne [System.Text.Json.JsonValueKind]::Object -or
-        -not $data.TryGetProperty('schemaVersion', [ref] $version) -or
-        $version.ValueKind -ne [System.Text.Json.JsonValueKind]::Number -or
-        -not [string]::Equals($version.GetRawText(), '1', [System.StringComparison]::Ordinal)) {
-        Stop-WithError "$Path has an unsupported schemaVersion; this action reads schemaVersion 1."
-    }
-
-    $branch = Get-StringProperty $data 'branch'
-    if ($null -eq $branch) {
-        Stop-WithError "$Path has no branch."
-    }
-
-    return [pscustomobject]@{ Path = $Path; Branch = $branch; Text = $text }
-}
-
-if (-not [string]::Equals($env:EVENT_NAME, 'pull_request', [System.StringComparison]::Ordinal)) {
-    Stop-WithError "The CopilotLedger receipt action runs on pull_request events, not $($env:EVENT_NAME)."
-}
-
-$repository = $env:GITHUB_REPOSITORY
-if (-not [string]::Equals($env:HEAD_REPOSITORY, $repository, [System.StringComparison]::OrdinalIgnoreCase)) {
-    Write-Notice 'Skipped the CopilotLedger receipt: workflows for pull requests from forks get a read-only token, so they can''t comment.'
-    Set-ActionOutput 'result' 'skipped'
-    Set-ActionOutput 'comment-url' ''
-    exit 0
-}
-
-$directory = $env:RECEIPTS_DIRECTORY.Trim('/') + '/'
-$candidates = [System.Collections.Generic.List[string]]::new()
-foreach ($file in (Get-Pages "repos/$repository/pulls/$($env:PR_NUMBER)/files")) {
-    $name = Get-StringProperty $file 'filename'
-    if ($null -ne $name -and
-        -not [string]::Equals((Get-StringProperty $file 'status'), 'removed', [System.StringComparison]::Ordinal) -and
-        $name.StartsWith($directory, [System.StringComparison]::Ordinal) -and
-        $name.EndsWith('.md', [System.StringComparison]::Ordinal)) {
-        $candidates.Add($name)
-    }
-}
-
-if ($candidates.Count -eq 0) {
-    Write-Notice "No CopilotLedger receipt changed in this pull request. Run gh ledger export-pr on the branch, then commit the file it writes under $directory."
-    Set-ActionOutput 'result' 'no-receipt'
-    Set-ActionOutput 'comment-url' ''
-    exit 0
-}
-
-$receipts = @($candidates | ForEach-Object { Read-Receipt $repository $_ $env:HEAD_SHA })
-$matching = @($receipts | Where-Object { [string]::Equals($_.Branch, $env:HEAD_REF, [System.StringComparison]::Ordinal) })
-if ($matching.Count -eq 0) {
-    $found = ($receipts | ForEach-Object { $_.Branch }) -join ', '
-    Stop-WithError "No receipt for $($env:HEAD_REF) changed in this pull request; found receipts for: $found."
-}
-
-if ($matching.Count -gt 1) {
-    $paths = ($matching | ForEach-Object { $_.Path }) -join ', '
-    Stop-WithError "More than one receipt for $($env:HEAD_REF) changed in this pull request: $paths."
-}
-
-$receipt = $matching[0]
-$existing = $null
-foreach ($comment in (Get-Pages "repos/$repository/issues/$($env:PR_NUMBER)/comments")) {
-    $user = [System.Text.Json.JsonElement]::new()
-    $login = if ($comment.TryGetProperty('user', [ref] $user)) { Get-StringProperty $user 'login' } else { $null }
-    $body = Get-StringProperty $comment 'body'
-    if ($null -ne $login -and
-        [string]::Equals($login, $env:COMMENT_AUTHOR, [System.StringComparison]::OrdinalIgnoreCase) -and
-        $null -ne $body -and
-        $body.StartsWith($Marker, [System.StringComparison]::Ordinal)) {
-        $existing = $comment
-        break
-    }
-}
-
-$payload = '{"body":' + (ConvertTo-Json -InputObject $receipt.Text -Compress) + '}'
-if ($null -eq $existing) {
-    $created = Invoke-GitHubApi 'POST' "repos/$repository/issues/$($env:PR_NUMBER)/comments" $payload
-    $result = 'created'
-    $url = Get-StringProperty $created 'html_url'
-}
-elseif ([string]::Equals(
-        (Get-StringProperty $existing 'body').Replace("`r`n", "`n"),
-        $receipt.Text.Replace("`r`n", "`n"),
-        [System.StringComparison]::Ordinal)) {
-    $result = 'unchanged'
-    $url = Get-StringProperty $existing 'html_url'
-}
-else {
-    $id = $existing.GetProperty('id').GetInt64()
-    $updated = Invoke-GitHubApi 'PATCH' "repos/$repository/issues/comments/$id" $payload
-    $result = 'updated'
-    $url = Get-StringProperty $updated 'html_url'
-}
-
-Write-Host "CopilotLedger receipt ${result}: $url"
-Set-ActionOutput 'result' $result
-Set-ActionOutput 'comment-url' $url
-exit 0
-````
-
-### `README.md` (copy exactly)
-
-````markdown
-# CopilotLedger PR Receipt
-
-Posts a branch's AI spend receipt on its pull request as one comment, and updates that comment on later pushes. The receipt comes from [gh-ledger](https://github.com/swigerb/gh-ledger), which records GitHub Copilot usage on your own machine, so the action needs no cloud service and no secrets.
-
-## How it works
-
-1. On your machine, check out the pull request's branch and run `gh ledger export-pr`. It writes the branch's receipt to `.github/copilot-ledger/receipts/<branch>-<hash>.md`.
-2. Commit that file and push.
-3. On each push, the action finds the receipt among the pull request's changed files, checks it, and posts it as one comment. Later pushes update that comment instead of adding new ones.
-
-The receipt shows GitHub AI Credits by model, Foundry BYOK spend, local-model tokens with the cloud spend they avoided, circuit-breaker trips, and the most expensive prompt, with its data as JSON. Its totals equal the branch's row in `gh ledger branch --since all --json`. Receipts stay in the repository after the pull request merges, as a record of what each branch spent.
-
-## Usage
-
-Add `.github/workflows/copilot-ledger-receipt.yml` to your repository:
-
-```yaml
-name: CopilotLedger receipt
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  contents: read
-  pull-requests: write
-
-concurrency:
-  group: copilot-ledger-receipt-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
-jobs:
-  receipt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: swigerb/copilot-ledger-action@v1
-```
-
-The workflow's `GITHUB_TOKEN` reads the receipt with `contents: read` and comments with `pull-requests: write`, and needs nothing else. The `concurrency` group keeps two runs for the same pull request from both adding a comment.
-
-## Inputs
-
-| Input | Default | Meaning |
-|---|---|---|
-| `github-token` | `${{ github.token }}` | Token that reads the pull request and writes the comment |
-| `receipts-directory` | `.github/copilot-ledger/receipts` | Where receipts are committed; change it only if you move them |
-| `comment-author` | `github-actions[bot]` | The login that owns the receipt comment; change it only when `github-token` belongs to another account |
-
-## Outputs
-
-| Output | Meaning |
-|---|---|
-| `result` | `created`, `updated`, `unchanged`, `no-receipt`, or `skipped` |
-| `comment-url` | The receipt comment's URL; empty for `no-receipt` and `skipped` |
-
-## What the action checks
-
-- It runs only for `pull_request` events. Pull requests from forks get a read-only token, so the action skips them with a notice. Other events, including `pull_request_target`, fail.
-- A receipt must be among the pull request's changed files, under `receipts-directory`, and end in `.md`. With none, the action leaves a notice and succeeds.
-- A receipt must start with `<!-- copilot-ledger-receipt -->` (with no byte order mark before it), be at most 65,536 bytes of UTF-8, and hold a JSON block with `"schemaVersion": 1` and a `branch` exactly equal to the pull request's branch. gh-ledger 0.4.0 and later write such receipts. Otherwise the action fails with an error that names the file or, when no receipt is for the pull request's branch, lists the branches of the receipts it found.
-- It updates the oldest comment by `comment-author` (compared case-insensitively, as GitHub logins are) that starts with `<!-- copilot-ledger-receipt -->`. It never edits anyone else's comment.
-
-## Versions
-
-`@v1` follows the latest v1.x release. To pin an exact release, use its full commit SHA with the version as a comment, for example `uses: swigerb/copilot-ledger-action@<commit SHA> # v1.0.0`.
-
-## Development
-
-The action is a composite action: `action.yml` runs `receipt.ps1` with PowerShell 7, which GitHub-hosted runners include. The tests replay the GitHub REST API offline:
-
-```shell
-pwsh -NoProfile -File tests/receipt.Tests.ps1
-```
-
-## Releasing
-
-1. Merge the change to `main` with CI passing.
-2. Create the release, for example `gh release create v1.0.1 --repo swigerb/copilot-ledger-action --target main --title v1.0.1 --generate-notes`.
-3. In the browser, edit the release, select **Publish this Action to the GitHub Marketplace**, choose a category, and select **Update release**. Publishing needs two-factor authentication, and the first time, accepting the GitHub Marketplace Developer Agreement.
-4. Move the major tag to the release: `git fetch --tags origin`, then `git tag -f v1 v1.0.1` and `git push -f origin v1`.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
-````
-
-### `.github/workflows/ci.yml` (copy exactly)
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  test:
-    name: test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Test the receipt action
-        shell: pwsh
-        run: pwsh -NoProfile -File tests/receipt.Tests.ps1
-```
-
-### Acceptance criteria
-
-- The five files match this section and "Task R tests" exactly, `LICENSE` is unchanged, and the repository has no other files.
-- `pwsh -NoProfile -File tests/receipt.Tests.ps1` prints `All receipt action tests passed.` and exits 0.
-- CI on the pull request passes on `ubuntu-latest` and `windows-latest`.
-
-### Verify
-
-```shell
-pwsh -NoProfile -File tests/receipt.Tests.ps1
-```
-## Test specifications
-
-Shared rules for every gh-ledger task, which extend Sprint 4's:
-
-- **Money.** Assertions use `decimal`. Read JSON money with `GetDecimal()`, never `GetDouble`.
-- **Public API only.** No `InternalsVisibleTo`. CLI behavior is tested through `GhLedgerCli.InvokeAsync` (`CliHarness`), and the MCP server through the SDK's `McpClient` over in-memory pipes.
-- **Isolation.** Each test that writes files gets its own `TempDirectory`, declared first (`using TempDirectory temp = new();`) so it's disposed last. Nothing touches the network, the real registry, `~/.copilot-ledger`, `~/.config`, gh, or shell profiles: HTTP goes through `FakeHttpHandler`, processes through `FakeCliPlatform`, and daemons through `TestServer` or `GuideWorld`'s stand-in. No test opens a socket or runs `git`.
-- **SQLite pools.** Keep every database under the test's `TempDirectory`; `TempDirectory.Dispose` calls `SqliteConnection.ClearAllPools()` before deleting it. DM7 drops a table on a database that no pooled connection reopens with an older schema, so it needs nothing more.
-- **Fresh files.** Read a file the product just wrote with `FileRetry.ReadAllTextAsync`, `ReadAllBytesAsync`, or, in synchronous helpers, `ReadAllText`. After a test writes a file for the product to read, read it back through `FileRetry` before running the product (`GitFixture` and `GuideWorld` do). Delete a file that was just written with `FileRetry.Delete`. Windows antivirus briefly locks new files (issue #30).
-- **Clocks and waits.** `DaemonCommands.StartAsync` and `StopAsync` measure their timeouts with the context's clock, so under a `ManualTimeProvider` they wait until the daemon writes `daemon.json` or releases its lock. A stand-in daemon must therefore always release its lock, even when its cleanup fails; `GuideWorld`'s does so in `finally`.
-- **Text.** `CliRun.Out` and `CliRun.Error` already have `\r\n` replaced with `\n`; never normalize them again. `GuideSamplesTests` normalizes the guide's text, which is the expected value, when it reads the file.
-- **Exact output.** When a case compares `Out` or `Error`, it compares the whole text, and every CLI run asserts its exit code.
-
-### Task 1 tests
-
-**RC8** (`OtlpReceiverTests`, copy exactly). It builds the receiver with the new callback and checks that the ingestor's exception reaches it, once, as the same object:
-
-Edit 1 of 2 in `tests/CopilotLedger.Tests/Otlp/OtlpReceiverTests.cs`, replace:
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs`, replace:
 
 ```csharp
-    [Fact]
-    public async Task RC8_IngestFailure_ReturnsRetryable503()
-    {
-        RecordingIngestor ingestor = new() { Exception = new InvalidOperationException() };
-        await using var app = Build(ingestor);
-        await app.StartAsync();
-        using HttpClient client = app.GetTestClient();
-        using HttpResponseMessage response = await client.SendAsync(
-```
-
-with:
-
-```csharp
-    [Fact]
-    public async Task RC8_IngestFailure_ReturnsRetryable503()
-    {
-        InvalidOperationException failure = new();
-        RecordingIngestor ingestor = new() { Exception = failure };
-        List<Exception> reported = [];
-        await using var app = OtlpReceiverApp.Build(
-            new OtlpReceiverOptions(),
-            ingestor,
-            builder => builder.UseTestServer(),
-            reported.Add);
-        await app.StartAsync();
-        using HttpClient client = app.GetTestClient();
-        using HttpResponseMessage response = await client.SendAsync(
-```
-
-Edit 2 of 2 in `tests/CopilotLedger.Tests/Otlp/OtlpReceiverTests.cs`, replace:
-
-```csharp
-        Assert.Equal(
-            "The ledger is unavailable; retry later.",
-            await ReadJsonErrorAsync(response));
-    }
-
-    [Fact]
-```
-
-with:
-
-```csharp
-        Assert.Equal(
-            "The ledger is unavailable; retry later.",
-            await ReadJsonErrorAsync(response));
-        Assert.Same(failure, Assert.Single(reported));
-    }
-
-    [Fact]
-```
-
-**DM1 and DM7** (`DaemonCommandTests`, copy exactly). DM1 expects version `0.4.1`. DM7 starts the in-process daemon with a manual clock at 2026-11-21T15:00:00Z and drops the `spans` table, so every ingestion fails. It posts the same Copilot trace three times, advancing the clock one minute before the third, then steps the clock back two minutes, to 14:59, and posts a fourth time. Then it stops the daemon. It asserts:
-
-- all four responses are 503, and `daemon stop` and the daemon both exit 0;
-- the log has exactly three `could not record spans` lines, in order: the first failure at 15:00, the third at 15:01 (the second, at 15:00, is suppressed), and the fourth at 14:59, written at once because the clock stepped back;
-- the log has 6 lines in all, counting the empty string after its last line break: `daemon listening`, the three warnings, and `daemon stopped`. The test doesn't assert the `daemon listening` line's position, because the daemon writes it just after `daemon.json`, so in rare runs it could follow the first warning.
-
-Edit 1 of 3 in `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs`, replace:
-
-```csharp
-using System.Text.Json;
-using CopilotLedger.Tests.TestSupport;
-
-namespace CopilotLedger.Tests.Cli;
-```
-
-with:
-
-```csharp
-using System.Globalization;
-using System.Net;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using CopilotLedger.Tests.TestSupport;
-using Microsoft.Data.Sqlite;
-
-namespace CopilotLedger.Tests.Cli;
-```
-
-Edit 2 of 3 in `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs`, replace:
-
-```csharp
-        JsonElement root = state.RootElement;
-        Assert.Equal(Environment.ProcessId, root.GetProperty("processId").GetInt32());
-        Assert.Equal("http://localhost:4318", root.GetProperty("endpoint").GetString());
-        Assert.Equal("0.4.0", root.GetProperty("version").GetString());
-        Assert.Equal(
-            Path.Combine(temp.Path, "data", "ledger.db"),
-            root.GetProperty("databasePath").GetString());
-```
-
-with:
-
-```csharp
-        JsonElement root = state.RootElement;
-        Assert.Equal(Environment.ProcessId, root.GetProperty("processId").GetInt32());
-        Assert.Equal("http://localhost:4318", root.GetProperty("endpoint").GetString());
-        Assert.Equal("0.4.1", root.GetProperty("version").GetString());
-        Assert.Equal(
-            Path.Combine(temp.Path, "data", "ledger.db"),
-            root.GetProperty("databasePath").GetString());
-```
-
-Edit 3 of 3 in `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs`, replace:
-
-```csharp
-        Assert.False(File.Exists(stopPath));
-        Assert.False(File.Exists(statePath));
-    }
-}
-```
-
-with:
-
-```csharp
-        Assert.False(File.Exists(stopPath));
-        Assert.False(File.Exists(statePath));
-    }
-
-    [Fact]
-    public async Task DM7_IngestFailuresAreLoggedAtMostOnceAMinute()
-    {
-        using var temp = new TempDirectory();
-        ManualTimeProvider clock = new(
-            DateTimeOffset.Parse("2026-11-21T15:00:00Z", CultureInfo.InvariantCulture));
-        await using var harness = new CliHarness(temp.Path, timeProvider: clock);
-        await harness.StartInProcessDaemonAsync();
-
-        // Without the spans table, every request fails in RecordAsync, as it would with a broken or full ledger.
-        await using (SqliteConnection connection = new(
-            $"Data Source={Path.Combine(temp.Path, "data", "ledger.db")}"))
-        {
-            await connection.OpenAsync();
-            await using SqliteCommand drop = connection.CreateCommand();
-            drop.CommandText = "DROP TABLE spans;";
-            await drop.ExecuteNonQueryAsync();
-        }
-
-        using HttpClient client = harness.CreateDaemonClient();
-        HttpStatusCode first = await PostTraceAsync(client);
-        HttpStatusCode second = await PostTraceAsync(client);
-        clock.Advance(TimeSpan.FromMinutes(1));
-        HttpStatusCode third = await PostTraceAsync(client);
-
-        // After the clock steps back, the next failure is logged at once.
-        clock.Advance(TimeSpan.FromMinutes(-2));
-        HttpStatusCode fourth = await PostTraceAsync(client);
-        CliRun stop = await harness.RunAsync("daemon", "stop");
-        CliRun daemon = await harness.InProcessDaemon!;
-
-        Assert.Equal(
-            [
-                HttpStatusCode.ServiceUnavailable,
-                HttpStatusCode.ServiceUnavailable,
-                HttpStatusCode.ServiceUnavailable,
-                HttpStatusCode.ServiceUnavailable,
-            ],
-            [first, second, third, fourth]);
-        Assert.Equal(0, stop.ExitCode);
-        Assert.Equal(0, daemon.ExitCode);
-        Assert.Equal(
-            [
-                "2026-11-21T15:00:00.0000000+00:00 Warning: could not record spans: SqliteException: SQLite Error 1: 'no such table: spans'.",
-                "2026-11-21T15:01:00.0000000+00:00 Warning: could not record spans: SqliteException: SQLite Error 1: 'no such table: spans'.",
-                "2026-11-21T14:59:00.0000000+00:00 Warning: could not record spans: SqliteException: SQLite Error 1: 'no such table: spans'.",
-            ],
-            harness.DaemonOutput.Split('\n').Where(
-                line => line.Contains(" Warning: could not record spans: ", StringComparison.Ordinal)));
-
-        // The other lines are "daemon listening", "daemon stopped", and the empty string after the last line break.
-        Assert.Equal(6, harness.DaemonOutput.Split('\n').Length);
-    }
-
-    private static async Task<HttpStatusCode> PostTraceAsync(HttpClient client)
-    {
-        using ByteArrayContent content = new(Encoding.UTF8.GetBytes(OtlpFixtures.CopilotChatTraceJson));
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        using HttpResponseMessage response = await client.PostAsync("/v1/traces", content);
-        return response.StatusCode;
-    }
-}
-```
-
-**BM12** (`CircuitBreakerMonitorTests`, copy exactly). It records trace H's spans without a monitor, so no trip is recorded yet. Then it runs a `CircuitBreakerMonitor` whose sink cancels the evaluation's token when the trip is published, the moment a client disconnect would hurt most. It asserts:
-
-- `EvaluateAsync` throws an `OperationCanceledException`, from the budget check that runs after the trip;
-- the trip is recorded as in BM1 (`AssertTripH`), the one alert is a trip, and nothing was warned;
-- the flag file exists and equals `CircuitFlagFile.Render` of the open trips, and `.copilot-ledger` holds no `*.tmp` file.
-
-With the token passed to `SyncAsync` instead of `CancellationToken.None`, BM12 fails: the sync throws before it writes the flag file. Add it after BM11, and add `CancelingAlertSink` after `Harness`:
-
-Edit 1 of 2 in `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs`, replace:
-
-```csharp
-        Assert.Equal(NOW, exceeded.AlertedAt);
-    }
-
-    private static void AssertTripH(BreakerTrip trip, string repo)
-    {
-        Assert.Equal(1, trip.Id);
-```
-
-with:
-
-```csharp
-        Assert.Equal(NOW, exceeded.AlertedAt);
-    }
-
-    [Fact]
-    public async Task BM12_CancellationAfterATripStillWritesTheFlagFile()
-    {
-        using TempDirectory temp = new();
-        Harness harness = await Harness.CreateAsync(
-            temp,
-            BreakerSettings.Default with { FlagFile = true },
-            monitor: false);
-        for (int request = 1; request <= 6; request++)
-        {
-            await harness.Ingestor.IngestAsync(TraceHRequest(request));
-        }
-
-        // The sink cancels the token as the trip is published, as a client that disconnects right then would.
-        using CancellationTokenSource aborted = new();
-        CancelingAlertSink sink = new(aborted);
-        CircuitBreakerMonitor breaker = new(harness.Store, sink);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => breaker.EvaluateAsync([TraceH], aborted.Token));
-
-        IReadOnlyList<BreakerTrip> trips =
-            await harness.Store.GetOpenBreakerTripsAsync(BreakerTripFilter.All);
-        AssertTripH(Assert.Single(trips), harness.Repo);
-        Assert.Equal(BreakerAlertKind.Trip, Assert.Single(sink.Alerts).Kind);
-        Assert.Empty(sink.Warnings);
-        string directory = Path.Combine(harness.Repo, ".copilot-ledger");
-        Assert.Equal(
-            CircuitFlagFile.Render(harness.Repo, trips),
-            await FileRetry.ReadAllTextAsync(Path.Combine(directory, "CIRCUIT_OPEN")));
-        Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
-    }
-
-    private static void AssertTripH(BreakerTrip trip, string repo)
-    {
-        Assert.Equal(1, trip.Id);
-```
-
-Edit 2 of 2 in `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs`, replace:
-
-```csharp
-            return new Harness(databasePath, store, ingestor, sink, repo);
-        }
-    }
-}
-```
-
-with:
-
-```csharp
-            return new Harness(databasePath, store, ingestor, sink, repo);
-        }
-    }
-
-    // Records alerts and warnings, and cancels source when an alert is published.
-    private sealed class CancelingAlertSink(CancellationTokenSource source) : IBreakerAlertSink
-    {
-        public List<BreakerAlert> Alerts { get; } = [];
-        public List<string> Warnings { get; } = [];
-
-        public void Publish(BreakerAlert alert)
-        {
-            Alerts.Add(alert);
-            source.Cancel();
-        }
-
-        public void Warn(string message) => Warnings.Add(message);
-    }
-}
-```
-
-**`ReportCommandTests.StatusText`** (copy exactly):
-
-In `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs`, replace:
-
-```csharp
-    private static string StatusText(string root) =>
-        Normalize($"""
-        gh-ledger 0.4.0
-        Daemon:  not running; start it with: gh-ledger daemon start
-        Ledger:  {Path.Combine(root, "data", "ledger.db")}
-        Rates:   2026-11-20
-```
-
-with:
-
-```csharp
-    private static string StatusText(string root) =>
-        Normalize($"""
-        gh-ledger 0.4.1
-        Daemon:  not running; start it with: gh-ledger daemon start
-        Ledger:  {Path.Combine(root, "data", "ledger.db")}
-        Rates:   2026-11-20
-```
-
-**Fresh-file reads (A2).** On each line below (line numbers at `3a0a514`), the text after the line's indentation is exactly the "Replace" cell; change it to the "With" cell and keep the indentation. Nothing else in these files changes except BM12's additions, which come after these lines, and every enclosing test is already `async`.
-
-| File | Line | Replace | With |
-|---|---|---|---|
-| `AlertDaemonTests.cs` | 74 | `File.ReadAllText(` | `await FileRetry.ReadAllTextAsync(` |
-| `BreakerCommandTests.cs` | 266 | `Assert.Equal(expected, File.ReadAllText(flag));` | `Assert.Equal(expected, await FileRetry.ReadAllTextAsync(flag));` |
-| `BreakerCommandTests.cs` | 273 | `Assert.Equal(expected, File.ReadAllText(flag));` | `Assert.Equal(expected, await FileRetry.ReadAllTextAsync(flag));` |
-| `InstallCommandTests.cs` | 51 | `await File.ReadAllTextAsync(ManifestPath(temp.Path)));` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));` |
-| `InstallCommandTests.cs` | 110 | `await File.ReadAllTextAsync(ManifestPath(temp.Path)));` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));` |
-| `InstallCommandTests.cs` | 149 | `await File.ReadAllTextAsync(ManifestPath(temp.Path)));` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));` |
-| `InstallCommandTests.cs` | 171 | `await File.ReadAllTextAsync(ManifestPath(temp.Path))))` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path))))` |
-| `InstallCommandTests.cs` | 201 | `string afterFirst = await File.ReadAllTextAsync(profile);` | `string afterFirst = await FileRetry.ReadAllTextAsync(profile);` |
-| `InstallCommandTests.cs` | 208 | `Assert.Equal(afterFirst, await File.ReadAllTextAsync(profile));` | `Assert.Equal(afterFirst, await FileRetry.ReadAllTextAsync(profile));` |
-| `InstallCommandTests.cs` | 219 | `await File.ReadAllTextAsync(ManifestPath(temp.Path)));` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));` |
-| `InstallCommandTests.cs` | 252 | `(await File.ReadAllTextAsync(` | `(await FileRetry.ReadAllTextAsync(` |
-| `InstallCommandTests.cs` | 287 | `await File.ReadAllTextAsync(ManifestPath(temp.Path)))` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)))` |
-| `InstallCommandTests.cs` | 415 | `(await File.ReadAllTextAsync(` | `(await FileRetry.ReadAllTextAsync(` |
-| `InstallCommandTests.cs` | 464 | `await File.ReadAllTextAsync(autostart));` | `await FileRetry.ReadAllTextAsync(autostart));` |
-| `InstallCommandTests.cs` | 466 | `await File.ReadAllTextAsync(ManifestPath(temp.Path))))` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path))))` |
-| `InstallCommandTests.cs` | 557 | `await File.ReadAllTextAsync(agent));` | `await FileRetry.ReadAllTextAsync(agent));` |
-| `InstallCommandTests.cs` | 559 | `await File.ReadAllTextAsync(ManifestPath(temp.Path))))` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path))))` |
-| `InstallCommandTests.cs` | 622 | `await File.ReadAllTextAsync(ManifestPath(temp.Path)));` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));` |
-| `InstallCommandTests.cs` | 727 | `await File.ReadAllTextAsync(ManifestPath(temp.Path)));` | `await FileRetry.ReadAllTextAsync(ManifestPath(temp.Path)));` |
-| `RatesCommandTests.cs` | 36 | `File.ReadAllBytes(path));` | `await FileRetry.ReadAllBytesAsync(path));` |
-| `RatesCommandTests.cs` | 37 | `string original = await File.ReadAllTextAsync(path);` | `string original = await FileRetry.ReadAllTextAsync(path);` |
-| `RatesCommandTests.cs` | 44 | `Assert.Equal(original, await File.ReadAllTextAsync(path));` | `Assert.Equal(original, await FileRetry.ReadAllTextAsync(path));` |
-| `RatesCommandTests.cs` | 47 | `Assert.Equal(original, await File.ReadAllTextAsync(path));` | `Assert.Equal(original, await FileRetry.ReadAllTextAsync(path));` |
-| `CircuitBreakerMonitorTests.cs` | 243 | `File.ReadAllText(flag));` | `await FileRetry.ReadAllTextAsync(flag));` |
-| `CircuitBreakerMonitorTests.cs` | 246 | `File.ReadAllText(` | `await FileRetry.ReadAllTextAsync(` |
-
-A5 and A10 get no new tests. The build shows that nothing used the removed members. A10 changes only test support, and the suite passing with the throwing getter shows that no test relied on the default. The wider cleanup in `SyncAsync` has no test: nothing public can make the write or move throw anything but `IOException` or `UnauthorizedAccessException` at a known moment.
-
-### Task 2 tests
-
-No .NET tests. CI's new smoke lines are the test, on `ubuntu-latest` and `windows-latest`, and the orchestrator's manual Release run tests the `rates` job.
-
-### Task 3 tests
-
-`tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs` (copy exactly). Each case builds a fresh `GuideWorld` in its own `TempDirectory`, with the guide's `rates-overlay` sample as the overlay.
-
-- **GS1** compares the set of sample IDs in the guide with the IDs the tests check: the 14 command samples plus `daemon-start`, `rates-update`, `budget-alert`, `receipt`, `mcp`, and `rates-overlay`.
-- **GS2** (14 cases) runs each command sample in its state, asserts exit code 0 and an empty `Error`, and compares `Out`, with the data directory shown as `C:\Users\you\.copilot-ledger`, to the sample's text plus `\n`.
-- **GS3** stops the stand-in daemon, asserts exit code 0, then runs `gh ledger daemon start` and compares it as GS2 does.
-- **GS4** runs `rates update` with a `FakeHttpHandler` that serves the built-in rates with `ratesVersion` `2026-12-15`, after asserting that the sample's command is `gh ledger rates update`, and compares as GS2 does.
-- **GS5** stops the stand-in, starts the real daemon in-process, posts the trace from `ChatTrace` (which must get 200), stops the daemon, and asserts both exit codes. The log must have exactly four elements after splitting on `\n`. The first two, in either order, are the `daemon listening` line (checked with `StartsWith` up to `(pid `, because the process ID varies) and the sample's `ALERT` line exactly: `StartInProcessDaemonAsync` waits only for `daemon.json`, which the daemon writes just before it logs `listening`, so the alert can come first. Then come `daemon stopped`, because shutdown drains the alert queue before logging it, and the empty string.
-- **GS6** compares `gh ledger export-pr --stdout` with the quoted receipt, unquoted, plus `\n`.
-- **GS7** runs `gh ledger mcp` over pipes, calls `get_branch_ledger` with no arguments, checks that the server exits 0 and wrote nothing to `Out` or `Error`, and compares the tool's text, with its last line (the JSON) indented, to the sample.
-
-````csharp
-using System.Globalization;
-using System.IO.Pipelines;
-using System.Net;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using CopilotLedger.Cli;
-using CopilotLedger.Tests.TestSupport;
-using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
-
-namespace CopilotLedger.Tests.Docs;
-
-// Checks that each sample in docs/guide.md is exactly what gh-ledger prints in the GuideWorld example.
-public sealed partial class GuideSamplesTests
-{
-    // The samples that show a command's output, and the state each command runs in.
-    private static readonly Dictionary<string, GuideState> Commands = new(StringComparer.Ordinal)
-    {
-        ["install"] = GuideState.Fresh,
-        ["status-first"] = GuideState.FirstPrompt,
-        ["status"] = GuideState.Month,
-        ["branch"] = GuideState.Month,
         ["top-prompts"] = GuideState.Month,
         ["agents"] = GuideState.Month,
         ["budget-set"] = GuideState.Month,
         ["budget-list"] = GuideState.Month,
-        ["breaker-status"] = GuideState.Month,
-        ["breaker-reset"] = GuideState.Month,
-        ["export-pr"] = GuideState.Month,
-        ["rates-validate"] = GuideState.Month,
-        ["daemon-stop"] = GuideState.Month,
-        ["uninstall"] = GuideState.Month,
-    };
+```
 
-    // The samples that GS3 to GS7 check, and the overlay that the Month state uses.
-    private static readonly string[] OtherSamples =
-        ["daemon-start", "rates-update", "budget-alert", "receipt", "mcp", "rates-overlay"];
+with:
 
-    private static readonly Lazy<IReadOnlyDictionary<string, GuideSample>> Samples = new(ReadSamples);
+```csharp
+        ["top-prompts"] = GuideState.Month,
+        ["agents"] = GuideState.Month,
+        ["cache"] = GuideState.Month,
+        ["cache-bloat"] = GuideState.Month,
+        ["cache-turns"] = GuideState.Month,
+        ["budget-set"] = GuideState.Month,
+        ["budget-list"] = GuideState.Month,
+```
 
-    public static TheoryData<string> CommandIds => new(Commands.Keys);
+Edit 1 of 5 in `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`, replace:
 
-    private static string Overlay => Samples.Value["rates-overlay"].Text + "\n";
+```csharp
+            (Chat("a1", "c1", "2026-11-21T14:05:00Z", "claude-opus-5.5", null, null, 400_000, 15_000, 250_000), "feature/search"),
+            (Chat("a1", "c2", "2026-11-21T14:07:00Z", "mai-code-2", null, "explore", 300_000, 15_000), "feature/search"),
+            (Chat("b2", "c1", "2026-11-21T16:20:00Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
+            (Chat("b2", "c2", "2026-11-21T16:21:30Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
+            (Chat("b2", "c3", "2026-11-21T16:23:00Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
+            (Chat("b2", "c4", "2026-11-21T16:24:30Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
+            (Chat("c3", "c1", "2026-11-21T19:10:00Z", "gpt-6.1-sol", "contoso.openai.azure.com", null, 200_000, 10_000), "feature/search"),
+            (Chat("d4", "c1", "2026-11-21T20:40:00Z", "qwen3.8-27b", "127.0.0.1", null, 300_000, 9_000), "feature/search"),
+```
 
-    [Fact]
-    public void GS1_TheGuideHasExactlyTheCheckedSamples()
-    {
-        Assert.Equal(
-            Commands.Keys.Concat(OtherSamples).Order(StringComparer.Ordinal),
-            Samples.Value.Keys.Order(StringComparer.Ordinal));
-    }
+with:
 
-    [Theory]
-    [MemberData(nameof(CommandIds))]
-    public async Task GS2_CommandSamplesShowTheirOutput(string id)
-    {
-        GuideSample sample = Samples.Value[id];
-        using TempDirectory temp = new();
-        await using GuideWorld world = await GuideWorld.CreateAsync(temp.Path, Commands[id], Overlay);
-        CliRun run = await world.RunAsync(sample.Command!);
-        Assert.Equal(0, run.ExitCode);
-        Assert.Equal(string.Empty, run.Error);
-        Assert.Equal(sample.Text + "\n", world.Display(run.Out));
-    }
+```csharp
+            (Chat("a1", "c1", "2026-11-21T14:05:00Z", "claude-opus-5.5", null, null, 400_000, 15_000, 250_000), "feature/search"),
+            (Chat("a1", "c2", "2026-11-21T14:07:00Z", "mai-code-2", null, "explore", 300_000, 15_000), "feature/search"),
+            (Chat("b2", "c1", "2026-11-21T16:20:00Z", "claude-opus-5.5", null, null, 357_500, 20_000, 150_000), "feature/search"),
+            (Chat("b2", "c2", "2026-11-21T16:21:30Z", "claude-opus-5.5", null, null, 452_500, 20_000, 250_000), "feature/search"),
+            (Chat("b2", "c3", "2026-11-21T16:23:00Z", "claude-opus-5.5", null, null, 547_500, 20_000, 350_000), "feature/search"),
+            (Chat("b2", "c4", "2026-11-21T16:24:30Z", "claude-opus-5.5", null, null, 642_500, 20_000, 450_000), "feature/search"),
+            (Chat("c3", "c1", "2026-11-21T19:10:00Z", "gpt-6.1-sol", "contoso.openai.azure.com", null, 200_000, 10_000), "feature/search"),
+            (Chat("d4", "c1", "2026-11-21T20:40:00Z", "qwen3.8-27b", "127.0.0.1", null, 300_000, 9_000), "feature/search"),
+```
 
-    [Fact]
-    public async Task GS3_DaemonStartSampleRestartsTheDaemon()
-    {
-        GuideSample sample = Samples.Value["daemon-start"];
-        using TempDirectory temp = new();
-        await using GuideWorld world = await GuideWorld.CreateAsync(temp.Path, GuideState.Month, Overlay);
-        Assert.Equal(0, (await world.RunAsync("gh ledger daemon stop")).ExitCode);
-        CliRun run = await world.RunAsync(sample.Command!);
-        Assert.Equal(0, run.ExitCode);
-        Assert.Equal(string.Empty, run.Error);
-        Assert.Equal(sample.Text + "\n", world.Display(run.Out));
-    }
+Edit 2 of 5 in `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`, replace:
 
-    [Fact]
-    public async Task GS4_RatesUpdateSampleDownloadsNewerRates()
-    {
-        GuideSample sample = Samples.Value["rates-update"];
-        Assert.Equal("gh ledger rates update", sample.Command);
-        using TempDirectory temp = new();
-        await using GuideWorld world = await GuideWorld.CreateAsync(temp.Path, GuideState.Month, Overlay);
-        FakeHttpHandler handler = new(
-            _ => FakeHttpHandler.Bytes(PublishedRates.Utf8(PublishedRates.WithVersion("2026-12-15"))));
-        CliRun run = await world.Harness.RunWithHttpAsync(handler, "rates", "update");
-        Assert.Equal(0, run.ExitCode);
-        Assert.Equal(string.Empty, run.Error);
-        Assert.Equal(sample.Text + "\n", world.Display(run.Out));
-    }
+```csharp
+        await store.RecordAsync(
+            spans.Select(item => new LedgerEntry(item.Span, rates.Calculate(item.Span), Context(item.Branch))).ToArray());
+        await new CircuitBreakerMonitor(store, new RecordingAlertSink()).EvaluateAsync(
+            spans.Select(item => item.Span.TraceId));
+```
 
-    [Fact]
-    public async Task GS5_BudgetAlertSampleIsTheDaemonsAlertLine()
-    {
-        GuideSample sample = Samples.Value["budget-alert"];
-        using TempDirectory temp = new();
-        await using GuideWorld world = await GuideWorld.CreateAsync(temp.Path, GuideState.Month, Overlay);
-        Assert.Equal(0, (await world.RunAsync("gh ledger daemon stop")).ExitCode);
-        await world.Harness.StartInProcessDaemonAsync();
-        using HttpClient client = world.Harness.CreateDaemonClient();
-        using ByteArrayContent content = new(Encoding.UTF8.GetBytes(ChatTrace(world.Repository)));
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        using HttpResponseMessage response = await client.PostAsync("/v1/traces", content);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(0, (await world.Harness.RunAsync("daemon", "stop")).ExitCode);
-        Assert.Equal(0, (await world.Harness.InProcessDaemon!).ExitCode);
-        string[] lines = world.Harness.DaemonOutput.Split('\n');
-        Assert.Equal(4, lines.Length);
+with:
 
-        // The daemon logs "listening" just after it writes daemon.json, so the alert can come before it.
-        Assert.Single(
-            lines[..2],
-            line => line.StartsWith(
-                $"2026-11-21T21:30:00.0000000+00:00 gh-ledger {GhLedgerCli.Version} daemon listening on http://localhost:4318 (pid ",
-                StringComparison.Ordinal));
-        Assert.Single(lines[..2], line => line == sample.Text);
-        Assert.Equal("2026-11-21T21:30:00.0000000+00:00 gh-ledger daemon stopped", lines[2]);
-        Assert.Equal(string.Empty, lines[3]);
-    }
+```csharp
+        await store.RecordAsync(
+            spans.Select(item => new LedgerEntry(item.Span, rates.Calculate(item.Span), Context(item.Branch))).ToArray());
 
-    [Fact]
-    public async Task GS6_ReceiptSampleIsTheBranchReceipt()
-    {
-        GuideSample sample = Samples.Value["receipt"];
-        using TempDirectory temp = new();
-        await using GuideWorld world = await GuideWorld.CreateAsync(temp.Path, GuideState.Month, Overlay);
-        CliRun run = await world.RunAsync("gh ledger export-pr --stdout");
-        Assert.Equal(0, run.ExitCode);
-        Assert.Equal(string.Empty, run.Error);
-        Assert.Equal(sample.Text + "\n", run.Out);
-    }
-
-    [Fact]
-    public async Task GS7_McpSampleIsTheBranchLedgerTool()
-    {
-        GuideSample sample = Samples.Value["mcp"];
-        using TempDirectory temp = new();
-        await using GuideWorld world = await GuideWorld.CreateAsync(temp.Path, GuideState.Month, Overlay);
-        Pipe toServer = new();
-        Pipe toClient = new();
-        StringWriter output = new(CultureInfo.InvariantCulture);
-        StringWriter error = new(CultureInfo.InvariantCulture);
-        Task<int> command = GhLedgerCli.InvokeAsync(
-            ["mcp"],
-            world.Harness.Context with
-            {
-                StandardInput = toServer.Reader.AsStream(),
-                StandardOutput = toClient.Writer.AsStream(),
-                WorkingDirectory = world.Repository,
-                Out = output,
-                Error = error,
-            });
-        await using McpClient client = await McpClient.CreateAsync(
-            new StreamClientTransport(
-                toServer.Writer.AsStream(),
-                toClient.Reader.AsStream()),
-            new McpClientOptions
-            {
-                ClientInfo = new Implementation
-                {
-                    Name = "guide-tests",
-                    Version = "1.0",
-                },
-            });
-        CallToolResult result = await client.CallToolAsync(
-            "get_branch_ledger",
-            new Dictionary<string, object?>());
-        string text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
-        await client.DisposeAsync();
-        await toServer.Writer.CompleteAsync();
-        Assert.Equal(0, await command.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.Empty(output.ToString());
-        Assert.Empty(error.ToString());
-        await toClient.Reader.CompleteAsync();
-        int json = text.LastIndexOf('\n') + 1;
-        Assert.Equal(sample.Text, text[..json] + Indent(text[json..]));
-    }
-
-    // A sample is "<!-- sample: <id> -->", then a shell block holding one gh ledger command and a text block holding
-    // its output, or a single text or json block, or a quoted receipt, then "<!-- /sample -->".
-    private static IReadOnlyDictionary<string, GuideSample> ReadSamples()
-    {
-        string guide = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "docs", "guide.md"))
-            .ReplaceLineEndings("\n");
-        Dictionary<string, GuideSample> samples = new(StringComparer.Ordinal);
-        foreach (Match match in SampleRegex().Matches(guide))
+        // Each prompt's span tree: the default agent's invoke_agent span (span ID ending a0), a subagent's invoke_agent
+        // span (e0) below it, and each request's chat span below its agent's. Links already recorded are kept.
+        List<GenAiSpanLink> links = [];
+        foreach (NormalizedGenAiSpan span in spans.Select(item => item.Span))
         {
-            string body = match.Groups["body"].Value;
-            Match command = CommandSampleRegex().Match(body);
-            Match block = BlockSampleRegex().Match(body);
-            GuideSample sample = command.Success
-                ? new GuideSample(command.Groups["command"].Value, command.Groups["text"].Value)
-                : block.Success
-                    ? new GuideSample(null, block.Groups["text"].Value)
-                    : new GuideSample(null, Unquote(body));
-            samples.Add(match.Groups["id"].Value, sample);
+            string root = span.SpanId[..14] + "a0";
+            links.Add(Link(span, root, null, null, "invoke_agent"));
+            if (span.AgentName is not null)
+            {
+                links.Add(Link(span, span.ParentSpanId!, root, span.AgentName, "invoke_agent"));
+            }
+
+            links.Add(Link(span, span.SpanId, span.ParentSpanId, span.AgentName, "chat"));
         }
 
-        return samples;
-    }
+        await store.RecordSpanLinksAsync(links);
+        await store.BackfillFromAgentSpansAsync(spans.Select(item => item.Span.TraceId));
+        await new CircuitBreakerMonitor(store, new RecordingAlertSink()).EvaluateAsync(
+            spans.Select(item => item.Span.TraceId));
+```
 
-    // Removes the "> " or ">" that starts each line of a quoted sample.
-    private static string Unquote(string body) =>
-        string.Join(
-            '\n',
-            body.Split('\n').Select(line =>
-                line == ">"
-                    ? string.Empty
-                    : line.StartsWith("> ", StringComparison.Ordinal)
-                        ? line[2..]
-                        : throw new InvalidDataException($"A quoted sample has an unquoted line: {line}")));
+Edit 3 of 5 in `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`, replace:
 
-    // get_branch_ledger returns its JSON on one line; the guide shows it indented.
-    private static string Indent(string json)
-    {
-        using JsonDocument document = JsonDocument.Parse(json);
-        return JsonSerializer.Serialize(
-            document.RootElement,
-            new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                NewLine = "\n",
-                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            });
-    }
+```csharp
+        Slug);
 
-    // One chat span in the repository at 14:50 local time: 250,000 input tokens of claude-opus-5.5, 100.00 AI credits.
-    private static string ChatTrace(string repository) => """
-        {"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"github-copilot"}},{"key":"process.working_directory","value":{"stringValue":REPOSITORY}}]},"scopeSpans":[{"spans":[{"traceId":"0f3c9a7e5d1b4f2a8c6e0d9b7a5c00f1","spanId":"5e8a1c3f7b9df1c1","name":"chat claude-opus-5.5","kind":3,"startTimeUnixNano":"1795290600000000000","endTimeUnixNano":"1795290600000000000","attributes":[{"key":"gen_ai.operation.name","value":{"stringValue":"chat"}},{"key":"gen_ai.request.model","value":{"stringValue":"claude-opus-5.5"}},{"key":"gen_ai.usage.input_tokens","value":{"intValue":"250000"}},{"key":"gen_ai.usage.output_tokens","value":{"intValue":"0"}}]}]}]}]}
-        """.Replace("REPOSITORY", JsonSerializer.Serialize(repository), StringComparison.Ordinal);
+    // trace and span are the last characters of 32- and 16-character IDs. GitHub-hosted models report cache counters, and
+    // this example's Foundry BYOK and local endpoints (the spans with a serverAddress) don't.
+    private static NormalizedGenAiSpan Chat(
+        string trace,
+```
 
-    [GeneratedRegex(@"^<!-- sample: (?<id>[a-z-]+) -->\n(?<body>.*?)\n<!-- /sample -->$", RegexOptions.Multiline | RegexOptions.Singleline)]
-    private static partial Regex SampleRegex();
+with:
 
-    [GeneratedRegex(@"\A```shell\n(?<command>gh ledger [^\n]+)\n```\n\n```text\n(?<text>.*)\n```\z", RegexOptions.Singleline)]
-    private static partial Regex CommandSampleRegex();
+```csharp
+        Slug);
 
-    [GeneratedRegex(@"\A```(?:text|json)\n(?<text>.*)\n```\z", RegexOptions.Singleline)]
-    private static partial Regex BlockSampleRegex();
+    // trace and span are the last characters of 32- and 16-character IDs. GitHub-hosted models report cache counters, and
+    // this example's Foundry BYOK and local endpoints (the spans with a serverAddress) don't. A request's parent is its
+    // agent's invoke_agent span: the default agent's ends in a0, and a subagent's in e0.
+    private static NormalizedGenAiSpan Chat(
+        string trace,
+```
 
-    private sealed record GuideSample(string? Command, string Text);
-}
-````
+Edit 4 of 5 in `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`, replace:
 
-### Task 4 tests
+```csharp
+        long cacheReadInputTokens = 0) =>
+        TestSpans.Chat(
+            startTime: Utc(start),
+            requestModel: model,
+```
 
-None new. `RateOverlayTests.DocsExamples_MatchRealMessages` (which reads `docs/configuration.md`) and `GuideSamplesTests` keep passing.
+with:
 
-### Task 5 tests
+```csharp
+        long cacheReadInputTokens = 0) =>
+        TestSpans.Chat(
+            parentSpanId: "5e8a1c3f7b9d" + trace.PadLeft(2, '0') + (agent is null ? "a0" : "e0"),
+            startTime: Utc(start),
+            requestModel: model,
+```
 
-None new. The Receipt workflow's run on the pull request shows that the pinned action resolves.
+Edit 5 of 5 in `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`, replace:
 
-### Task R tests
-
-`tests/receipt.Tests.ps1` (copy exactly). Its 18 cases, AC1–AC18, are Sprint 4's (see "Task 3 tests" in `.github/plans/archive/sprint-4.md`); only the two header comment lines differ. They fake the GitHub REST API with a function named `Invoke-WebRequest`, so they never reach the network.
-
-````powershell
-#Requires -Version 7.4
-# Runs receipt.ps1 against a fake GitHub REST API. No network.
-# Usage: pwsh -NoProfile -File tests/receipt.Tests.ps1
-
-Set-StrictMode -Version 3.0
-$ErrorActionPreference = 'Stop'
-
-$ScriptPath = Join-Path $PSScriptRoot '..' 'receipt.ps1'
-$Api = 'https://api.github.test'
-$Repository = 'octo/widgets'
-$Sha = '0123456789abcdef0123456789abcdef01234567'
-$Directory = '.github/copilot-ledger/receipts'
-$ReceiptPath = "$Directory/feature-ledger-0a1b2c3d.md"
-$FilesUri = "GET $Api/repos/$Repository/pulls/7/files?per_page=100&page=1"
-$ContentUri = "GET $Api/repos/$Repository/contents/.github/copilot-ledger/receipts/feature-ledger-0a1b2c3d.md?ref=$Sha"
-$CommentsUri = "GET $Api/repos/$Repository/issues/7/comments?per_page=100&page=1"
-$CreateUri = "POST $Api/repos/$Repository/issues/7/comments"
-
-$ReceiptText = @'
-<!-- copilot-ledger-receipt -->
-### CopilotLedger receipt for `feature/ledger` — 56.00 AI credits
-
-<details>
-<summary>Data</summary>
-
-```json
-{
-  "schemaVersion": 1,
-  "branch": "feature/ledger"
+```csharp
+            SpanId = "5e8a1c3f7b9d" + trace.PadLeft(2, '0') + span,
+        };
 }
 ```
 
-</details>
-'@.ReplaceLineEndings("`n") + "`n"
+with:
 
-$Fake = @{ Requests = $null; Bodies = $null; Headers = $null; Responses = $null }
-$Failures = [System.Collections.Generic.List[string]]::new()
+```csharp
+            SpanId = "5e8a1c3f7b9d" + trace.PadLeft(2, '0') + span,
+        };
 
-# Replaces the cmdlet for receipt.ps1, which runs in a child scope of this script.
-function Invoke-WebRequest {
-    param(
-        [string] $Uri,
-        [string] $Method,
-        [hashtable] $Headers,
-        [byte[]] $Body,
-        [string] $ContentType)
-    $key = "$Method $Uri"
-    $Fake.Requests.Add($key)
-    $Fake.Headers = $Headers
-    if ($null -ne $Body) {
-        $Fake.Bodies.Add("$ContentType $([System.Text.Encoding]::UTF8.GetString($Body))")
-    }
-
-    if (-not $Fake.Responses.ContainsKey($key)) {
-        throw "Unexpected request: $key"
-    }
-
-    return [pscustomobject]@{ Content = $Fake.Responses[$key] }
+    private static GenAiSpanLink Link(
+        NormalizedGenAiSpan chat,
+        string spanId,
+        string? parentSpanId,
+        string? agent,
+        string operation) => new()
+    {
+        TraceId = chat.TraceId,
+        SpanId = spanId,
+        ParentSpanId = parentSpanId,
+        OperationName = operation,
+        AgentName = agent,
+        ConversationId = chat.ConversationId,
+        StartTime = chat.StartTime,
+    };
 }
+```
 
-function ConvertTo-CompactJson($Value) {
-    return ConvertTo-Json -InputObject $Value -Compress -Depth 5
-}
+Edit 1 of 2 in `docs/cli.md`, replace:
 
-function New-Files([object[]] $Files) {
-    return ConvertTo-CompactJson @($Files | ForEach-Object { [ordered]@{ filename = $_[0]; status = $_[1] } })
-}
+```markdown
+| Command | Reports |
+|---|---|
+| `gh ledger status [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals for today and the last 7 and 30 days |
+| `gh ledger branch [--repo <key> \| --all-repos] [--since <period>] [--json]` | Spend by branch in the current repository, or in another or every repository; outside a Git repository, every repository |
+| `gh ledger agents [--repo <key>] [--since <period>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
+| `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
 
-function New-Content([string] $Text, [long] $Size = -1) {
-    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Text)
-    return ConvertTo-CompactJson ([ordered]@{
-        size = if ($Size -ge 0) { $Size } else { $bytes.Length }
-        encoding = 'base64'
-        content = [System.Convert]::ToBase64String($bytes, [System.Base64FormattingOptions]::InsertLineBreaks)
-    })
-}
+- A repository key is an `owner/repo` slug, a local repository root for a repository whose `origin` has no `owner/repo` path, or `(none)` for spend outside any repository.
+```
 
-function New-Comment([long] $Id, [string] $Login, [string] $Body) {
-    return [ordered]@{
-        id = $Id
-        user = [ordered]@{ login = $Login }
-        body = $Body
-        html_url = "https://github.test/octo/widgets/pull/7#issuecomment-$Id"
-    }
-}
+with:
 
-function Invoke-Receipt([hashtable] $Responses, [hashtable] $Environment = @{}) {
-    $Fake.Requests = [System.Collections.Generic.List[string]]::new()
-    $Fake.Bodies = [System.Collections.Generic.List[string]]::new()
-    $Fake.Headers = $null
-    $Fake.Responses = $Responses
-    $outputFile = [System.IO.Path]::GetTempFileName()
-    $values = @{
-        GITHUB_API_URL = $Api
-        GITHUB_REPOSITORY = $Repository
-        GITHUB_OUTPUT = $outputFile
-        RECEIPT_TOKEN = 'test-token'
-        RECEIPTS_DIRECTORY = $Directory
-        COMMENT_AUTHOR = 'github-actions[bot]'
-        EVENT_NAME = 'pull_request'
-        PR_NUMBER = '7'
-        HEAD_REF = 'feature/ledger'
-        HEAD_SHA = $Sha
-        HEAD_REPOSITORY = $Repository
-    }
-    foreach ($name in $Environment.Keys) {
-        $values[$name] = $Environment[$name]
-    }
+```markdown
+| Command | Reports |
+|---|---|
+| `gh ledger status [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals and cache hit ratios for today and the last 7 and 30 days |
+| `gh ledger branch [--repo <key> \| --all-repos] [--since <period>] [--json]` | Spend by branch in the current repository, or in another or every repository; outside a Git repository, every repository |
+| `gh ledger agents [--repo <key>] [--since <period>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
+| `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
+| `gh ledger status --cache ...` | Prompt-cache efficiency; see [Prompt-cache efficiency](#prompt-cache-efficiency) |
 
-    foreach ($name in $values.Keys) {
-        [System.Environment]::SetEnvironmentVariable($name, $values[$name])
-    }
+- A repository key is an `owner/repo` slug, a local repository root for a repository whose `origin` has no `owner/repo` path, or `(none)` for spend outside any repository.
+```
 
-    $global:LASTEXITCODE = 0
-    try {
-        [string[]] $lines = @(& $ScriptPath *>&1 | ForEach-Object { "$_" })
-    }
-    catch {
-        # An unexpected request fails this case, not the whole run.
-        [string[]] $lines = @("exception: $($_.Exception.Message)")
-        $global:LASTEXITCODE = 99
-    }
+Edit 2 of 2 in `docs/cli.md`, replace:
 
-    $run = [pscustomobject]@{
-        ExitCode = $global:LASTEXITCODE
-        Lines = $lines
-        Outputs = [System.IO.File]::ReadAllText($outputFile)
-        Requests = [string[]] $Fake.Requests.ToArray()
-        Bodies = [string[]] $Fake.Bodies.ToArray()
-        Headers = $Fake.Headers
-    }
-    Remove-Item -LiteralPath $outputFile
-    return $run
-}
+```markdown
+- Spend is split into GitHub AI credits (`AI credits` and `GitHub USD`), Foundry BYOK (`BYOK USD`), and local models, whose `Local saved` is the cloud spend they avoided. `Unpriced` counts requests without a price; see [configuration.md](configuration.md).
+- An agent shows as `(none)` when Copilot reports no agent name, as its default agent does. Built-in subagents such as `explore` report their own names, and a custom agent reports the `name` in its `.agent.md` file, or the file's name without `.agent.md`.
 
-function Assert-Equal($Expected, $Actual, [string] $Message) {
-    $expectedJson = ConvertTo-Json -InputObject $Expected -Compress -Depth 5 -EscapeHandling EscapeNonAscii
-    $actualJson = ConvertTo-Json -InputObject $Actual -Compress -Depth 5 -EscapeHandling EscapeNonAscii
-    if (-not [string]::Equals($expectedJson, $actualJson, [System.StringComparison]::Ordinal)) {
-        $Failures.Add("$Message`n  expected: $expectedJson`n  actual:   $actualJson")
-    }
-}
+## Circuit breaker
+```
 
-function Get-PostedBody([string] $Request) {
-    $json = $Request.Substring('application/json '.Length)
-    return [System.Text.Json.JsonDocument]::Parse($json).RootElement.GetProperty('body').GetString()
-}
+with:
 
-# AC1: a new receipt is posted as a new comment.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(@('src/app.cs', 'modified'), @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText
-    $CommentsUri = '[]'
-    $CreateUri = ConvertTo-CompactJson (New-Comment 100 'github-actions[bot]' $ReceiptText)
-}
-Assert-Equal 0 $run.ExitCode 'AC1 exit code'
-Assert-Equal @('CopilotLedger receipt created: https://github.test/octo/widgets/pull/7#issuecomment-100') $run.Lines 'AC1 log'
-Assert-Equal "result=created`ncomment-url=https://github.test/octo/widgets/pull/7#issuecomment-100`n" $run.Outputs 'AC1 outputs'
-Assert-Equal @($FilesUri, $ContentUri, $CommentsUri, $CreateUri) $run.Requests 'AC1 requests'
-Assert-Equal 1 $run.Bodies.Count 'AC1 body count'
-Assert-Equal $ReceiptText (Get-PostedBody $run.Bodies[0]) 'AC1 posted body'
-Assert-Equal 'Bearer test-token' $run.Headers['Authorization'] 'AC1 authorization header'
-Assert-Equal 'application/vnd.github+json' $run.Headers['Accept'] 'AC1 accept header'
-Assert-Equal '2026-03-10' $run.Headers['X-GitHub-Api-Version'] 'AC1 API version header'
+```markdown
+- Spend is split into GitHub AI credits (`AI credits` and `GitHub USD`), Foundry BYOK (`BYOK USD`), and local models, whose `Local saved` is the cloud spend they avoided. `Unpriced` counts requests without a price; see [configuration.md](configuration.md).
+- An agent shows as `(none)` when Copilot reports no agent name, as its default agent does. Built-in subagents such as `explore` report their own names, and a custom agent reports the `name` in its `.agent.md` file, or the file's name without `.agent.md`.
+- `status --json` adds a `cache` object to each period, and each row of `branch --json` and `agents --json` adds `cacheReportedSpans`, `cacheUnreportedSpans`, and `cacheHitRatio`. See [Prompt-cache efficiency](#prompt-cache-efficiency).
 
-# AC2: the bot's earlier receipt comment is updated in place.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'modified'))
-    $ContentUri = New-Content $ReceiptText
-    $CommentsUri = ConvertTo-CompactJson @(
-        (New-Comment 54 'octocat' 'Looks good'),
-        (New-Comment 55 'github-actions[bot]' "<!-- copilot-ledger-receipt -->`nold"))
-    "PATCH $Api/repos/$Repository/issues/comments/55" = ConvertTo-CompactJson (New-Comment 55 'github-actions[bot]' $ReceiptText)
-}
-Assert-Equal 0 $run.ExitCode 'AC2 exit code'
-Assert-Equal @('CopilotLedger receipt updated: https://github.test/octo/widgets/pull/7#issuecomment-55') $run.Lines 'AC2 log'
-Assert-Equal "result=updated`ncomment-url=https://github.test/octo/widgets/pull/7#issuecomment-55`n" $run.Outputs 'AC2 outputs'
-Assert-Equal @($FilesUri, $ContentUri, $CommentsUri, "PATCH $Api/repos/$Repository/issues/comments/55") $run.Requests 'AC2 requests'
-Assert-Equal $ReceiptText (Get-PostedBody $run.Bodies[0]) 'AC2 posted body'
+## Prompt-cache efficiency
 
-# AC3: an identical comment (stored with CRLF line endings) isn't edited.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText
-    $CommentsUri = ConvertTo-CompactJson @(, (New-Comment 56 'github-actions[bot]' $ReceiptText.Replace("`n", "`r`n")))
-}
-Assert-Equal 0 $run.ExitCode 'AC3 exit code'
-Assert-Equal @('CopilotLedger receipt unchanged: https://github.test/octo/widgets/pull/7#issuecomment-56') $run.Lines 'AC3 log'
-Assert-Equal "result=unchanged`ncomment-url=https://github.test/octo/widgets/pull/7#issuecomment-56`n" $run.Outputs 'AC3 outputs'
-Assert-Equal @($FilesUri, $ContentUri, $CommentsUri) $run.Requests 'AC3 requests'
+Copilot reports how many of each request's input tokens the model read from its prompt cache and how many it wrote to it. Cache reads cost much less than uncached input, so a falling hit ratio, or a context that grows on every request, raises spend without changing the result. For a walkthrough, see [Find context bloat](guide.md#find-context-bloat).
 
-# AC4: a marker comment by someone else isn't touched; the action adds its own.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText
-    $CommentsUri = ConvertTo-CompactJson @(, (New-Comment 57 'octocat' $ReceiptText))
-    $CreateUri = ConvertTo-CompactJson (New-Comment 101 'github-actions[bot]' $ReceiptText)
-}
-Assert-Equal 0 $run.ExitCode 'AC4 exit code'
-Assert-Equal "result=created`ncomment-url=https://github.test/octo/widgets/pull/7#issuecomment-101`n" $run.Outputs 'AC4 outputs'
-Assert-Equal @($FilesUri, $ContentUri, $CommentsUri, $CreateUri) $run.Requests 'AC4 requests'
+| Command | Reports |
+|---|---|
+| `gh ledger status --cache [--by model\|branch\|pr\|agent] [--repo <key>] [--branch <name>] [--pr <n>] [--since <period>] [--json]` | Cache efficiency by model (the default), branch, pull request, or agent, in every repository or in one with `--repo`; `--branch` and `--pr` keep one branch or pull request |
+| `gh ledger status --cache --turns (--trace <traceId> \| --conversation <id>) [--json]` | Each model request of one prompt chain, or of one Copilot session, in start order |
+| `gh ledger status --cache --bloat [--repo <key>] [--since <period>] [--limit <n>] [--json]` | The prompt chains with the most uncached input and the most input growth; `--limit` is 1 to 100 and defaults to 10 |
 
-# AC5: no receipt in the pull request (a removed receipt doesn't count).
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(@('src/app.cs', 'modified'), @($ReceiptPath, 'removed'), @("$Directory/notes.txt", 'added'))
-}
-Assert-Equal 0 $run.ExitCode 'AC5 exit code'
-Assert-Equal @('::notice::No CopilotLedger receipt changed in this pull request. Run gh ledger export-pr on the branch, then commit the file it writes under .github/copilot-ledger/receipts/.') $run.Lines 'AC5 log'
-Assert-Equal "result=no-receipt`ncomment-url=`n" $run.Outputs 'AC5 outputs'
-Assert-Equal @(, $FilesUri) $run.Requests 'AC5 requests'
+- `Input` counts all input tokens, including those read from and written to the cache. `Uncached` is the rest: input minus cache reads and cache writes.
+- Copilot sends a cache-read or cache-write count only when it isn't zero, so when a request sends one, the other is 0. A request that sends neither, as many Foundry BYOK and local endpoints do, has unknown cache use. Requests recorded by earlier versions of gh-ledger count as unknown, unless they recorded a cache read or write.
+- `Cache reported` counts the requests with known cache use. `Hit %` is cache reads divided by input over those requests, rounded to one decimal place. It shows `n/a` when no request in the row reported cache counters; a real zero shows as `0.0%`. The cache columns are totals over the same requests, so they show `n/a` too, and `*` marks a total that leaves some of the row's requests out. A footnote counts the requests left out.
+- `--by pr` groups requests by pull request when the branch's Git config tracks `refs/pull/<n>/head`, as `gh pr checkout` sets up for some pull requests from forks. Other requests show as `(no PR) <branch>`. gh-ledger reads only the local Git config and never asks GitHub.
+- A request, or turn, is one model call. `--turns` lists each request with its cache use and `Growth`, the change in input from the previous request of the same agent invocation and model, so a subagent's requests are compared only with each other. `-` marks the first request of an invocation, and `n/a` a request whose agent invocation wasn't recorded.
+- `--bloat` ranks prompt chains whose requests all reported cache counters by uncached input, and prompt chains by their largest input growth within one agent invocation and model. Chains with requests that reported no cache counters are ranked separately by estimated uncached input, which counts all input of those requests as uncached, as pricing does. Ties go to the lower trace ID.
+- Without `--cache`, `status` takes only `--json`. With `--turns`, give `--trace` or `--conversation`, and optionally `--json`. `--by`, `--branch`, and `--pr` can't be used with `--bloat`, and `--limit` needs `--bloat`.
 
-# AC6: pull requests from forks are skipped without any request.
-$run = Invoke-Receipt @{} @{ HEAD_REPOSITORY = 'fork-owner/widgets' }
-Assert-Equal 0 $run.ExitCode 'AC6 exit code'
-Assert-Equal @('::notice::Skipped the CopilotLedger receipt: workflows for pull requests from forks get a read-only token, so they can''t comment.') $run.Lines 'AC6 log'
-Assert-Equal "result=skipped`ncomment-url=`n" $run.Outputs 'AC6 outputs'
-Assert-Equal @() $run.Requests 'AC6 requests'
+In JSON, `cacheHitRatio` is the exact ratio or `null`, and token counts that are unknown are `null`:
 
-# AC7: other events fail without any request.
-$run = Invoke-Receipt @{} @{ EVENT_NAME = 'pull_request_target' }
-Assert-Equal 1 $run.ExitCode 'AC7 exit code'
-Assert-Equal @('::error::The CopilotLedger receipt action runs on pull_request events, not pull_request_target.') $run.Lines 'AC7 log'
-Assert-Equal '' $run.Outputs 'AC7 outputs'
-Assert-Equal @() $run.Requests 'AC7 requests'
+- `status --json` periods: `cache` has `cacheReportedSpans`, `cacheUnreportedSpans`, `reportedInputTokens`, `reportedCacheReadInputTokens`, and `cacheHitRatio`.
+- `status --cache --json` rows: the group (`model`; `agent`; `repository` and `branch`; or `repository`, `pullRequest`, and `branch`, where `pullRequest` is `null` for `(no PR)` rows), then `spans`, `cacheReportedSpans`, `cacheUnreportedSpans`, `inputTokens`, `outputTokens`, `maxInputTokens`, `averageInputTokensPerTurn`, `reportedInputTokens`, `reportedCacheReadInputTokens`, `reportedCacheWriteInputTokens`, `uncachedInputTokens` (observed, over the requests that reported cache counters), `estimatedUncachedInputTokens` (over all requests, counting unknown cache use as uncached), and `cacheHitRatio`.
+- `status --cache --turns --json` turns: IDs, time, Git context, agent, model, tokens, `cacheReadState` and `cacheWriteState` (`reported`, `absent`, or `legacy_unknown`), the observed cache and uncached tokens, `cacheHitRatio`, and `inputDeltaFromPreviousTurn`.
+- `status --cache --bloat --json`: `byUncachedInput`, `byInputGrowth`, and `byEstimatedUncachedInput`, and `spansWithoutAgent`, the requests left out of input growth.
 
-# AC8: a receipt for another branch fails.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText
-} @{ HEAD_REF = 'feature/other' }
-Assert-Equal 1 $run.ExitCode 'AC8 exit code'
-Assert-Equal @('::error::No receipt for feature/other changed in this pull request; found receipts for: feature/ledger.') $run.Lines 'AC8 log'
-Assert-Equal @($FilesUri, $ContentUri) $run.Requests 'AC8 requests'
+## Circuit breaker
+```
 
-# AC9: a file without the marker fails.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content ("# Notes`n" + $ReceiptText)
-}
-Assert-Equal 1 $run.ExitCode 'AC9 exit code'
-Assert-Equal @("::error::$ReceiptPath doesn't start with <!-- copilot-ledger-receipt -->, so it isn't a CopilotLedger receipt.") $run.Lines 'AC9 log'
+Edit 1 of 1 in `docs/configuration.md`, replace:
 
-# AC10: a receipt over 65,536 bytes fails before it's decoded.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText 65537
-}
-Assert-Equal 1 $run.ExitCode 'AC10 exit code'
-Assert-Equal @("::error::$ReceiptPath is 65537 bytes; a receipt can be at most 65536 bytes.") $run.Lines 'AC10 log'
+```markdown
+| `unrecognized_endpoint` | The endpoint isn't GitHub, Foundry, or local | Add its host to the matching `hostSuffixes` or `additionalHosts` list |
+| `invalid_usage` | Token counts are inconsistent, for example more cached tokens than input tokens | Report it; it usually means a telemetry exporter bug |
 
-# AC11: invalid JSON in the data block fails.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText.Replace('"schemaVersion": 1,', '"schemaVersion": 1')
-}
-Assert-Equal 1 $run.ExitCode 'AC11 exit code'
-Assert-Equal 1 $run.Lines.Count 'AC11 log line count'
-Assert-Equal $true ($run.Lines[0].StartsWith("::error::$ReceiptPath has invalid JSON data: ", [System.StringComparison]::Ordinal)) 'AC11 log'
+## Why Foundry BYOK is unpriced by default
+```
 
-# AC12: an unsupported schema version fails.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText.Replace('"schemaVersion": 1,', '"schemaVersion": 2,')
-}
-Assert-Equal 1 $run.ExitCode 'AC12 exit code'
-Assert-Equal @("::error::$ReceiptPath has an unsupported schemaVersion; this action reads schemaVersion 1.") $run.Lines 'AC12 log'
+with:
 
-# AC13: pages are read until one has fewer than 100 items.
-$page1 = @(1..100 | ForEach-Object { , @("src/file$_.cs", 'modified') })
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files $page1
-    "GET $Api/repos/$Repository/pulls/7/files?per_page=100&page=2" = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText
-    $CommentsUri = '[]'
-    $CreateUri = ConvertTo-CompactJson (New-Comment 102 'github-actions[bot]' $ReceiptText)
-}
-Assert-Equal 0 $run.ExitCode 'AC13 exit code'
-Assert-Equal @($FilesUri, "GET $Api/repos/$Repository/pulls/7/files?per_page=100&page=2", $ContentUri, $CommentsUri, $CreateUri) $run.Requests 'AC13 requests'
+```markdown
+| `unrecognized_endpoint` | The endpoint isn't GitHub, Foundry, or local | Add its host to the matching `hostSuffixes` or `additionalHosts` list |
+| `invalid_usage` | Token counts are inconsistent, for example more cached tokens than input tokens | Report it; it usually means a telemetry exporter bug |
 
-# AC14: a receipts-directory input with surrounding slashes still matches.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText
-    $CommentsUri = '[]'
-    $CreateUri = ConvertTo-CompactJson (New-Comment 103 'github-actions[bot]' $ReceiptText)
-} @{ RECEIPTS_DIRECTORY = "/$Directory/" }
-Assert-Equal 0 $run.ExitCode 'AC14 exit code'
-Assert-Equal "result=created`ncomment-url=https://github.test/octo/widgets/pull/7#issuecomment-103`n" $run.Outputs 'AC14 outputs'
+### Cache tokens
 
-# AC15: branch names are compared case-sensitively.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText
-} @{ HEAD_REF = 'Feature/Ledger' }
-Assert-Equal 1 $run.ExitCode 'AC15 exit code'
-Assert-Equal @('::error::No receipt for Feature/Ledger changed in this pull request; found receipts for: feature/ledger.') $run.Lines 'AC15 log'
+A request's input tokens include the tokens the model read from its prompt cache and the tokens it wrote to it. Copilot reports the cache-read and cache-write counts only when they aren't zero. Cache reads are priced at `cachedInputPer1M`, cache writes at `cacheWritePer1M`, and the rest of the input at `inputPer1M`. When a request reports neither count, as many Foundry BYOK and local endpoints do, all of its input is priced as uncached input.
 
-# AC16: a branch that differs only by a zero-width space doesn't match.
-$zeroWidthBranch = "feature/ledger$([char] 0x200B)"
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content $ReceiptText.Replace('"branch": "feature/ledger"', "`"branch`": `"$zeroWidthBranch`"")
-}
-Assert-Equal 1 $run.ExitCode 'AC16 exit code'
-Assert-Equal @("::error::No receipt for feature/ledger changed in this pull request; found receipts for: $zeroWidthBranch.") $run.Lines 'AC16 log'
-Assert-Equal @($FilesUri, $ContentUri) $run.Requests 'AC16 requests'
+Cache-efficiency reports, such as `gh ledger status --cache`, don't treat such a request as a cache miss: its cache use is unknown, so hit ratios and observed cache totals leave it out, and a group of such requests shows `n/a` rather than `0.0%`. See [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
 
-# AC17: a receipt that starts with a byte order mark fails the marker check.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'added'))
-    $ContentUri = New-Content ("$([char] 0xFEFF)" + $ReceiptText)
-}
-Assert-Equal 1 $run.ExitCode 'AC17 exit code'
-Assert-Equal @("::error::$ReceiptPath doesn't start with <!-- copilot-ledger-receipt -->, so it isn't a CopilotLedger receipt.") $run.Lines 'AC17 log'
-Assert-Equal @($FilesUri, $ContentUri) $run.Requests 'AC17 requests'
+## Why Foundry BYOK is unpriced by default
+```
 
-# AC18: comment-author matches the comment's login case-insensitively, as GitHub logins do.
-$run = Invoke-Receipt @{
-    $FilesUri = New-Files @(, @($ReceiptPath, 'modified'))
-    $ContentUri = New-Content $ReceiptText
-    $CommentsUri = ConvertTo-CompactJson @(, (New-Comment 58 'github-actions[bot]' "<!-- copilot-ledger-receipt -->`nold"))
-    "PATCH $Api/repos/$Repository/issues/comments/58" = ConvertTo-CompactJson (New-Comment 58 'github-actions[bot]' $ReceiptText)
-} @{ COMMENT_AUTHOR = 'GitHub-Actions[bot]' }
-Assert-Equal 0 $run.ExitCode 'AC18 exit code'
-Assert-Equal "result=updated`ncomment-url=https://github.test/octo/widgets/pull/7#issuecomment-58`n" $run.Outputs 'AC18 outputs'
-Assert-Equal @($FilesUri, $ContentUri, $CommentsUri, "PATCH $Api/repos/$Repository/issues/comments/58") $run.Requests 'AC18 requests'
+Edit 1 of 2 in `docs/guide.md`, replace:
 
-if ($Failures.Count -gt 0) {
-    $Failures | ForEach-Object { Write-Host "FAIL: $_" }
-    Write-Host "$($Failures.Count) assertion(s) failed."
-    exit 1
-}
+```markdown
+- [Find the most expensive prompts](#find-the-most-expensive-prompts)
+- [Compare agents](#compare-agents)
+- [Set a budget for a branch](#set-a-budget-for-a-branch)
+- [Catch a runaway loop](#catch-a-runaway-loop)
+```
 
-Write-Host 'All receipt action tests passed.'
-exit 0
+with:
+
+```markdown
+- [Find the most expensive prompts](#find-the-most-expensive-prompts)
+- [Compare agents](#compare-agents)
+- [Find context bloat](#find-context-bloat)
+- [Set a budget for a branch](#set-a-budget-for-a-branch)
+- [Catch a runaway loop](#catch-a-runaway-loop)
+```
+
+Edit 2 of 2 in `docs/guide.md`, replace:
+
+```markdown
+<!-- /sample -->
+
+`(none)` is Copilot's default agent, which reports no name. Subagents such as `explore`, and your custom agents, report their own names.
+
+## Set a budget for a branch
+```
+
+with:
+
+````markdown
+<!-- /sample -->
+
+`(none)` is Copilot's default agent, which reports no name. Subagents such as `explore`, and your custom agents, report their own names.
+
+## Find context bloat
+
+**Goal:** find the prompts whose context grows on every request, and see how much of it the prompt cache absorbs.
+
+Every model request sends the conversation so far, so an agent's input grows as it works. Input that the model's prompt cache already holds costs much less than uncached input. See how much of the input the cache served, by model:
+
+<!-- sample: cache -->
+```shell
+gh ledger status --cache
+```
+
+```text
+Cache efficiency by model in all repositories (last 30 days)
+
+Model            Spans  Cache reported      Input  Cache read  Cache write   Uncached   Output  Hit %
+claude-opus-5.5      7               7  2,900,000   1,450,000            0  1,450,000  127,000  50.0%
+mai-code-2           2               2  1,100,000     500,000            0    600,000   55,000  45.5%
+qwen3.8-27b          1               0    300,000         n/a          n/a        n/a    9,000    n/a
+gpt-6.1-sol          1               0    200,000         n/a          n/a        n/a   10,000    n/a
+
+2 of 11 spans reported no cache counters. Hit % and the cache columns leave them out; * marks a partial total.
+```
+<!-- /sample -->
+
+`Hit %` is the share of input read from the cache. This example's Foundry BYOK and local endpoints report no cache counters, so their rows show `n/a`: unknown, not a 0% hit rate. Add `--by branch`, `--by pr`, or `--by agent` to group the rows another way.
+
+Find the prompts that sent the most uncached input, and those whose input grew the most:
+
+<!-- sample: cache-bloat -->
+```shell
+gh ledger status --cache --bloat --limit 3
+```
+
+```text
+Context bloat in all repositories (last 30 days)
+
+Prompt chains by uncached input
+#  Started           Repository      Spans      Input  Uncached  Hit %  Trace
+1  2026-11-21 11:20  contoso/webapp      4  2,000,000   800,000  60.0%  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
+2  2026-11-21 09:05  contoso/webapp      2    700,000   450,000  35.7%  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00a1
+3  2026-11-03 10:30  contoso/webapp      1    300,000   300,000   0.0%  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00a7
+
+Prompt chains by input growth within one agent invocation and model
+#  Started           Repository      Agent   Model            Requests  First input  Peak input   Growth  Trace
+1  2026-11-21 11:20  contoso/webapp  (none)  claude-opus-5.5         4      357,500     642,500  285,000  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
+
+Prompt chains with requests that reported no cache counters, by estimated uncached input
+#  Started           Repository      Spans  Cache reported    Input  Est. uncached  Trace
+1  2026-11-21 15:40  contoso/webapp      1               0  300,000        300,000  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00d4
+2  2026-11-21 14:10  contoso/webapp      1               0  200,000        200,000  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00c3
+
+Est. uncached is an estimate: it counts all input of a request without cache counters as uncached, as pricing does.
+```
+<!-- /sample -->
+
+The prompt that tripped the circuit breaker leads both lists. See each of its requests:
+
+<!-- sample: cache-turns -->
+```shell
+gh ledger status --cache --turns --trace 0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
+```
+
+```text
+Model requests in trace 0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
+
+#  Started              Agent   Model              Input  Cache read  Cache write  Uncached  Output  Hit %   Growth
+1  2026-11-21 11:20:00  (none)  claude-opus-5.5  357,500     150,000            0   207,500  20,000  42.0%        -
+2  2026-11-21 11:21:30  (none)  claude-opus-5.5  452,500     250,000            0   202,500  20,000  55.2%  +95,000
+3  2026-11-21 11:23:00  (none)  claude-opus-5.5  547,500     350,000            0   197,500  20,000  63.9%  +95,000
+4  2026-11-21 11:24:30  (none)  claude-opus-5.5  642,500     450,000            0   192,500  20,000  70.0%  +95,000
+
+Growth is the change in input from the previous request by the same agent invocation and model; - marks its first request.
+```
+<!-- /sample -->
+
+Each request added 95,000 tokens of context. The cache served more of it each time, but every request still sent about 200,000 uncached tokens. Growth compares a request only with earlier requests of the same agent invocation and model, so a subagent's requests never mix with its parent's. To see every request of a Copilot session, use `--conversation <id>` instead of `--trace`, with the session ID that `--json` output shows as `conversationId`. For the columns and the JSON fields, see [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
+
+## Set a budget for a branch
 ````
-## Final step: end-to-end check and releases (orchestrator, not a builder task)
 
-After Task 5 merges and CI on `main` is green, the orchestrator:
+### Tests
 
-1. **Runs the end-to-end check**, with `COPILOT_LEDGER_HOME` pointed at a temporary directory:
-   - a real Copilot CLI request into a running daemon;
-   - the reports, the circuit breaker, a budget, and the MCP server;
-   - `export-pr`, and the action on a real draft pull request, from `swigerb/copilot-ledger-action` at the commit `receipt.yml` pins;
-   - `rates update`;
-   - `gh extension install swigerb/gh-ledger`.
-2. **Releases the action first**, because the docs say `@v1`. It creates `v1.0.0` at the commit Task 5 pinned, with `gh release create v1.0.0 --repo swigerb/copilot-ledger-action --target <commit> --title v1.0.0 --generate-notes`. Then, from a clone, it creates the major tag at the same commit: `git fetch --tags origin`, `git tag v1 v1.0.0`, and `git push origin v1`. The user lists the release on Marketplace in the browser, as the action's README describes. If the end-to-end check needs a fix in the action, the fixed commit becomes `v1.0.0`, and `receipt.yml`'s pin moves to it in a small pull request.
-3. **Releases gh-ledger v0.4.1**, following `docs/releasing.md`: a manual Release run on `main` (the dry run, which also checks `ratesVersion`), then the tag. Afterward, with the daemon stopped and the Copilot sessions that use the MCP server closed, `gh extension upgrade ledger` takes an installed 0.4.0 to 0.4.1 (`gh ledger status` shows `gh-ledger 0.4.1 (GitHub CLI extension)`), and `gh ledger rates update` prints `Rates are up to date (2026-11-20).`, because the rates didn't change.
+- **GS1:** the guide has exactly the checked samples, now including `cache`, `cache-bloat`, and `cache-turns`.
+- **GS2** (3 new cases): the three samples are exactly what the commands print in the Month state.
+- Every other guide sample (`status`, `branch`, `top-prompts`, `agents`, budgets, the breaker, `export-pr`, the receipt, and `mcp`) still passes unchanged.
 
-When the sprint closes, `ledger-architect` archives this plan with its amendments.
+### Acceptance criteria
+
+- `docs/cli.md`, `docs/configuration.md`, and `docs/guide.md` are updated, and `GuideSamplesTests` passes.
+- `docs/configuration.md` matches the pricing behavior: absent counters are priced as uncached and reported as unknown.
+- `dotnet test CopilotLedger.slnx` passes **804** tests (801 + 3).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 12 specification: Document Unreported Cache Misses
+
+`ledger-architect` added this task on 2026-11-23, after reviewing Tasks 1–11 (finding R1 of the review). It changes two docs, and no code, test, or output.
+
+D1 treats a request that sends neither cache counter as unknown, and its acceptance names the bias that leaves: a cache miss that writes nothing to the cache sends no counter either, so it's left out of `Hit %` instead of counting as a miss. For a model whose provider reports cache reads but never cache writes, every miss is left out, so the model's `Hit %` covers only its requests that read from the cache and is higher than its real hit ratio. `Cache reported` and the footnote show how many requests were left out, but not that they may be misses, and Task 11's docs name only Foundry BYOK and local endpoints as requests without counters. This task says so where the docs explain `Hit %` and unknown cache use.
+
+### Files
+
+| File | Change |
+|---|---|
+| `docs/cli.md` | "Prompt-cache efficiency" gains a bullet after the `Cache reported` bullet: a miss without a cache write sends no counters, so `Hit %` can be too high, and the sign of it |
+| `docs/configuration.md` | "Cache tokens" gains one sentence with the same point |
+
+### Facts (retrieved 2026-11-23)
+
+- OpenAI's [Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching) guide: GPT-5.6 and later bill cache writes and report them as `cache_write_tokens`, while earlier models support only implicit caching, with no cache-write charge, and report cache reads as `cached_tokens`. So a model can report cache reads without ever reporting a nonzero cache write, and Copilot leaves out a zero counter (see "Verified facts"). The recorded Copilot CLI capture `CopilotTraces.TraceBA` shows a cache write for `gpt-6-luna`, so some GPT models do report writes through Copilot.
+- Assumption (not verified): which models Copilot reports with cache reads but no cache writes. The docs describe the behavior and its sign, and name no model.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+```markdown
+- `Cache reported` counts the requests with known cache use. `Hit %` is cache reads divided by input over those requests, rounded to one decimal place. It shows `n/a` when no request in the row reported cache counters; a real zero shows as `0.0%`. The cache columns are totals over the same requests, so they show `n/a` too, and `*` marks a total that leaves some of the row's requests out. A footnote counts the requests left out.
+- `--by pr` groups requests by pull request when the branch's Git config tracks `refs/pull/<n>/head`, as `gh pr checkout` sets up for some pull requests from forks. Other requests show as `(no PR) <branch>`. gh-ledger reads only the local Git config and never asks GitHub.
+```
+
+with:
+
+```markdown
+- `Cache reported` counts the requests with known cache use. `Hit %` is cache reads divided by input over those requests, rounded to one decimal place. It shows `n/a` when no request in the row reported cache counters; a real zero shows as `0.0%`. The cache columns are totals over the same requests, so they show `n/a` too, and `*` marks a total that leaves some of the row's requests out. A footnote counts the requests left out.
+- A request that missed the cache and wrote nothing to it also sends neither count, so it's left out as unknown, not counted as a miss. For a model whose provider reports cache reads but never cache writes, as some providers with automatic prompt caching do, every miss is like that: its `Hit %` covers only the requests that read from the cache, so it's higher than the model's real hit ratio. When a model's `Cache reported` is less than its `Spans`, its `Hit %` is probably too high.
+- `--by pr` groups requests by pull request when the branch's Git config tracks `refs/pull/<n>/head`, as `gh pr checkout` sets up for some pull requests from forks. Other requests show as `(no PR) <branch>`. gh-ledger reads only the local Git config and never asks GitHub.
+```
+
+Edit 1 of 1 in `docs/configuration.md`, replace:
+
+```markdown
+Cache-efficiency reports, such as `gh ledger status --cache`, don't treat such a request as a cache miss: its cache use is unknown, so hit ratios and observed cache totals leave it out, and a group of such requests shows `n/a` rather than `0.0%`. See [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
+```
+
+with:
+
+```markdown
+Cache-efficiency reports, such as `gh ledger status --cache`, don't treat such a request as a cache miss: its cache use is unknown, so hit ratios and observed cache totals leave it out, and a group of such requests shows `n/a` rather than `0.0%`. A cache miss that writes nothing to the cache also reports neither count, so it's left out too, and a hit ratio can be higher than the real one. See [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
+```
+
+### Tests
+
+No test is added or changed, because only prose changes. `GuideSamplesTests` reads only `docs/guide.md`, which doesn't change, and `RateOverlayTests` reads only the `rates-error-example` blocks of `docs/configuration.md`, which don't change.
+
+### Acceptance criteria
+
+- `docs/cli.md` says that a cache miss without a cache write sends no counters and is left out as unknown, that a model whose provider reports cache reads but never cache writes then shows a `Hit %` higher than its real hit ratio, and that `Cache reported` less than `Spans` is the sign. `docs/configuration.md` says that such a miss is left out and that a hit ratio can be too high.
+- No other file changes.
+- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes **804** tests, as after Task 11, with 0 failed and 0 skipped.
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Test specifications
+
+Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` for time, `FakeCliPlatform` and `CliHarness` for the CLI, and `McpTestHarness` or in-process pipes for MCP. No test starts a process, runs `git`, uses the network or Docker, or reads `~/.copilot-ledger`. Money and ratios are `decimal` (`TheoryData<…, decimal>` or `decimal` arguments, never `[InlineData(double)]`), and expected text is compared exactly, with `ReplaceLineEndings("\n")` only on the expected literal.
+
+| Task | New tests (cases) | Changed tests | Total after |
+|---|---|---|---:|
+| 1 | NZ13 (7), NZ14, CM1 (8), CM2, CM3 (9) | — | 697 |
+| 2 | Resolve_PullRequestCheckout_ReadsTheNumberFromTheMergeRef, Resolve_MergeConfig_YieldsOnlyExplicitPullRequestRefs (19), Resolve_DetachedHead_HasNoPullRequest, Resolve_LinkedWorktree_ReadsTheMergeRefFromTheCommonConfig, PullRequestNumber_DefaultsToNullAndTakesPartInEquality, CG4 | — | 721 |
+| 3 | S12, S13 (7), SL11, SL12, IG10 | S1, SL1, SL8, SL10 (schema version 4) | 732 |
+| 4 | S14, S15 | — | 734 |
+| 5 | CE1 (5), CE2, CE3, CE4, CE5 | — | 743 |
+| 6 | TB1, TB2, TB3, TB4, CB1, CB2 | — | 749 |
+| 7 | RP14, RP15 | StatusText; GS2 `status-first` and `status` (guide text) | 751 |
+| 8 | CR1 (5), CR2, CR3, CR4 (8), CR5, CR6 | — | 768 |
+| 9 | CR7, CR8, CR9, CR10, CR11 (14) | — | 786 |
+| 10 | MC8 (13 more cases), MC13, MC14 | MC1, MC2, MC4, MC6, MC11; GS7 (guide text) | 801 |
+| 11 | GS2 (3 more cases: `cache`, `cache-bloat`, `cache-turns`) | GS1 (guide text) | 804 |
+| 12 | — (docs only) | — | 804 |
+
+Each task's "Tests" subsection lists what its tests check, and its code gives every assertion. Decimal test vectors used across tasks, all exact `decimal` quotients in the invariant culture:
+
+| Quotient | Value | Where |
+|---|---|---|
+| 3,662 / 7,429 | `0.4929331000134607618791223583` | CM1, CE1 |
+| 1,450,000 / 2,600,000 | `0.5576923076923076923076923077` | CM1 |
+| 1,450,000 / 2,700,000 | `0.537037037037037037037037037` | GS7 (the guide's `mcp` sample) |
+| 1,200,000 / 2,200,000 | `0.5454545454545454545454545455` | S14, RP14 |
+| 2 / 3 (800,000 / 1,200,000 or 10,000 / 15,000) | `0.6666666666666666666666666667` | CM1, S14, RP15, CR2, CR6, TB2, CB1, MC13, MC14 |
+| 840,000 / 1,250,000 | `0.672` | MC13 |
+| 1 / 6 | `0.1666666666666666666666666667` | CE1 |
+| 900 / 1,300 | `0.6923076923076923076923076923` | CE3 |
+| 1,600 / 3,500 | `0.4571428571428571428571428571` | CE4 |
+| 3,500 / 6,000 | `0.5833333333333333333333333333` | CE4 |
+| 4,500 / 7,000 | `0.6428571428571428571428571429` | CE4 |
+| 22,000 / 38,000 | `0.5789473684210526315789473684` | CB1, CR10 |
+| 8,000 / 30,000 | `0.2666666666666666666666666667` | CR3 |
+| 160,000 / 3 | `53333.333333333333333333333333` | MC13 (`averageInputTokensPerTurn`) |
+
+Percentages round half away from zero to one decimal place: `0.537037…` → `53.7%`, `0.527027…` → `52.7%`, `0.4875` → `48.8%` (the midpoint case, in the guide's `status` sample), `0.5454…` → `54.5%`, `0.6666…` → `66.7%`, `0.2666…` → `26.7%`, `0.16666…` → `16.7%`, and a reported `0` → `0.0%`.
+
+## Final step: the pull request (orchestrator, not a builder task)
+
+After Task 12, the orchestrator:
+
+1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (804 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-5.md`, and the files the tasks list.
+2. Pushes `swigerb-prompt-cache-efficiency-per-turn-tokens` and opens one pull request, "Sprint 6: Prompt-cache efficiency & per-turn token breakdown", whose body says `Closes #62`, lists the twelve task commits, and states deviations D1–D5 from "Design decisions", each with a one-line rationale, and the bias that D1 leaves (see "Cache usage is per span").
+3. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary.
+4. Optionally, with a real Copilot CLI session sending telemetry to a daemon whose `COPILOT_LEDGER_HOME` is a temporary directory, runs `gh ledger status --cache --turns --conversation <session id>` and checks that requests show `reported` states and that a first request shows a cache write with `0` cache reads. That re-checks D1's assumption on the installed Copilot CLI, which this sprint couldn't capture again.
+5. Asks `ledger-architect` to review the branch.
+
+This sprint doesn't bump the version, tag, or release. When the sprint closes, `ledger-architect` archives this plan with its amendments.
 
 ## Deferred to later sprints
 
-- **`gh ledger` in every message** (carried). Under the extension, breaker, alert, MCP, sign-in, `rates init`, and port messages still say `gh-ledger <command>`, and the guide's samples show it. Using `GhExtension.CommandName` in each would change many tests and the guide's samples. Recommended next.
-- **Workflow dependency lockfiles.** GitHub now recommends `gh actions-lock` lockfiles over SHA pins, kept current by Dependabot. Adopting them needs the user's decision on Dependabot.
-- **The guide on macOS and Linux.** The samples show Windows. A second `GuideWorld` platform could produce the setup scenario's `install` and `status` output for a shell profile.
-- **Reconciliation with `nano_aiu`** (carried). Store each `chat` span's `github.copilot.nano_aiu` and report drift per model, never the root `invoke_agent` total. Protobuf carries it as an IEEE `double`, so it needs a decimal-only design.
-- **Breaker state in `status`** (carried).
-- **MCP registration in `install`** (carried). `install` could run `copilot mcp add` or edit `~/.copilot/mcp-config.json`, with `uninstall` undoing it; until then, the docs give `copilot mcp remove ledger`.
-- **`COPILOT_LEDGER_HOME` in sign-in items** (carried). Pass the data directory to the sign-in item instead of warning.
-- **Headless Linux** (carried). A `systemd --user` unit for machines without a desktop session.
-- **A tool gate** (carried). A user-level `preToolUse` hook that denies tools while the breaker is open; it needs the hook contract verified live.
-- **Webhooks** (carried) as another alert channel.
-- **Smarter retry churn** (carried). Telling test and build commands apart needs the command text, which Copilot exports only with content capture.
-- **Signed receipts and a pre-push hook** (carried). A signature can't vouch for a local ledger, and a pre-push hook can't add to the push it runs in; see `.github/plans/archive/sprint-4.md`.
-- **`export-pr --since`** (carried), for branch names that are reused.
-- **Upgrading without stopping everything by hand** (carried). For example, a `gh ledger upgrade` command that stops the daemon, upgrades, and restarts it, instead of documenting `daemon stop` first. Copilot's MCP servers would still hold the binary on Windows, so it could only report which processes are left.
-- **Build provenance** (carried). `actions/attest-build-provenance` for the release assets, verifiable with `gh attestation verify`.
-- **Arm64 smoke tests** (carried). Run the `linux-arm64` and `win-arm64` binaries on Arm64 runners, and `osx-x64` under Rosetta.
-- **Checking for newer rates automatically** (carried), for example a `status` hint when the latest release's rates are newer.
-- **Receipts for fork pull requests** (carried). They'd need `pull_request_target` or a second workflow triggered by `workflow_run`, with care for untrusted input.
-- **Carried from Sprint 2:** a custom port in `install`, rates follow-ups, BYOK, local, and VS Code Local captures, file-exporter ingestion, Native AOT, and overflow-safe rollups, as described in `.github/plans/archive/sprint-2.md`.
+- **Migration numbers for #61 and #63.** This sprint takes schema version 4. Dual-lens costing (#61) and `gh ledger import` (#63) take the next free numbers in merge order, 5 and up, and their plans must say so.
+- **#61, dual-lens costing.** Retail cache-read and cache-write rates apply to the stored counters, which keep pricing an absent counter as 0 (all input uncached). Keep that pricing rule separate from the metrics rule (`CacheMetrics.IsReported`, `ReportedSql`).
+- **#63, `gh ledger import`.** Map Copilot's `session.usage_record` `cacheDetailsReported` onto `CacheCounterState`: `Reported` for both counters when it's true (a 0 is then a reported 0) and `Absent` when it's false. `RecordAsync` rejects `LegacyUnknown`, so imported rows can't use it unless that rule changes.
+- **#64, `gh ledger export`.** The public contracts it can chart are `GetCacheEfficiencyAsync` with `CacheEfficiencyRow` (including pull request rows), `GetTurnBreakdownAsync` with `TurnTokenRow`, and `GetContextBloatAsync` with `ContextBloatReport`.
+- **#65, `gh ledger audit`.** Cache-miss streaks over `GetTurnBreakdownAsync` rows, counting only rows where `CacheMetrics.IsReported` (their `CacheReadInputTokens` isn't null) and keeping sequences apart by `AgentSpanId`.
+- **User turns.** Group requests by `github.copilot.turn_id` or `interaction_id`, and mark `github.copilot.request.type = compaction` requests, which shrink input and could hide growth. Both need the attributes captured and stored first.
+- **Agent definitions.** `gen_ai.agent.id`, which the reference calls a stable agent-definition identifier, could group the same agent across invocations, alongside `agent_span_id` for instances.
+- **MCP tools for turns and bloat**, for example `get_turn_breakdown` and `get_context_bloat`, if agents need them; this sprint exposes them only in the CLI.
+- **A fresh capture of cache attributes** from Copilot CLI, the GitHub Copilot app, and VS Code, to re-check that a zero counter is always left out (D1's assumption).
+- **Optional follow-ups from the 2026-11-23 review.** (1) The `status --cache` footnote ends with "`*` marks a partial total" even when no row has a `*`. (2) Migration 4 upgrades legacy states once, so a pre-v4 daemon that keeps running after a newer command migrates the ledger (possible only off Windows, against the guide's upgrade steps) records rows as `legacy_unknown`, even with nonzero counters, and without `agent_span_id`, until it restarts; a later migration can repeat the two state `UPDATE`s. (3) `GetContextBloatAsync` computes input growth after the period filter, while `GetTurnBreakdownAsync` computes deltas before its filter, so a sequence that starts before `--since` grows from its first request inside the period. (4) The `(@trace IS NULL OR …)` and `(@conversation IS NULL OR …)` conditions of `GetTurnBreakdownAsync` keep SQLite from seeking `ix_spans_trace` or `ix_spans_conversation_start`; a full scan of a 160,000-span test ledger took 29 ms, so it isn't urgent. (5) `get_cache_efficiency`'s description could carry Task 12's caveat for agents. (6) A subagent's requests get a conversation ID only from their own spans or their own `invoke_agent` span, because the backfill doesn't cross nested agents; the Final step's live check can confirm that `--turns --conversation` lists them.
+- **Carried from Sprint 5:** `gh ledger` in every message, workflow dependency lockfiles, the guide on macOS and Linux, reconciliation with `nano_aiu`, breaker state in `status`, MCP registration in `install`, `COPILOT_LEDGER_HOME` in sign-in items, headless Linux, a tool gate, webhooks, smarter retry churn, signed receipts and a pre-push hook, `export-pr --since`, upgrading without stopping everything by hand, build provenance, Arm64 smoke tests, checking for newer rates automatically, receipts for fork pull requests, and the Sprint 2 carry-overs, as described in `.github/plans/archive/sprint-5.md`.

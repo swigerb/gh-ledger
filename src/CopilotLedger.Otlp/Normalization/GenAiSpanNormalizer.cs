@@ -99,18 +99,26 @@ public static class GenAiSpanNormalizer
         long output = 0;
         long cacheRead = 0;
         long cacheWrite = 0;
+        CacheCounterState cacheReadState = CacheCounterState.Absent;
+        CacheCounterState cacheWriteState = CacheCounterState.Absent;
 
         if (isInference)
         {
             if (!TryToken(attributes, GenAiAttributeNames.InputTokens, out input, out rejectionReason) ||
                 !TryToken(attributes, GenAiAttributeNames.OutputTokens, out output, out rejectionReason) ||
-                !TryToken(attributes, GenAiAttributeNames.CacheReadInputTokens, out cacheRead, out rejectionReason) ||
+                !TryToken(
+                    attributes,
+                    GenAiAttributeNames.CacheReadInputTokens,
+                    out cacheRead,
+                    out cacheReadState,
+                    out rejectionReason) ||
                 !TryToken(
                     attributes,
                     FindAttribute(attributes, GenAiAttributeNames.CacheWriteInputTokens) is not null
                         ? GenAiAttributeNames.CacheWriteInputTokens
                         : GenAiAttributeNames.LegacyCacheCreationInputTokens,
                     out cacheWrite,
+                    out cacheWriteState,
                     out rejectionReason))
             {
                 return false;
@@ -200,6 +208,8 @@ public static class GenAiSpanNormalizer
                 OutputTokens = output,
                 CacheReadInputTokens = cacheRead,
                 CacheWriteInputTokens = cacheWrite,
+                CacheReadState = cacheReadState,
+                CacheWriteState = cacheWriteState,
             };
         }
 
@@ -268,6 +278,20 @@ public static class GenAiSpanNormalizer
         value = attribute.Value.IntValue;
         rejectionReason = null;
         return true;
+    }
+
+    // Like TryToken, and also says whether the span carried the attribute. A missing attribute is Absent with value 0.
+    private static bool TryToken(
+        IReadOnlyList<OtlpAttribute> attributes,
+        string key,
+        out long value,
+        out CacheCounterState state,
+        out string? rejectionReason)
+    {
+        state = FindAttribute(attributes, key) is null
+            ? CacheCounterState.Absent
+            : CacheCounterState.Reported;
+        return TryToken(attributes, key, out value, out rejectionReason);
     }
 
     private static int? ReadServerPort(IReadOnlyList<OtlpAttribute> attributes)

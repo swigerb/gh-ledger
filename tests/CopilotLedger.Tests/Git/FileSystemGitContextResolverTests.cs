@@ -230,6 +230,109 @@ public sealed class FileSystemGitContextResolverTests
         Assert.Null(Resolve(temp, repo));
     }
 
+    [Fact]
+    public void Resolve_PullRequestCheckout_ReadsTheNumberFromTheMergeRef()
+    {
+        using TempDirectory temp = new();
+        using TempDirectory plain = new();
+        string repo = GitFixture.Create(temp.Path, pullRequest: 42);
+        string other = GitFixture.Create(plain.Path);
+
+        GitWorkspaceContext? result = Resolve(temp, Path.Combine(repo, "src"));
+        GitWorkspaceContext? withoutPullRequest = Resolve(plain, other);
+
+        Assert.NotNull(result);
+        Assert.Equal("feature/ledger", result.BranchName);
+        Assert.Equal("swigerb/copilot-ledger", result.RepositorySlug);
+        Assert.Equal(42, result.PullRequestNumber);
+        Assert.NotNull(withoutPullRequest);
+        Assert.Null(withoutPullRequest.PullRequestNumber);
+    }
+
+    public static TheoryData<string, int?> MergeConfigs => new()
+    {
+        { "[branch \"feature/x\"]\n\tremote = origin\n\tmerge = refs/pull/42/head\n", 42 },
+        { "[branch \"feature/x\"]\n\tremote = origin\n\tmerge = refs/heads/feature/x\n", null },
+        { "[branch \"other\"]\n\tmerge = refs/pull/42/head\n", null },
+        { "[branch \"Feature/X\"]\n\tmerge = refs/pull/42/head\n", null },
+        { "[Branch \"feature/x\"]\n\tMERGE = \"refs/pull/7/head\" ; gh pr checkout\n", 7 },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/42/head\n\tmerge = refs/heads/feature/x\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/42/head\n[branch \"feature/x\"]\n\tremote = origin\n", 42 },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/42/head\n[branch \"feature/x\"]\n\tmerge = refs/pull/43/head\n", 43 },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/2147483647/head\n", 2147483647 },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/2147483648/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/0/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/042/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/-1/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/+1/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/4 2/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/42/merge\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull/head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = refs/pull//head\n", null },
+        { "[branch \"feature/x\"]\n\tmerge = \"refs/pull/42/head\n", null },
+    };
+
+    [Theory]
+    [MemberData(nameof(MergeConfigs))]
+    public void Resolve_MergeConfig_YieldsOnlyExplicitPullRequestRefs(string branchConfig, int? expected)
+    {
+        using TempDirectory temp = new();
+        string repo = CreateDirectory(temp, "repo");
+        string git = CreateDirectory(repo, ".git");
+        Write(git, "HEAD", "ref: refs/heads/feature/x\n");
+        Write(git, "refs/heads/feature/x", Sha1 + "\n");
+        Write(git, "config", $"[remote \"origin\"]\n\turl = {OriginUrl}\n" + branchConfig);
+
+        GitWorkspaceContext? result = Resolve(temp, repo);
+
+        Assert.NotNull(result);
+        Assert.Equal(expected, result.PullRequestNumber);
+        Assert.Equal(OriginUrl, result.RemoteOriginUrl);
+        Assert.Equal("swigerb/copilot-ledger", result.RepositorySlug);
+    }
+
+    [Fact]
+    public void Resolve_DetachedHead_HasNoPullRequest()
+    {
+        using TempDirectory temp = new();
+        string repo = CreateDirectory(temp, "repo");
+        string git = CreateDirectory(repo, ".git");
+        Write(git, "HEAD", Sha1 + "\n");
+        Write(git, "config", "[branch \"feature/x\"]\n\tmerge = refs/pull/42/head\n");
+
+        GitWorkspaceContext? result = Resolve(temp, repo);
+
+        Assert.NotNull(result);
+        Assert.True(result.IsDetachedHead);
+        Assert.Null(result.PullRequestNumber);
+    }
+
+    [Fact]
+    public void Resolve_LinkedWorktree_ReadsTheMergeRefFromTheCommonConfig()
+    {
+        using TempDirectory temp = new();
+        string main = CreateDirectory(temp, "main");
+        string mainGit = CreateDirectory(main, ".git");
+        Write(mainGit, "HEAD", "ref: refs/heads/main\n");
+        Write(
+            mainGit,
+            "config",
+            $"[remote \"origin\"]\n\turl = {OriginUrl}\n[branch \"wt-branch\"]\n\tremote = origin\n\tmerge = refs/pull/9/head\n");
+        Write(mainGit, "refs/heads/wt-branch", Sha1 + "\n");
+        string worktreeGit = CreateDirectory(mainGit, "worktrees", "wt");
+        Write(worktreeGit, "HEAD", "ref: refs/heads/wt-branch\n");
+        Write(worktreeGit, "commondir", "../..\n");
+        string worktree = CreateDirectory(temp, "wt");
+        Write(worktree, ".git", "gitdir: " + worktreeGit + "\n");
+
+        GitWorkspaceContext? worktreeResult = Resolve(temp, worktree);
+        GitWorkspaceContext? mainResult = Resolve(temp, main);
+
+        Assert.Equal(9, worktreeResult!.PullRequestNumber);
+        Assert.Equal("main", mainResult!.BranchName);
+        Assert.Null(mainResult.PullRequestNumber);
+    }
+
     private static GitWorkspaceContext? Resolve(TempDirectory temp, string workingDirectory) =>
         new FileSystemGitContextResolver(temp.Path).Resolve(workingDirectory);
 

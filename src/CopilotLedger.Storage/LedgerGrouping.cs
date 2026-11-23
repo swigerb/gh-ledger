@@ -7,4 +7,5 @@ public enum LedgerGrouping
     Model,
     Agent,
     ChannelModel,
+    PullRequest,     // GetCacheEfficiencyAsync only: repository and pull request, or repository and branch without one
 }
