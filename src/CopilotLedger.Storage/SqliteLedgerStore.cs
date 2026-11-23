@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 
 namespace CopilotLedger.Storage;
 
-public sealed class SqliteLedgerStore
+public sealed partial class SqliteLedgerStore
 {
     private const string InsertSql = """
         INSERT INTO spans (
@@ -32,7 +32,8 @@ public sealed class SqliteLedgerStore
             @api_equivalent_usd_pico, @api_equivalent_status, @api_rate_card_model_id,
             @api_rates_version, @api_rate_card_sha256,
             @ingest_source, @canonical_usage_id, @imported_tool_call_count
-        ) ON CONFLICT (trace_id, span_id) DO NOTHING;
+        ) ON CONFLICT (trace_id, span_id) DO NOTHING
+        RETURNING id;
         """;
 
     // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
@@ -164,18 +165,47 @@ public sealed class SqliteLedgerStore
         }
 
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
-        await using SqliteTransaction transaction =
-            (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        // BEGIN IMMEDIATE: the authority rules read and write under the write lock, so an import runs before or after this.
+        await using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
         int inserted = 0;
         long recordedAtUnixMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
 
         foreach (LedgerEntry entry in batch)
         {
-            await using SqliteCommand command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = InsertSql;
-            AddInsertParameters(command, entry.Span, entry.Calculation, LiveProvenance(entry), recordedAtUnixMs);
-            inserted += await command.ExecuteNonQueryAsync(cancellationToken);
+            RowProvenance provenance = LiveProvenance(entry);
+            if (await InsertSpanAsync(
+                    transaction,
+                    entry.Span,
+                    entry.Calculation,
+                    provenance,
+                    recordedAtUnixMs,
+                    cancellationToken) is not long id)
+            {
+                continue;
+            }
+
+            inserted++;
+
+            // A live row supersedes the imported row of the same call, wherever it is (I1), and the imported rows of its
+            // conversation that it can't be matched to (I2, I3).
+            if (provenance.CanonicalUsageId is not null)
+            {
+                await UsageAuthority.SupersedeCanonicalAsync(
+                    transaction,
+                    provenance.CanonicalUsageId,
+                    id,
+                    cancellationToken);
+            }
+
+            if (entry.Span.ConversationId is not null)
+            {
+                await UsageAuthority.ReconcileConversationAsync(
+                    transaction,
+                    entry.Span.ConversationId,
+                    id,
+                    cancellationToken);
+            }
         }
 
         await transaction.CommitAsync(cancellationToken);
@@ -1117,6 +1147,15 @@ public sealed class SqliteLedgerStore
                     changed += await command.ExecuteNonQueryAsync(cancellationToken);
                 }
             }
+
+            // A live row whose conversation was just assigned follows the authority rules as if it had arrived with it.
+            foreach (string conversation in agents
+                .Select(agent => agent.ConversationId)
+                .OfType<string>()
+                .Distinct(StringComparer.Ordinal))
+            {
+                await UsageAuthority.ReconcileConversationAsync(transaction, conversation, null, cancellationToken);
+            }
         }
 
         await transaction.CommitAsync(cancellationToken);
@@ -1785,6 +1824,22 @@ public sealed class SqliteLedgerStore
             entry.Git?.BranchName,
             entry.Git?.HeadCommitSha,
             entry.Git?.PullRequestNumber);
+
+    // Inserts a spans row and returns its id, or null when (trace_id, span_id) already has a row.
+    private static async Task<long?> InsertSpanAsync(
+        SqliteTransaction transaction,
+        NormalizedGenAiSpan span,
+        CreditCalculationResult calculation,
+        RowProvenance provenance,
+        long recordedAtUnixMs,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = transaction.Connection!.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = InsertSql;
+        AddInsertParameters(command, span, calculation, provenance, recordedAtUnixMs);
+        return await command.ExecuteScalarAsync(cancellationToken) is long id ? id : null;
+    }
 
     private static void AddInsertParameters(
         SqliteCommand command,
