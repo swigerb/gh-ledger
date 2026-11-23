@@ -31,6 +31,7 @@ public sealed class CliHarness : IAsyncDisposable
             Error = new StringWriter(CultureInfo.InvariantCulture),
             DataDirectory = Path.Combine(root, "data"),
             CopilotHome = Path.Combine(root, "copilot-home"),
+            CodexHome = Path.Combine(root, "codex-home"),
             WorkingDirectory = root,
             TimeProvider = TimeProvider,
             Platform = Platform,

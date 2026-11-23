@@ -1,4 +1,5 @@
 using CopilotLedger.Core;
+using CopilotLedger.Core.Import;
 using CopilotLedger.Otlp.Attribution;
 using Microsoft.AspNetCore.Hosting;
 
@@ -10,6 +11,7 @@ public sealed record CliContext
     public required TextWriter Error { get; init; }
     public required string DataDirectory { get; init; }
     public required string CopilotHome { get; init; }
+    public required string CodexHome { get; init; }                                     // import --source codex
     public required string WorkingDirectory { get; init; }
     public required TimeProvider TimeProvider { get; init; }
     public required ICliPlatform Platform { get; init; }
@@ -25,8 +27,8 @@ public sealed record CliContext
     public string RatesOverlayPath => Path.Combine(DataDirectory, "rates.json");
 
     // DataDirectory: COPILOT_LEDGER_HOME when set and not blank, else LedgerPaths.DataDirectory.
-    // CopilotHome: CopilotSessionWorkspaceLocator.DefaultCopilotHome. WorkingDirectory: Environment.CurrentDirectory.
-    // TimeProvider: TimeProvider.System. Platform: new SystemCliPlatform().
+    // CopilotHome: CopilotSessionWorkspaceLocator.DefaultCopilotHome. CodexHome: CodexSessionLogSource.DefaultHome.
+    // WorkingDirectory: Environment.CurrentDirectory. TimeProvider: TimeProvider.System. Platform: new SystemCliPlatform().
     public static CliContext CreateDefault(TextWriter output, TextWriter error)
     {
         ArgumentNullException.ThrowIfNull(output);
@@ -40,6 +42,7 @@ public sealed record CliContext
                 ? LedgerPaths.DataDirectory
                 : overridePath,
             CopilotHome = CopilotSessionWorkspaceLocator.DefaultCopilotHome,
+            CodexHome = CodexSessionLogSource.DefaultHome,
             WorkingDirectory = Environment.CurrentDirectory,
             TimeProvider = TimeProvider.System,
             Platform = new SystemCliPlatform(),
