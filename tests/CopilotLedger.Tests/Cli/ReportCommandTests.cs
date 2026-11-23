@@ -110,9 +110,9 @@ public sealed class ReportCommandTests
             Normalize("""
             Branches in swigerb/copilot-ledger (last 30 days)
 
-            Branch          Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-            main                1         0      286.00       $2.86     $0.00        $0.00
-            feature/ledger      2         0       56.00       $0.56     $0.00        $0.23
+            Branch          Spans  Unpriced  AI credits  GitHub USD  BYOK USD  API equiv USD  Local saved
+            main                1         0      286.00       $2.86     $0.00          $2.86        $0.00
+            feature/ledger      2         0       56.00       $0.56     $0.00       Unpriced        $0.23
 
             """),
             run.Out);
@@ -156,10 +156,10 @@ public sealed class ReportCommandTests
             Normalize("""
             Agents in all repositories (all time)
 
-            Agent             Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-            ledger-architect      1         0      286.00       $2.86     $0.00        $0.00
-            ledger-builder        3         1       56.00       $0.56     $0.00        $0.23
-            (none)                1         0        0.00       $0.00     $0.32        $0.00
+            Agent             Spans  Unpriced  AI credits  GitHub USD  BYOK USD  API equiv USD  Local saved
+            ledger-architect      1         0      286.00       $2.86     $0.00          $2.86        $0.00
+            ledger-builder        3         1       56.00       $0.56     $0.00       Unpriced        $0.23
+            (none)                1         0        0.00       $0.00     $0.32       Unpriced        $0.00
 
             """),
             run.Out);
@@ -183,9 +183,9 @@ public sealed class ReportCommandTests
             Normalize("""
             Top 2 prompts by cost in all repositories (all time)
 
-            #  Started           Repository              Agents            Models                   Spans  AI credits  GitHub USD  BYOK USD  Local saved  Trace
-            1  2026-11-21 09:00  swigerb/copilot-ledger  ledger-architect  claude-opus-5.5              1      286.00       $2.86     $0.00        $0.00  11111111111111111111111111111111
-            2  2026-11-21 08:00  swigerb/copilot-ledger  ledger-builder    mai-code-2, qwen3.8-27b      2       56.00       $0.56     $0.00        $0.23  22222222222222222222222222222222
+            #  Started           Repository              Agents            Models                   Spans  AI credits  GitHub USD  BYOK USD  API equiv USD  Local saved  Trace
+            1  2026-11-21 09:00  swigerb/copilot-ledger  ledger-architect  claude-opus-5.5              1      286.00       $2.86     $0.00          $2.86        $0.00  11111111111111111111111111111111
+            2  2026-11-21 08:00  swigerb/copilot-ledger  ledger-builder    mai-code-2, qwen3.8-27b      2       56.00       $0.56     $0.00       Unpriced        $0.23  22222222222222222222222222222222
 
             """),
             run.Out);
@@ -569,7 +569,7 @@ public sealed class ReportCommandTests
         decimal? hitRatio)
     {
         Assert.Equal(
-            ["localSavedUsd", "cacheReportedSpans", "cacheUnreportedSpans", "cacheHitRatio"],
+            ["apiEquivalentEstimatedSpans", "cacheReportedSpans", "cacheUnreportedSpans", "cacheHitRatio"],
             row.EnumerateObject().Select(property => property.Name).TakeLast(4));
         Assert.Equal(reported, row.GetProperty("cacheReportedSpans").GetInt64());
         Assert.Equal(unreported, row.GetProperty("cacheUnreportedSpans").GetInt64());
@@ -651,10 +651,17 @@ public sealed class ReportCommandTests
         Rates:   2026-11-23
         Copilot: OTel export not enabled; run: gh-ledger install
 
-        Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-        Today             3         0      342.00       $3.42     $0.00        $0.23
-        Last 7 days       4         0      342.00       $3.42     $0.32        $0.23
-        Last 30 days      4         0      342.00       $3.42     $0.32        $0.23
+        Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  API equiv USD  Local saved
+        Today             3         0      342.00       $3.42     $0.00         $2.86*        $0.23
+        Last 7 days       4         0      342.00       $3.42     $0.32         $2.86*        $0.23
+        Last 30 days      4         0      342.00       $3.42     $0.32         $2.86*        $0.23
+
+        Period        GitHub USD  At API prices  GitHub/API  Local saved  Local at API prices
+        Today              $3.42         $2.86*         n/a        $0.23             Unpriced
+        Last 7 days        $3.42         $2.86*         n/a        $0.23             Unpriced
+        Last 30 days       $3.42         $2.86*         n/a        $0.23             Unpriced
+
+        3 of 4 spans in the last 30 days had no API-equivalent price. API-equivalent amounts leave them out; * marks a partial amount.
 
         Period        Cache hit  Cache reported
         Today             54.5%  2 of 3 spans

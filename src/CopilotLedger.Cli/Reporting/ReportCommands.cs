@@ -28,6 +28,7 @@ internal static class ReportCommands
         new("AI credits", true),
         new("GitHub USD", true),
         new("BYOK USD", true),
+        new("API equiv USD", true),
         new("Local saved", true),
     ];
 
@@ -371,14 +372,17 @@ internal static class ReportCommands
             ("Last 7 days", RequirePeriod(context, "7d")),
             ("Last 30 days", RequirePeriod(context, "30d")),
         ];
-        List<(string Label, Period Period, LedgerRollupRow Total)> totals = [];
+        List<(string Label, Period Period, StatusTotals Totals)> totals = [];
         foreach ((string label, Period period) in periods)
         {
             IReadOnlyList<LedgerRollupRow> rows = await store.GetRollupAsync(
-                LedgerGrouping.Repository,
+                LedgerGrouping.ChannelModel,
                 new LedgerFilter { From = period.From },
                 cancellationToken);
-            totals.Add((label, period, Sum(rows)));
+            totals.Add((label, period, new StatusTotals(
+                Sum(rows),
+                Sum([.. rows.Where(row => row.Channel == BillingChannel.GitHubAiCredits)]),
+                Sum([.. rows.Where(row => row.Channel == BillingChannel.Local)]))));
         }
 
         if (json)
@@ -418,7 +422,40 @@ internal static class ReportCommands
             context.Out,
             [new("Period", false), .. MoneyColumns],
             totals.Select(item =>
-                (IReadOnlyList<string>)[item.Label, .. MoneyCells(item.Total)]).ToArray());
+                (IReadOnlyList<string>)[item.Label, .. MoneyCells(item.Totals.All)]).ToArray());
+        context.Out.WriteLine();
+        string[][] lenses = totals.Select(item => new[]
+        {
+            item.Label,
+            LedgerFormat.Usd(item.Totals.Copilot.AiCreditsUsd),
+            LedgerFormat.ApiEquivalent(item.Totals.Copilot),
+            BilledToApi(item.Totals.Copilot),
+            LedgerFormat.Usd(item.Totals.Local.LocalSavedUsd),
+            LedgerFormat.ApiEquivalent(item.Totals.Local),
+        }).ToArray();
+        TableWriter.Write(
+            context.Out,
+            [
+                new("Period", false),
+                new("GitHub USD", true),
+                new("At API prices", true),
+                new("GitHub/API", true),
+                new("Local saved", true),
+                new("Local at API prices", true),
+            ],
+            lenses);
+        LedgerRollupRow widest = totals[^1].Totals.All;
+        WriteApiEquivalentFootnotes(
+            context,
+            [
+                .. totals.Select(item => LedgerFormat.ApiEquivalent(item.Totals.All)),
+                .. lenses.SelectMany(row => new[] { row[2], row[5] }),
+            ],
+            widest.SpanCount,
+            widest.ApiEquivalentUnpricedSpanCount,
+            widest.ApiEquivalentEstimatedSpanCount,
+            " in the last 30 days");
+
         context.Out.WriteLine();
         TableWriter.Write(
             context.Out,
@@ -427,8 +464,8 @@ internal static class ReportCommands
                 (IReadOnlyList<string>)
                 [
                     item.Label,
-                    LedgerFormat.Percent(item.Total.CacheHitRatio),
-                    $"{LedgerFormat.Count(item.Total.CacheReportedSpanCount)} of {Spans(item.Total.SpanCount)}",
+                    LedgerFormat.Percent(item.Totals.All.CacheHitRatio),
+                    $"{LedgerFormat.Count(item.Totals.All.CacheReportedSpanCount)} of {Spans(item.Totals.All.SpanCount)}",
                 ]).ToArray());
         return 0;
     }
@@ -531,6 +568,13 @@ internal static class ReportCommands
             return (IReadOnlyList<string>)[.. identifiers, .. MoneyCells(row)];
         }).ToArray();
         TableWriter.Write(context.Out, [.. leading, .. MoneyColumns], tableRows);
+        WriteApiEquivalentFootnotes(
+            context,
+            [.. rows.Select(LedgerFormat.ApiEquivalent)],
+            rows.Sum(row => row.SpanCount),
+            rows.Sum(row => row.ApiEquivalentUnpricedSpanCount),
+            rows.Sum(row => row.ApiEquivalentEstimatedSpanCount),
+            string.Empty);
         return 0;
     }
 
@@ -580,6 +624,7 @@ internal static class ReportCommands
             new("AI credits", true),
             new("GitHub USD", true),
             new("BYOK USD", true),
+            new("API equiv USD", true),
             new("Local saved", true),
             new("Trace", false),
         ];
@@ -595,10 +640,18 @@ internal static class ReportCommands
                 LedgerFormat.Credits(row.AiCredits),
                 LedgerFormat.Usd(row.AiCreditsUsd),
                 LedgerFormat.Usd(row.FoundryByokUsd),
+                LedgerFormat.ApiEquivalent(row),
                 LedgerFormat.Usd(row.LocalSavedUsd),
                 row.TraceId,
             ]).ToArray();
         TableWriter.Write(context.Out, columns, tableRows);
+        WriteApiEquivalentFootnotes(
+            context,
+            [.. rows.Select(LedgerFormat.ApiEquivalent)],
+            rows.Sum(row => row.SpanCount),
+            rows.Sum(row => row.ApiEquivalentUnpricedSpanCount),
+            rows.Sum(row => row.ApiEquivalentEstimatedSpanCount),
+            string.Empty);
         return 0;
     }
 
@@ -903,7 +956,7 @@ internal static class ReportCommands
         string? ratesError,
         bool enabled,
         IReadOnlyList<string> warnings,
-        IReadOnlyList<(string Label, Period Period, LedgerRollupRow Total)> totals,
+        IReadOnlyList<(string Label, Period Period, StatusTotals Totals)> totals,
         bool extension,
         bool downloadedRates)
     {
@@ -958,12 +1011,40 @@ internal static class ReportCommands
 
         writer.WriteEndArray();
         writer.WriteStartArray("periods");
-        foreach ((string _, Period period, LedgerRollupRow total) in totals)
+        foreach ((string _, Period period, StatusTotals periodTotals) in totals)
         {
+            LedgerRollupRow total = periodTotals.All;
             writer.WriteStartObject();
             writer.WriteString("label", period.Label);
             LedgerFormat.WriteTime(writer, "from", period.From);
             LedgerFormat.WriteTotals(writer, total);
+            LedgerFormat.WriteApiEquivalent(writer, total);
+            writer.WritePropertyName("lenses");
+            writer.WriteStartObject();
+            writer.WritePropertyName("copilot");
+            writer.WriteStartObject();
+            writer.WriteNumber("spans", periodTotals.Copilot.SpanCount);
+            writer.WriteNumber("unpricedSpans", periodTotals.Copilot.UnpricedSpanCount);
+            LedgerFormat.WriteMoney(writer, "aiCredits", periodTotals.Copilot.AiCredits);
+            LedgerFormat.WriteMoney(writer, "aiCreditsUsd", periodTotals.Copilot.AiCreditsUsd);
+            LedgerFormat.WriteApiEquivalent(
+                writer,
+                periodTotals.Copilot.ApiEquivalentUsd,
+                periodTotals.Copilot.ApiEquivalentUnpricedSpanCount,
+                periodTotals.Copilot.ApiEquivalentEstimatedSpanCount);
+            LedgerFormat.WriteDecimal(writer, "billedToApiRatio", BilledToApiRatio(periodTotals.Copilot));
+            writer.WriteEndObject();
+            writer.WritePropertyName("local");
+            writer.WriteStartObject();
+            writer.WriteNumber("spans", periodTotals.Local.SpanCount);
+            LedgerFormat.WriteMoney(writer, "localSavedUsd", periodTotals.Local.LocalSavedUsd);
+            LedgerFormat.WriteApiEquivalent(
+                writer,
+                periodTotals.Local.ApiEquivalentUsd,
+                periodTotals.Local.ApiEquivalentUnpricedSpanCount,
+                periodTotals.Local.ApiEquivalentEstimatedSpanCount);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
             writer.WritePropertyName("cache");
             writer.WriteStartObject();
             writer.WriteNumber("cacheReportedSpans", total.CacheReportedSpanCount);
@@ -1016,6 +1097,7 @@ internal static class ReportCommands
             }
 
             LedgerFormat.WriteTotals(writer, row);
+            LedgerFormat.WriteApiEquivalent(writer, row);
             LedgerFormat.WriteCacheCoverage(writer, row);
             writer.WriteEndObject();
         }
@@ -1080,6 +1162,7 @@ internal static class ReportCommands
 
             writer.WriteEndArray();
             LedgerFormat.WriteTotals(writer, row);
+            LedgerFormat.WriteApiEquivalent(writer, row);
             writer.WriteEndObject();
         }
 
@@ -1300,6 +1383,7 @@ internal static class ReportCommands
         LedgerFormat.Credits(row.AiCredits),
         LedgerFormat.Usd(row.AiCreditsUsd),
         LedgerFormat.Usd(row.FoundryByokUsd),
+        LedgerFormat.ApiEquivalent(row),
         LedgerFormat.Usd(row.LocalSavedUsd),
     ];
 
@@ -1351,6 +1435,37 @@ internal static class ReportCommands
 
     private static string Spans(long count) =>
         $"{LedgerFormat.Count(count)} {(count == 1 ? "span" : "spans")}";
+
+    // A blank line and the footnotes for a table's API-equivalent cells: one when a cell has "*", then one when a cell has
+    // "~". spans, unpricedSpans, and estimatedSpans are the table's totals, for the spans that scope names.
+    private static void WriteApiEquivalentFootnotes(
+        CliContext context,
+        IReadOnlyList<string> cells,
+        long spans,
+        long unpricedSpans,
+        long estimatedSpans,
+        string scope)
+    {
+        bool partial = cells.Any(cell => cell.EndsWith('*'));
+        bool estimate = cells.Any(cell => cell.StartsWith('~'));
+        if (!partial && !estimate)
+        {
+            return;
+        }
+
+        context.Out.WriteLine();
+        if (partial)
+        {
+            context.Out.WriteLine(
+                $"{LedgerFormat.Count(unpricedSpans)} of {Spans(spans)}{scope} had no API-equivalent price. API-equivalent amounts leave them out; * marks a partial amount.");
+        }
+
+        if (estimate)
+        {
+            context.Out.WriteLine(
+                $"{LedgerFormat.Count(estimatedSpans)} priced {(estimatedSpans == 1 ? "span" : "spans")}{scope} reported no cache counters, so all of {(estimatedSpans == 1 ? "its" : "their")} input is priced as uncached; ~ marks an estimate.");
+        }
+    }
 
     private static string Requests(long count) =>
         $"{LedgerFormat.Count(count)} {(count == 1 ? "request" : "requests")}";
@@ -1424,4 +1539,25 @@ internal static class ReportCommands
 
     private static Period RequirePeriod(CliContext context, string value) =>
         ParsePeriod(context, value);
+
+    // GitHub-billed USD (AI credits at $0.01 each) per USD of the same requests at API list prices. null unless both views
+    // priced every one of them and the API-equivalent amount isn't 0.
+    private static decimal? BilledToApiRatio(LedgerRollupRow copilot) =>
+        copilot.SpanCount > 0
+        && copilot.UnpricedSpanCount == 0
+        && copilot.ApiEquivalentUnpricedSpanCount == 0
+        && copilot.ApiEquivalentUsd is decimal api
+        && api != 0m
+            ? copilot.AiCredits * AiCreditMath.UsdPerAiCredit / api
+            : null;
+
+    // BilledToApiRatio with two decimal places, rounded half away from zero, as 1.25x, after "~" when the API-equivalent amount
+    // is an estimate; n/a when there's no ratio.
+    private static string BilledToApi(LedgerRollupRow copilot) =>
+        BilledToApiRatio(copilot) is decimal ratio
+            ? $"{(copilot.ApiEquivalentEstimatedSpanCount > 0 ? "~" : "")}{decimal.Round(ratio, 2, MidpointRounding.AwayFromZero).ToString("0.00", CultureInfo.InvariantCulture)}x"
+            : "n/a";
+
+    // A status period's totals: All its spans, the GitHub-billed (Copilot) ones, and the Local ones.
+    private sealed record StatusTotals(LedgerRollupRow All, LedgerRollupRow Copilot, LedgerRollupRow Local);
 }

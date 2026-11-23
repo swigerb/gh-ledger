@@ -70,7 +70,7 @@ The port defaults to 4318. Only one daemon runs at a time. Copilot's telemetry i
 
 | Command | Reports |
 |---|---|
-| `gh ledger status [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals and cache hit ratios for today and the last 7 and 30 days |
+| `gh ledger status [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals, billed amounts compared with API list prices, and cache hit ratios for today and the last 7 and 30 days |
 | `gh ledger branch [--repo <key> \| --all-repos] [--since <period>] [--json]` | Spend by branch in the current repository, or in another or every repository; outside a Git repository, every repository |
 | `gh ledger agents [--repo <key>] [--since <period>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
 | `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
@@ -79,9 +79,24 @@ The port defaults to 4318. Only one daemon runs at a time. Copilot's telemetry i
 - A repository key is an `owner/repo` slug, a local repository root for a repository whose `origin` has no `owner/repo` path, or `(none)` for spend outside any repository.
 - `--since` takes `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date; the default is `30d`.
 - Tables round money to cents; JSON keeps exact amounts.
-- Spend is split into GitHub AI credits (`AI credits` and `GitHub USD`), Foundry BYOK (`BYOK USD`), and local models, whose `Local saved` is the cloud spend they avoided. `Unpriced` counts requests without a price; see [configuration.md](configuration.md).
+- Spend is split into GitHub AI credits (`AI credits` and `GitHub USD`), Foundry BYOK (`BYOK USD`), and local models, whose `Local saved` is the cloud spend they avoided. `Unpriced` counts requests without a price; see [configuration.md](configuration.md). `API equiv USD` compares the same requests with API list prices; see [API-equivalent USD](#api-equivalent-usd).
 - An agent shows as `(none)` when Copilot reports no agent name, as its default agent does. Built-in subagents such as `explore` report their own names, and a custom agent reports the `name` in its `.agent.md` file, or the file's name without `.agent.md`.
 - `status --json` adds a `cache` object to each period, and each row of `branch --json` and `agents --json` adds `cacheReportedSpans`, `cacheUnreportedSpans`, and `cacheHitRatio`. See [Prompt-cache efficiency](#prompt-cache-efficiency).
+
+### API-equivalent USD
+
+`API equiv USD` is what the same requests would cost at each model's API list prices: a comparison, never part of what you're billed, and never counted toward budgets or the circuit breaker. See [API-equivalent prices](configuration.md#api-equivalent-prices) for how requests are priced.
+
+- `Unpriced` means no request in the row has an API-equivalent price, never $0.00. A row with no requests shows `$0.00`.
+- `*` after an amount means some of the row's requests have no API-equivalent price and are left out: their model has no list price, such as the MAI models, the request is local and the local baseline has none, its token counts are inconsistent, or it was recorded before gh-ledger had API list prices (see `gh ledger rates backfill-api-equivalent` in [Rates](#rates)).
+- `~` before an amount means it's an estimate: some of its requests reported no cache counters, so all of their input is priced as uncached, which can be more than they cost.
+- A footnote under the table counts the requests behind each mark it uses. In `status`, it counts the last 30 days, which include the other periods.
+- `status` adds a table that compares, for each period, `GitHub USD` with the same GitHub-billed requests `At API prices`, and `Local saved` with the local requests at API list prices (`Local at API prices`). `GitHub/API` is GitHub USD divided by the API-equivalent amount, with AI credits at $0.01, rounded to two decimal places; it shows `n/a` unless every GitHub-billed request in the period has both prices and the API-equivalent amount isn't 0, and `~` marks an estimate. Retail and avoided amounts are never added to billed spend.
+
+In JSON, amounts are exact. The names follow the other fields: GitHub AI credits used are `aiCredits`, local-offload savings are `localSavedUsd`, and API-equivalent USD is `apiEquivalentUsd`.
+
+- `status --json` periods, rows of `branch --json` and `agents --json`, and rows of `top-prompts --json` add, after `localSavedUsd`: `apiEquivalentUsd` (`null` when no request has an API-equivalent price), `apiEquivalentUnpricedSpans` (the requests without one), and `apiEquivalentEstimatedSpans` (priced requests that reported no cache counters).
+- `status --json` periods also add `lenses`, before `cache`. `lenses.copilot` covers the GitHub-billed requests: `spans`, `unpricedSpans`, `aiCredits`, `aiCreditsUsd`, the three API-equivalent fields, and `billedToApiRatio`, the exact `GitHub/API` ratio or `null`. `lenses.local` covers the local requests: `spans`, `localSavedUsd`, and the three API-equivalent fields.
 
 ## Prompt-cache efficiency
 
