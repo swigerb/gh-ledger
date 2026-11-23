@@ -232,6 +232,106 @@ public sealed class SqliteLedgerStore
         return rows;
     }
 
+    // Prompt-cache efficiency by group, largest input first, then by the group key. grouping is Repository, Branch, Model,
+    // Agent, or PullRequest, which groups spans by repository and pull request number, and spans without one by repository
+    // and branch. Throws ArgumentOutOfRangeException for ChannelModel.
+    public async Task<IReadOnlyList<CacheEfficiencyRow>> GetCacheEfficiencyAsync(
+        LedgerGrouping grouping,
+        LedgerFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        (string keyColumns, string keyAliases) = grouping switch
+        {
+            LedgerGrouping.Repository =>
+                ("COALESCE(repo_slug, repo_root, '(none)') AS repository",
+                 "repository"),
+            LedgerGrouping.Branch =>
+                ("""
+                 COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                          COALESCE(branch_name, '(none)') AS branch
+                 """,
+                 "repository, branch"),
+            LedgerGrouping.Model =>
+                ("COALESCE(model_id, '(none)') AS model",
+                 "model"),
+            LedgerGrouping.Agent =>
+                ("COALESCE(agent_name, '(none)') AS agent",
+                 "agent"),
+            LedgerGrouping.PullRequest =>
+                ("""
+                 COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                          pull_request_number AS pull_request,
+                          CASE WHEN pull_request_number IS NULL THEN COALESCE(branch_name, '(none)') END AS branch
+                 """,
+                 "repository, pull_request, branch"),
+            _ => throw new ArgumentOutOfRangeException(nameof(grouping), grouping, null),
+        };
+
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {keyColumns},
+                   COUNT(*)                                                                AS span_count,
+                   SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END)                          AS cache_reported_span_count,
+                   SUM(input_tokens)                                                       AS input_tokens,
+                   SUM(output_tokens)                                                      AS output_tokens,
+                   MAX(input_tokens)                                                       AS max_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN input_tokens ELSE 0 END)               AS reported_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_read_input_tokens ELSE 0 END)    AS reported_cache_read_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN cache_write_input_tokens ELSE 0 END)   AS reported_cache_write_input_tokens,
+                   SUM(CASE WHEN {ReportedSql} THEN {UncachedSql} ELSE 0 END)              AS reported_uncached_input_tokens,
+                   SUM({UncachedSql})                                                      AS estimated_uncached_input_tokens
+            FROM spans
+            WHERE {FilterSql}
+            GROUP BY {keyAliases}
+            ORDER BY input_tokens DESC, {keyAliases} ASC;
+            """;
+        AddFilterParameters(command, filter);
+
+        List<CacheEfficiencyRow> rows = [];
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            bool hasRepository = grouping is LedgerGrouping.Repository
+                or LedgerGrouping.Branch
+                or LedgerGrouping.PullRequest;
+            bool hasBranch = grouping is LedgerGrouping.Branch or LedgerGrouping.PullRequest
+                && !reader.IsDBNull(reader.GetOrdinal("branch"));
+            rows.Add(new CacheEfficiencyRow
+            {
+                Repository = hasRepository ? reader.GetString(reader.GetOrdinal("repository")) : null,
+                Branch = hasBranch ? reader.GetString(reader.GetOrdinal("branch")) : null,
+                PullRequestNumber = grouping == LedgerGrouping.PullRequest
+                    && !reader.IsDBNull(reader.GetOrdinal("pull_request"))
+                        ? reader.GetInt32(reader.GetOrdinal("pull_request"))
+                        : null,
+                Model = grouping == LedgerGrouping.Model
+                    ? reader.GetString(reader.GetOrdinal("model"))
+                    : null,
+                Agent = grouping == LedgerGrouping.Agent
+                    ? reader.GetString(reader.GetOrdinal("agent"))
+                    : null,
+                SpanCount = reader.GetInt64(reader.GetOrdinal("span_count")),
+                CacheReportedSpanCount = reader.GetInt64(reader.GetOrdinal("cache_reported_span_count")),
+                InputTokens = reader.GetInt64(reader.GetOrdinal("input_tokens")),
+                OutputTokens = reader.GetInt64(reader.GetOrdinal("output_tokens")),
+                MaxInputTokens = reader.GetInt64(reader.GetOrdinal("max_input_tokens")),
+                ReportedInputTokens = reader.GetInt64(reader.GetOrdinal("reported_input_tokens")),
+                ReportedCacheReadInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_cache_read_input_tokens")),
+                ReportedCacheWriteInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_cache_write_input_tokens")),
+                ReportedUncachedInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("reported_uncached_input_tokens")),
+                EstimatedUncachedInputTokens =
+                    reader.GetInt64(reader.GetOrdinal("estimated_uncached_input_tokens")),
+            });
+        }
+
+        return rows;
+    }
+
     // Inserts links in one transaction and returns the number inserted. Existing (trace_id, span_id) rows are kept unchanged.
     // Throws InvalidOperationException if InitializeAsync hasn't run.
     public async Task<int> RecordSpanLinksAsync(
