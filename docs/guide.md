@@ -379,17 +379,18 @@ The action posts the receipt as a comment on the pull request:
 > - **GitHub AI Credits:** 617.75 credits ($6.18) across 6 turns: `claude-opus-5.5` 599.00, `mai-code-2` 18.75
 > - **Foundry BYOK:** $0.49 across 1 turn: `gpt-6.1-sol` $0.49
 > - **Local offload:** 309,000 tokens across 1 turn ($0.00 billed • $0.17 cloud spend avoided): `qwen3.8-27b` 309,000
+> - **API-equivalent (retail):** $6.49 at API list prices • 2 turns unpriced • estimated: 1 turn reported no cache counters
 > - **Circuit breaker:** 1 trip • max single-prompt burn: 504.00 credits
 >
 > <details>
 > <summary>Details and data</summary>
 >
-> | Billing | Model | Turns | Unpriced | Input tokens | Output tokens | Cost | Cloud spend avoided |
-> | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-> | GitHub AI Credits | `claude-opus-5.5` | 5 | 0 | 2,400,000 | 95,000 | 599.00 credits ($5.99) | $0.00 |
-> | Foundry BYOK | `gpt-6.1-sol` | 1 | 0 | 200,000 | 10,000 | $0.49 | $0.00 |
-> | GitHub AI Credits | `mai-code-2` | 1 | 0 | 300,000 | 15,000 | 18.75 credits ($0.19) | $0.00 |
-> | Local | `qwen3.8-27b` | 1 | 0 | 300,000 | 9,000 | $0.00 | $0.17 |
+> | Billing | Model | Turns | Unpriced | Input tokens | Output tokens | Cost | API-equivalent | Cloud spend avoided |
+> | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+> | GitHub AI Credits | `claude-opus-5.5` | 5 | 0 | 2,400,000 | 95,000 | 599.00 credits ($5.99) | $5.99 | $0.00 |
+> | Foundry BYOK | `gpt-6.1-sol` | 1 | 0 | 200,000 | 10,000 | $0.49 | $0.50 (estimate) | $0.00 |
+> | GitHub AI Credits | `mai-code-2` | 1 | 0 | 300,000 | 15,000 | 18.75 credits ($0.19) | Unpriced | $0.00 |
+> | Local | `qwen3.8-27b` | 1 | 0 | 300,000 | 9,000 | $0.00 | Unpriced | $0.17 |
 >
 > Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.4.1
 >
@@ -413,7 +414,10 @@ The action posts the receipt as a comment on the pull request:
 >     "aiCredits": 617.75,
 >     "aiCreditsUsd": 6.1775,
 >     "foundryByokUsd": 0.49,
->     "localSavedUsd": 0.1725
+>     "localSavedUsd": 0.1725,
+>     "apiEquivalentUsd": 6.49,
+>     "apiEquivalentUnpricedSpans": 2,
+>     "apiEquivalentEstimatedSpans": 1
 >   },
 >   "prompts": 4,
 >   "maxPromptCredits": 504,
@@ -431,7 +435,10 @@ The action posts the receipt as a comment on the pull request:
 >       "aiCredits": 599,
 >       "aiCreditsUsd": 5.99,
 >       "foundryByokUsd": 0,
->       "localSavedUsd": 0
+>       "localSavedUsd": 0,
+>       "apiEquivalentUsd": 5.99,
+>       "apiEquivalentUnpricedSpans": 0,
+>       "apiEquivalentEstimatedSpans": 0
 >     },
 >     {
 >       "channel": "foundry_byok",
@@ -445,7 +452,10 @@ The action posts the receipt as a comment on the pull request:
 >       "aiCredits": 0,
 >       "aiCreditsUsd": 0,
 >       "foundryByokUsd": 0.49,
->       "localSavedUsd": 0
+>       "localSavedUsd": 0,
+>       "apiEquivalentUsd": 0.5,
+>       "apiEquivalentUnpricedSpans": 0,
+>       "apiEquivalentEstimatedSpans": 1
 >     },
 >     {
 >       "channel": "github_ai_credits",
@@ -459,7 +469,10 @@ The action posts the receipt as a comment on the pull request:
 >       "aiCredits": 18.75,
 >       "aiCreditsUsd": 0.1875,
 >       "foundryByokUsd": 0,
->       "localSavedUsd": 0
+>       "localSavedUsd": 0,
+>       "apiEquivalentUsd": null,
+>       "apiEquivalentUnpricedSpans": 1,
+>       "apiEquivalentEstimatedSpans": 0
 >     },
 >     {
 >       "channel": "local",
@@ -473,7 +486,10 @@ The action posts the receipt as a comment on the pull request:
 >       "aiCredits": 0,
 >       "aiCreditsUsd": 0,
 >       "foundryByokUsd": 0,
->       "localSavedUsd": 0.1725
+>       "localSavedUsd": 0.1725,
+>       "apiEquivalentUsd": null,
+>       "apiEquivalentUnpricedSpans": 1,
+>       "apiEquivalentEstimatedSpans": 0
 >     }
 >   ]
 > }

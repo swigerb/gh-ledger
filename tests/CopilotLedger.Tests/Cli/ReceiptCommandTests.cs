@@ -20,19 +20,20 @@ public sealed class ReceiptCommandTests
         - **Foundry BYOK:** $0.32 across 1 turn: `gpt-6.1-sol` $0.32
         - **Local offload:** 412,000 tokens across 1 turn ($0.00 billed • $0.23 cloud spend avoided): `qwen3.8-27b` 412,000
         - **Not priced:** 1 turn: `mystery-1`
+        - **API-equivalent (retail):** $2.86 at API list prices • 5 turns unpriced
         - **Circuit breaker:** 2 trips • max single-prompt burn: 317.50 credits
 
         <details>
         <summary>Details and data</summary>
 
-        | Billing | Model | Turns | Unpriced | Input tokens | Output tokens | Cost | Cloud spend avoided |
-        | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-        | GitHub AI Credits | `claude-opus-5.5` | 1 | 0 | 1,200,000 | 50,000 | 286.00 credits ($2.86) | $0.00 |
-        | GitHub AI Credits | `mai-code-2` | 1 | 0 | 1,000,000 | 100,000 | 56.00 credits ($0.56) | $0.00 |
-        | Foundry BYOK | `gpt-6.1-sol` | 1 | 0 | 100,000 | 10,000 | $0.32 | $0.00 |
-        | Local | `qwen3.8-27b` | 1 | 0 | 400,000 | 12,000 | $0.00 | $0.23 |
-        | GitHub AI Credits | `gpt-unknown` | 1 | 1 | 1,000 | 100 | 0.00 credits ($0.00) | $0.00 |
-        | Not priced | `mystery-1` | 1 | 1 | 2,000 | 200 | $0.00 | $0.00 |
+        | Billing | Model | Turns | Unpriced | Input tokens | Output tokens | Cost | API-equivalent | Cloud spend avoided |
+        | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+        | GitHub AI Credits | `claude-opus-5.5` | 1 | 0 | 1,200,000 | 50,000 | 286.00 credits ($2.86) | $2.86 | $0.00 |
+        | GitHub AI Credits | `mai-code-2` | 1 | 0 | 1,000,000 | 100,000 | 56.00 credits ($0.56) | Unpriced | $0.00 |
+        | Foundry BYOK | `gpt-6.1-sol` | 1 | 0 | 100,000 | 10,000 | $0.32 | Unpriced | $0.00 |
+        | Local | `qwen3.8-27b` | 1 | 0 | 400,000 | 12,000 | $0.00 | Unpriced | $0.23 |
+        | GitHub AI Credits | `gpt-unknown` | 1 | 1 | 1,000 | 100 | 0.00 credits ($0.00) | Unpriced | $0.00 |
+        | Not priced | `mystery-1` | 1 | 1 | 2,000 | 200 | $0.00 | Unpriced | $0.00 |
 
         Repository `swigerb/copilot-ledger` • 3 prompts • commit `0123456789ab` • generated 2026-11-21 15:00 UTC by gh-ledger <version>
 
@@ -56,7 +57,10 @@ public sealed class ReceiptCommandTests
             "aiCredits": 342,
             "aiCreditsUsd": 3.42,
             "foundryByokUsd": 0.315,
-            "localSavedUsd": 0.23
+            "localSavedUsd": 0.23,
+            "apiEquivalentUsd": 2.86,
+            "apiEquivalentUnpricedSpans": 5,
+            "apiEquivalentEstimatedSpans": 0
           },
           "prompts": 3,
           "maxPromptCredits": 317.5,
@@ -74,7 +78,10 @@ public sealed class ReceiptCommandTests
               "aiCredits": 286,
               "aiCreditsUsd": 2.86,
               "foundryByokUsd": 0,
-              "localSavedUsd": 0
+              "localSavedUsd": 0,
+              "apiEquivalentUsd": 2.86,
+              "apiEquivalentUnpricedSpans": 0,
+              "apiEquivalentEstimatedSpans": 0
             },
             {
               "channel": "github_ai_credits",
@@ -88,7 +95,10 @@ public sealed class ReceiptCommandTests
               "aiCredits": 56,
               "aiCreditsUsd": 0.56,
               "foundryByokUsd": 0,
-              "localSavedUsd": 0
+              "localSavedUsd": 0,
+              "apiEquivalentUsd": null,
+              "apiEquivalentUnpricedSpans": 1,
+              "apiEquivalentEstimatedSpans": 0
             },
             {
               "channel": "foundry_byok",
@@ -102,7 +112,10 @@ public sealed class ReceiptCommandTests
               "aiCredits": 0,
               "aiCreditsUsd": 0,
               "foundryByokUsd": 0.315,
-              "localSavedUsd": 0
+              "localSavedUsd": 0,
+              "apiEquivalentUsd": null,
+              "apiEquivalentUnpricedSpans": 1,
+              "apiEquivalentEstimatedSpans": 0
             },
             {
               "channel": "local",
@@ -116,7 +129,10 @@ public sealed class ReceiptCommandTests
               "aiCredits": 0,
               "aiCreditsUsd": 0,
               "foundryByokUsd": 0,
-              "localSavedUsd": 0.23
+              "localSavedUsd": 0.23,
+              "apiEquivalentUsd": null,
+              "apiEquivalentUnpricedSpans": 1,
+              "apiEquivalentEstimatedSpans": 0
             },
             {
               "channel": "github_ai_credits",
@@ -130,7 +146,10 @@ public sealed class ReceiptCommandTests
               "aiCredits": 0,
               "aiCreditsUsd": 0,
               "foundryByokUsd": 0,
-              "localSavedUsd": 0
+              "localSavedUsd": 0,
+              "apiEquivalentUsd": null,
+              "apiEquivalentUnpricedSpans": 1,
+              "apiEquivalentEstimatedSpans": 0
             },
             {
               "channel": "unpriced",
@@ -144,7 +163,10 @@ public sealed class ReceiptCommandTests
               "aiCredits": 0,
               "aiCreditsUsd": 0,
               "foundryByokUsd": 0,
-              "localSavedUsd": 0
+              "localSavedUsd": 0,
+              "apiEquivalentUsd": null,
+              "apiEquivalentUnpricedSpans": 1,
+              "apiEquivalentEstimatedSpans": 0
             }
           ]
         }
@@ -161,6 +183,7 @@ public sealed class ReceiptCommandTests
         - **GitHub AI Credits:** none
         - **Foundry BYOK:** none
         - **Local offload:** none
+        - **API-equivalent (retail):** none
         - **Circuit breaker:** 0 trips • max single-prompt burn: 0.00 credits
 
         <details>
@@ -190,7 +213,10 @@ public sealed class ReceiptCommandTests
             "aiCredits": 0,
             "aiCreditsUsd": 0,
             "foundryByokUsd": 0,
-            "localSavedUsd": 0
+            "localSavedUsd": 0,
+            "apiEquivalentUsd": 0,
+            "apiEquivalentUnpricedSpans": 0,
+            "apiEquivalentEstimatedSpans": 0
           },
           "prompts": 0,
           "maxPromptCredits": 0,
@@ -440,7 +466,7 @@ public sealed class ReceiptCommandTests
         ]);
         string repo = Path.Combine(temp.Path, "repo");
         const string Error =
-            "The receipt for feature/ledger is 67762 bytes; a receipt can be at most 65536 bytes.\n";
+            "The receipt for feature/ledger is 68094 bytes; a receipt can be at most 65536 bytes.\n";
 
         CliRun file = await harness.RunInAsync(repo, "export-pr");
         CliRun stdout = await harness.RunInAsync(repo, "export-pr", "--stdout");
@@ -455,6 +481,69 @@ public sealed class ReceiptCommandTests
         Assert.Equal(0, json.ExitCode);
         Assert.Equal(string.Empty, json.Error);
         Assert.False(Directory.Exists(Path.Combine(repo, ".github")));
+    }
+
+    [Fact]
+    public async Task EP11_ApiEquivalentTotalsReconcileWithBranchJson()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await SeededHarnessAsync(temp.Path);
+        string repo = Path.Combine(temp.Path, "repo");
+
+        CliRun receipt = await harness.RunInAsync(repo, "export-pr", "--json");
+        CliRun branch = await harness.RunInAsync(repo, "branch", "--since", "all", "--json");
+
+        using JsonDocument receiptJson = JsonDocument.Parse(receipt.Out);
+        using JsonDocument branchJson = JsonDocument.Parse(branch.Out);
+        JsonElement totals = receiptJson.RootElement.GetProperty("totals");
+        JsonElement row = Assert.Single(
+            branchJson.RootElement.GetProperty("rows").EnumerateArray(),
+            item => item.GetProperty("branch").GetString() == "feature/ledger");
+        foreach (string name in new[] { "apiEquivalentUsd", "apiEquivalentUnpricedSpans", "apiEquivalentEstimatedSpans" })
+        {
+            Assert.Equal(row.GetProperty(name).GetRawText(), totals.GetProperty(name).GetRawText());
+        }
+
+        JsonElement[] models = receiptJson.RootElement.GetProperty("models").EnumerateArray().ToArray();
+        Assert.Equal(
+            totals.GetProperty("apiEquivalentUsd").GetDecimal(),
+            models.Where(item => item.GetProperty("apiEquivalentUsd").ValueKind != JsonValueKind.Null)
+                .Sum(item => item.GetProperty("apiEquivalentUsd").GetDecimal()));
+        Assert.Equal(
+            totals.GetProperty("apiEquivalentUnpricedSpans").GetInt64(),
+            models.Sum(item => item.GetProperty("apiEquivalentUnpricedSpans").GetInt64()));
+    }
+
+    // A branch whose turns all lack a list price says Unpriced, never $0.00.
+    [Fact]
+    public async Task EP12_ReceiptsWithoutApiEquivalentPricesSayUnpriced()
+    {
+        using TempDirectory temp = new();
+        GitFixture.Create(temp.Path);
+        await using CliHarness harness = new(temp.Path, new FakeCliPlatform(), Time);
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), harness.TimeProvider);
+        await store.InitializeAsync();
+        NormalizedGenAiSpan span = TestSpans.Chat(requestModel: "mai-code-2", inputTokens: 1_000, outputTokens: 100);
+        await store.RecordAsync(
+        [
+            new LedgerEntry(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), GitFixture.Feature(temp.Path)),
+        ]);
+        string repo = Path.Combine(temp.Path, "repo");
+
+        CliRun markdown = await harness.RunInAsync(repo, "export-pr", "--stdout");
+        CliRun json = await harness.RunInAsync(repo, "export-pr", "--json");
+
+        Assert.Equal(0, markdown.ExitCode);
+        Assert.Contains(
+            "\n- **API-equivalent (retail):** Unpriced (1 turn without an API-equivalent price)\n",
+            markdown.Out);
+        Assert.Contains(
+            "| GitHub AI Credits | `mai-code-2` | 1 | 0 | 1,000 | 100 | 0.08 credits ($0.00) | Unpriced | $0.00 |\n",
+            markdown.Out);
+        using JsonDocument document = JsonDocument.Parse(json.Out);
+        Assert.Equal(
+            JsonValueKind.Null,
+            document.RootElement.GetProperty("totals").GetProperty("apiEquivalentUsd").ValueKind);
     }
 
     private static string Expected(string template) =>

@@ -153,6 +153,8 @@ A budget is a soft cap in AI credits for one branch. When the branch's billed sp
 
 The receipt covers all spend recorded on the branch: GitHub AI credits by model, Foundry BYOK spend, local-model tokens and the cloud spend they avoided, unpriced requests, circuit-breaker trips, and the most expensive prompt, with the data as JSON. A turn is one model request. Its totals equal the branch's row in `gh ledger branch --since all --json`. Branch and model names appear in code spans, so they never become mentions or links.
 
+The `API-equivalent (retail)` line and column compare the same turns with API list prices; they're never part of the billed amounts (see [API-equivalent USD](#api-equivalent-usd)). The line shows `none` without turns and `Unpriced` when no turn has an API-equivalent price, and otherwise says how many turns it leaves out and how many make it an estimate. The column writes `partial` and `estimate` instead of `*` and `~`, which are Markdown syntax. The JSON data adds `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans` to `totals` and to each model, and keeps `schemaVersion` 1.
+
 - `--stdout` writes the Markdown to standard output instead of the file.
 - `--json` writes the JSON data to standard output instead of the file.
 
