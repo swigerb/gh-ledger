@@ -74,6 +74,14 @@ internal static class SessionLogs
     internal static string? CommitSha(string? value) =>
         value is { Length: 40 or 64 } && value.All(char.IsAsciiHexDigit) ? value.ToLowerInvariant() : null;
 
+    // A UUID of 36 hex digits and hyphens, in lowercase "D" form; else null.
+    internal static string? Uuid(string? value) =>
+        value is { Length: 36 } &&
+        value.All(character => character == '-' || char.IsAsciiHexDigit(character)) &&
+        Guid.TryParseExact(value, "D", out Guid id)
+            ? id.ToString("D")
+            : null;
+
     // A fully qualified path without trailing separators; else null.
     internal static string? FullPath(string? value) =>
         value is not null && Path.IsPathFullyQualified(value) ? Path.TrimEndingDirectorySeparator(value) : null;
