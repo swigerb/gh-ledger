@@ -284,9 +284,11 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
     }
 
     // Prices one request at this card's API list prices (apiEquivalent), whatever its billing channel priced: a local
-    // request as the local retail baseline, and any other request as its ModelId. Pure and thread-safe. Throws only
-    // ArgumentNullException; an unknown model or date is Unpriced, and a non-inference operation or inconsistent token
-    // counts are NotApplicable.
+    // request as the local retail baseline, and any other request as its ModelId, or as its RequestModel when no section
+    // of this card has ModelId. So a response model that the card doesn't know, such as a dated id that a Foundry BYOK
+    // endpoint reports, never hides a request model with a list price, and a model that the card knows without a list
+    // price, such as mai-code-2, is never priced as another. Pure and thread-safe. Throws only ArgumentNullException; an
+    // unknown model or date is Unpriced, and a non-inference operation or inconsistent token counts are NotApplicable.
     public ApiEquivalentCost CalculateApiEquivalent(ApiEquivalentRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -303,6 +305,12 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         }
 
         string? model = NormalizeModel(request.ModelId);
+        string? requestModel = NormalizeModel(request.RequestModel);
+        if (requestModel is not null && (model is null || !IsKnown(model)))
+        {
+            model = requestModel;
+        }
+
         ModelRateCard? card = request.Channel == BillingChannel.Local
             ? _retailLocalBaseline
             : model is null ? null : FindModel(_retailModels, model);
@@ -321,6 +329,13 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             selection.Tier.Name,
             Price(request, selection.Tier, uncached));
     }
+
+    // Whether any section of this card has model as an id or alias.
+    private bool IsKnown(string model) =>
+        FindModel(_githubModels, model) is not null ||
+        FindModel(_foundryModels, model) is not null ||
+        FindModel(_retailModels, model) is not null ||
+        _localModels.Any(item => item.Matches(model));
 
     private static JsonRateCardCalculator Create(string baseJson, string? overlayJson, string? overlayName)
     {
@@ -1109,6 +1124,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
                 OperationName = span.OperationName,
                 Channel = channel,
                 ModelId = modelId,
+                RequestModel = span.RequestModel,
                 StartTime = span.StartTime,
                 InputTokens = span.InputTokens,
                 OutputTokens = span.OutputTokens,

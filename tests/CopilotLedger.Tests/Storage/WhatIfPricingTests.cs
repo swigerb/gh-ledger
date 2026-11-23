@@ -1,4 +1,5 @@
 using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
 using CopilotLedger.Storage;
 using CopilotLedger.Tests.TestSupport;
 using Microsoft.Data.Sqlite;
@@ -104,6 +105,31 @@ public sealed class WhatIfPricingTests
             whatIf,
             row => AssertChain(row, "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3", 0.3m, 1, 1),
             row => AssertChain(row, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", null, 2, 0));
+    }
+
+    // What-if pricing falls back to the request model as ingestion does, so the recording card still gives back the
+    // recorded rollup.
+    [Fact]
+    public async Task WI5_TheRequestModelFallback_MatchesIngestion()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            serverAddress: "llm.example.com",
+            requestModel: "test-retail",
+            responseModel: "test-retail-preview",
+            inputTokens: 1_000,
+            outputTokens: 100);
+        await store.RecordAsync([new LedgerEntry(span, Retail.Calculate(span), null)]);
+
+        IReadOnlyList<LedgerRollupRow> recorded = await store.GetRollupAsync(LedgerGrouping.Model, LedgerFilter.All);
+        IReadOnlyList<LedgerRollupRow> whatIf =
+            await store.GetRollupAsync(LedgerGrouping.Model, LedgerFilter.All, Retail);
+
+        Assert.Equal(recorded, whatIf);
+        LedgerRollupRow preview = Assert.Single(whatIf, row => row.Model == "test-retail-preview");
+        Assert.Equal(0.0045m, preview.ApiEquivalentUsd);
+        Assert.Equal(0, preview.ApiEquivalentUnpricedSpanCount);
     }
 
     private static string Recorded(PromptChainRow row) =>

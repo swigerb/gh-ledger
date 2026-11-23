@@ -203,7 +203,7 @@ public sealed class SqliteLedgerStore
             query.Transaction = transaction;
             query.CommandText = """
                 SELECT id, operation_name, billing_channel, model_id, start_time_unix_ms,
-                       input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens
+                       input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, request_model
                 FROM spans
                 WHERE api_equivalent_status IS NULL
                 ORDER BY id;
@@ -216,6 +216,7 @@ public sealed class SqliteLedgerStore
                     OperationName = reader.GetString(1),
                     Channel = ToBillingChannel(reader.GetString(2)),
                     ModelId = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    RequestModel = reader.IsDBNull(9) ? null : reader.GetString(9),
                     StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(4)),
                     InputTokens = reader.GetInt64(5),
                     OutputTokens = reader.GetInt64(6),
@@ -1924,6 +1925,7 @@ public sealed class SqliteLedgerStore
                    operation_name                                AS what_if_operation,
                    billing_channel                               AS what_if_channel,
                    model_id                                      AS what_if_model,
+                   request_model                                 AS what_if_request_model,
                    start_time_unix_ms                            AS what_if_start,
                    input_tokens                                  AS what_if_input,
                    output_tokens                                 AS what_if_output,
@@ -1938,11 +1940,13 @@ public sealed class SqliteLedgerStore
         while (await reader.ReadAsync(cancellationToken))
         {
             int model = reader.GetOrdinal("what_if_model");
+            int requestModel = reader.GetOrdinal("what_if_request_model");
             ApiEquivalentCost cost = whatIf.CalculateApiEquivalent(new ApiEquivalentRequest
             {
                 OperationName = reader.GetString(reader.GetOrdinal("what_if_operation")),
                 Channel = ToBillingChannel(reader.GetString(reader.GetOrdinal("what_if_channel"))),
                 ModelId = reader.IsDBNull(model) ? null : reader.GetString(model),
+                RequestModel = reader.IsDBNull(requestModel) ? null : reader.GetString(requestModel),
                 StartTime = DateTimeOffset.FromUnixTimeMilliseconds(
                     reader.GetInt64(reader.GetOrdinal("what_if_start"))),
                 InputTokens = reader.GetInt64(reader.GetOrdinal("what_if_input")),

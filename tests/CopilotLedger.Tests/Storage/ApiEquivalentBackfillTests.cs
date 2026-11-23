@@ -1,4 +1,5 @@
 using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
 using CopilotLedger.Storage;
 using CopilotLedger.Tests.TestSupport;
 using Microsoft.Data.Sqlite;
@@ -117,6 +118,32 @@ public sealed class ApiEquivalentBackfillTests
         Assert.Equal(
             1L,
             await ScalarAsync(connection, "SELECT COUNT(*) FROM spans WHERE api_equivalent_status IS NULL;"));
+    }
+
+    // A span whose response model no section of the rates has is priced as its request model, as ingestion prices it.
+    [Fact]
+    public async Task AB4_Backfill_FallsBackToTheRequestModelAsIngestionDoes()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            serverAddress: "llm.example.com",
+            requestModel: "test-retail",
+            responseModel: "test-retail-preview",
+            inputTokens: 1_000,
+            outputTokens: 100);
+        await store.RecordAsync([new LedgerEntry(span, Retail.Calculate(span), null)]);
+        await using SqliteConnection connection = await OpenAsync(temp);
+        string[] ingested = await RowsAsync(connection, $"SELECT model_id, {ApiColumns} FROM spans;");
+        await ExecuteAsync(connection, $"UPDATE spans SET ({ApiColumns}) = (NULL, NULL, NULL, NULL, NULL);");
+
+        ApiEquivalentBackfill backfill = await store.BackfillApiEquivalentAsync(Retail, dryRun: false);
+
+        AssertBackfill(backfill, 1, 1, 0.0045m, 0, 0, 0, 1);
+        Assert.Equal(
+            [$"test-retail-preview|4500000000|priced|test-retail|retail-fixture|{Retail.ApiRateCardSha256}"],
+            ingested);
+        Assert.Equal(ingested, await RowsAsync(connection, $"SELECT model_id, {ApiColumns} FROM spans;"));
     }
 
     private static void AssertBackfill(
