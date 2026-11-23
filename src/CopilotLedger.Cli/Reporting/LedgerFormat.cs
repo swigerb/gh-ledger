@@ -28,6 +28,10 @@ internal static class LedgerFormat
         TimeZoneInfo.ConvertTime(value, zone)
             .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 
+    public static string LocalTimeSeconds(DateTimeOffset value, TimeZoneInfo zone) =>
+        TimeZoneInfo.ConvertTime(value, zone)
+            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
     public static void WriteMoney(
         Utf8JsonWriter writer,
         string name,

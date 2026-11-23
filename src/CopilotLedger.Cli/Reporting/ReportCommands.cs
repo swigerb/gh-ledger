@@ -8,6 +8,7 @@ using CopilotLedger.Cli.Install;
 using CopilotLedger.Cli.Rates;
 using CopilotLedger.Core.Git;
 using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
 using CopilotLedger.Storage;
 
 namespace CopilotLedger.Cli.Reporting;
@@ -87,6 +88,49 @@ internal static class ReportCommands
             }
         });
         Option<string> since = SinceOption(context);
+        Option<bool> turns = new("--turns")
+        {
+            Description = "With --cache, list the model requests of one trace or conversation.",
+        };
+        Option<string?> trace = new("--trace")
+        {
+            Description = "The trace ID for --turns.",
+        };
+        trace.Validators.Add(result =>
+        {
+            string value = result.GetValueOrDefault<string?>() ?? string.Empty;
+            if (value.Length != 32 || !value.All(char.IsAsciiHexDigit))
+            {
+                result.AddError("--trace must be a 32-character hexadecimal trace ID.");
+            }
+        });
+        Option<string?> conversation = new("--conversation")
+        {
+            Description = "The conversation (Copilot session) ID for --turns.",
+        };
+        conversation.Validators.Add(result =>
+        {
+            if (string.IsNullOrWhiteSpace(result.GetValueOrDefault<string?>()))
+            {
+                result.AddError("--conversation can't be blank.");
+            }
+        });
+        Option<bool> bloat = new("--bloat")
+        {
+            Description = "With --cache, rank prompt chains by uncached input and input growth.",
+        };
+        Option<int> limit = new("--limit")
+        {
+            Description = "Prompt chains in each --bloat ranking.",
+            DefaultValueFactory = _ => 10,
+        };
+        limit.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<int>() is < 1 or > 100)
+            {
+                result.AddError("--limit must be from 1 to 100.");
+            }
+        });
         command.Add(json);
         command.Add(cache);
         command.Add(by);
@@ -94,33 +138,93 @@ internal static class ReportCommands
         command.Add(branch);
         command.Add(pullRequest);
         command.Add(since);
+        command.Add(turns);
+        command.Add(trace);
+        command.Add(conversation);
+        command.Add(bloat);
+        command.Add(limit);
         command.Validators.Add(result =>
         {
-            string[] given = new Option[] { by, repository, branch, pullRequest, since }
+            string[] given = new Option[] { by, repository, branch, pullRequest, since, turns, trace, conversation, bloat, limit }
                 .Where(option => result.GetResult(option) is { Implicit: false })
                 .Select(option => option.Name)
                 .ToArray();
-            if (!result.GetValue(cache) && given.Length > 0)
+            if (!result.GetValue(cache))
             {
-                result.AddError($"{given[0]} requires --cache.");
+                if (given.Length > 0)
+                {
+                    result.AddError($"{given[0]} requires --cache.");
+                }
+
+                return;
+            }
+
+            bool turnsView = result.GetValue(turns);
+            bool bloatView = result.GetValue(bloat);
+            string? error;
+            if (turnsView && bloatView)
+            {
+                error = "Use either --turns or --bloat, not both.";
+            }
+            else if (turnsView)
+            {
+                string? other = given.FirstOrDefault(name => name is not ("--turns" or "--trace" or "--conversation"));
+                error = other is not null
+                    ? $"{other} can't be used with --turns."
+                    : given.Contains("--trace") == given.Contains("--conversation")
+                        ? "Use --turns with either --trace <traceId> or --conversation <id>."
+                        : null;
+            }
+            else
+            {
+                string? turnsOnly = given.FirstOrDefault(name => name is "--trace" or "--conversation");
+                string? notForBloat = given.FirstOrDefault(name => name is "--by" or "--branch" or "--pr");
+                error = turnsOnly is not null
+                    ? $"{turnsOnly} requires --turns."
+                    : bloatView && notForBloat is not null
+                        ? $"{notForBloat} can't be used with --bloat."
+                        : !bloatView && given.Contains("--limit")
+                            ? "--limit requires --bloat."
+                            : null;
+            }
+
+            if (error is not null)
+            {
+                result.AddError(error);
             }
         });
         command.SetAction(
             (ParseResult result, CancellationToken cancellationToken) =>
                 !result.GetValue(cache)
                     ? StatusAsync(context, result.GetValue(json), cancellationToken)
-                    : CacheAsync(
-                        context,
-                        result.GetValue(by)!,
-                        new LedgerFilter
-                        {
-                            Repository = result.GetValue(repository),
-                            Branch = result.GetValue(branch),
-                            PullRequestNumber = result.GetValue(pullRequest),
-                        },
-                        ParsePeriod(context, result.GetValue(since)),
-                        result.GetValue(json),
-                        cancellationToken));
+                    : result.GetValue(turns)
+                        ? TurnsAsync(
+                            context,
+                            result.GetValue(trace) is string traceId
+                                ? TurnSelector.ForTrace(traceId)
+                                : TurnSelector.ForConversation(result.GetValue(conversation)!),
+                            result.GetValue(json),
+                            cancellationToken)
+                        : result.GetValue(bloat)
+                            ? BloatAsync(
+                                context,
+                                result.GetValue(repository),
+                                ParsePeriod(context, result.GetValue(since)),
+                                result.GetValue(limit),
+                                result.GetValue(json),
+                                cancellationToken)
+                            : CacheAsync(
+                                context,
+                                result.GetValue(by)!,
+                                new LedgerFilter
+                                {
+                                    Repository = result.GetValue(repository),
+                                    Branch = result.GetValue(branch),
+                                    PullRequestNumber = result.GetValue(pullRequest),
+                                },
+                                ParsePeriod(context, result.GetValue(since)),
+                                result.GetValue(json),
+                                cancellationToken));
         return command;
     }
 
@@ -574,6 +678,223 @@ internal static class ReportCommands
         return 0;
     }
 
+    private static async Task<int> TurnsAsync(
+        CliContext context,
+        TurnSelector selector,
+        bool json,
+        CancellationToken cancellationToken)
+    {
+        SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
+        await store.InitializeAsync(cancellationToken);
+        IReadOnlyList<TurnTokenRow> rows = await store.GetTurnBreakdownAsync(
+            selector,
+            LedgerFilter.All,
+            cancellationToken);
+        if (json)
+        {
+            WriteTurnsJson(context, selector, rows);
+            return 0;
+        }
+
+        string scope = selector.TraceId is string traceId
+            ? $"trace {traceId}"
+            : $"conversation {selector.ConversationId}";
+        if (rows.Count == 0)
+        {
+            context.Out.WriteLine($"No model requests recorded for {scope}.");
+            return 0;
+        }
+
+        bool conversation = selector.ConversationId is not null;
+        context.Out.WriteLine($"Model requests in {scope}");
+        context.Out.WriteLine();
+        TableColumn[] columns =
+        [
+            new("#", true),
+            new("Started", false),
+            new("Agent", false),
+            new("Model", false),
+            new("Input", true),
+            new("Cache read", true),
+            new("Cache write", true),
+            new("Uncached", true),
+            new("Output", true),
+            new("Hit %", true),
+            new("Growth", true),
+            .. conversation ? [new TableColumn("Trace", false)] : Array.Empty<TableColumn>(),
+        ];
+        IReadOnlyList<IReadOnlyList<string>> tableRows = rows.Select((row, index) =>
+            (IReadOnlyList<string>)
+            [
+                (index + 1).ToString(CultureInfo.InvariantCulture),
+                LedgerFormat.LocalTimeSeconds(row.StartTime, context.TimeProvider.LocalTimeZone),
+                row.Agent ?? "(none)",
+                row.Model,
+                LedgerFormat.Count(row.InputTokens),
+                row.CacheReadInputTokens is long read ? LedgerFormat.Count(read) : "n/a",
+                row.CacheWriteInputTokens is long write ? LedgerFormat.Count(write) : "n/a",
+                row.UncachedInputTokens is long uncached ? LedgerFormat.Count(uncached) : "n/a",
+                LedgerFormat.Count(row.OutputTokens),
+                LedgerFormat.Percent(row.CacheHitRatio),
+                Growth(row),
+                .. conversation ? [row.TraceId] : Array.Empty<string>(),
+            ]).ToArray();
+        TableWriter.Write(context.Out, columns, tableRows);
+        context.Out.WriteLine();
+        context.Out.WriteLine(
+            "Growth is the change in input from the previous request by the same agent invocation and model; - marks its first request.");
+        if (rows.Any(row => row.AgentSpanId is null))
+        {
+            context.Out.WriteLine(
+                "n/a growth: the request's agent invocation isn't recorded, so it isn't compared with others.");
+        }
+
+        long unreported = rows.Count(row => row.CacheReadInputTokens is null);
+        if (unreported > 0)
+        {
+            context.Out.WriteLine(
+                $"{LedgerFormat.Count(unreported)} of {Requests(rows.Count)} reported no cache counters.");
+        }
+
+        return 0;
+    }
+
+    private static async Task<int> BloatAsync(
+        CliContext context,
+        string? repository,
+        Period period,
+        int limit,
+        bool json,
+        CancellationToken cancellationToken)
+    {
+        SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
+        await store.InitializeAsync(cancellationToken);
+        ContextBloatReport report = await store.GetContextBloatAsync(
+            new LedgerFilter { From = period.From, Repository = repository },
+            limit,
+            cancellationToken);
+        if (json)
+        {
+            WriteBloatJson(context, period, repository, limit, report);
+            return 0;
+        }
+
+        TimeZoneInfo zone = context.TimeProvider.LocalTimeZone;
+        context.Out.WriteLine($"Context bloat in {repository ?? "all repositories"} ({period.Label})");
+        context.Out.WriteLine();
+        context.Out.WriteLine("Prompt chains by uncached input");
+        WriteSection(
+            context,
+            [
+                new("#", true),
+                new("Started", false),
+                new("Repository", false),
+                new("Spans", true),
+                new("Input", true),
+                new("Uncached", true),
+                new("Hit %", true),
+                new("Trace", false),
+            ],
+            report.ByUncachedInput.Select((row, index) =>
+                (IReadOnlyList<string>)
+                [
+                    (index + 1).ToString(CultureInfo.InvariantCulture),
+                    LedgerFormat.LocalTime(row.StartTime, zone),
+                    row.Repository,
+                    LedgerFormat.Count(row.SpanCount),
+                    LedgerFormat.Count(row.InputTokens),
+                    LedgerFormat.Count(row.ReportedUncachedInputTokens),
+                    LedgerFormat.Percent(row.CacheHitRatio),
+                    row.TraceId,
+                ]).ToArray());
+        context.Out.WriteLine();
+        context.Out.WriteLine("Prompt chains by input growth within one agent invocation and model");
+        WriteSection(
+            context,
+            [
+                new("#", true),
+                new("Started", false),
+                new("Repository", false),
+                new("Agent", false),
+                new("Model", false),
+                new("Requests", true),
+                new("First input", true),
+                new("Peak input", true),
+                new("Growth", true),
+                new("Trace", false),
+            ],
+            report.ByInputGrowth.Select((row, index) =>
+                (IReadOnlyList<string>)
+                [
+                    (index + 1).ToString(CultureInfo.InvariantCulture),
+                    LedgerFormat.LocalTime(row.StartTime, zone),
+                    row.Repository,
+                    row.Agent ?? "(none)",
+                    row.Model,
+                    LedgerFormat.Count(row.TurnCount),
+                    LedgerFormat.Count(row.FirstInputTokens),
+                    LedgerFormat.Count(row.PeakInputTokens),
+                    LedgerFormat.Count(row.InputGrowthTokens),
+                    row.TraceId,
+                ]).ToArray());
+        context.Out.WriteLine();
+        context.Out.WriteLine("Prompt chains with requests that reported no cache counters, by estimated uncached input");
+        WriteSection(
+            context,
+            [
+                new("#", true),
+                new("Started", false),
+                new("Repository", false),
+                new("Spans", true),
+                new("Cache reported", true),
+                new("Input", true),
+                new("Est. uncached", true),
+                new("Trace", false),
+            ],
+            report.ByEstimatedUncachedInput.Select((row, index) =>
+                (IReadOnlyList<string>)
+                [
+                    (index + 1).ToString(CultureInfo.InvariantCulture),
+                    LedgerFormat.LocalTime(row.StartTime, zone),
+                    row.Repository,
+                    LedgerFormat.Count(row.SpanCount),
+                    LedgerFormat.Count(row.CacheReportedSpanCount),
+                    LedgerFormat.Count(row.InputTokens),
+                    LedgerFormat.Count(row.EstimatedUncachedInputTokens),
+                    row.TraceId,
+                ]).ToArray());
+        if (report.ByEstimatedUncachedInput.Count > 0)
+        {
+            context.Out.WriteLine();
+            context.Out.WriteLine(
+                "Est. uncached is an estimate: it counts all input of a request without cache counters as uncached, as pricing does.");
+        }
+
+        if (report.SpansWithoutAgent > 0)
+        {
+            context.Out.WriteLine();
+            context.Out.WriteLine(
+                $"Input growth leaves out {Requests(report.SpansWithoutAgent)} without a recorded agent invocation.");
+        }
+
+        return 0;
+    }
+
+    // A ranking's table, or "None." when it has no rows.
+    private static void WriteSection(
+        CliContext context,
+        IReadOnlyList<TableColumn> columns,
+        IReadOnlyList<IReadOnlyList<string>> rows)
+    {
+        if (rows.Count == 0)
+        {
+            context.Out.WriteLine("None.");
+            return;
+        }
+
+        TableWriter.Write(context.Out, columns, rows);
+    }
+
     private static void WriteStatusJson(
         CliContext context,
         bool running,
@@ -827,6 +1148,127 @@ internal static class ReportCommands
         context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
     }
 
+    private static void WriteTurnsJson(
+        CliContext context,
+        TurnSelector selector,
+        IReadOnlyList<TurnTokenRow> rows)
+    {
+        using MemoryStream stream = new();
+        using Utf8JsonWriter writer = new(stream, JsonOptions);
+        writer.WriteStartObject();
+        LedgerFormat.WriteNullable(writer, "traceId", selector.TraceId);
+        LedgerFormat.WriteNullable(writer, "conversationId", selector.ConversationId);
+        writer.WriteStartArray("turns");
+        for (int index = 0; index < rows.Count; index++)
+        {
+            TurnTokenRow row = rows[index];
+            writer.WriteStartObject();
+            writer.WriteNumber("turn", index + 1);
+            writer.WriteString("traceId", row.TraceId);
+            writer.WriteString("spanId", row.SpanId);
+            LedgerFormat.WriteNullable(writer, "parentSpanId", row.ParentSpanId);
+            LedgerFormat.WriteNullable(writer, "conversationId", row.ConversationId);
+            LedgerFormat.WriteNullable(writer, "agentSpanId", row.AgentSpanId);
+            LedgerFormat.WriteTime(writer, "startTime", row.StartTime);
+            writer.WriteString("repository", row.Repository);
+            writer.WriteString("branch", row.Branch);
+            LedgerFormat.WriteNullable(writer, "pullRequest", row.PullRequestNumber);
+            LedgerFormat.WriteNullable(writer, "agent", row.Agent);
+            writer.WriteString("model", row.Model);
+            writer.WriteNumber("inputTokens", row.InputTokens);
+            writer.WriteNumber("outputTokens", row.OutputTokens);
+            writer.WriteString("cacheReadState", StateName(row.CacheReadState));
+            writer.WriteString("cacheWriteState", StateName(row.CacheWriteState));
+            LedgerFormat.WriteNullable(writer, "cacheReadInputTokens", row.CacheReadInputTokens);
+            LedgerFormat.WriteNullable(writer, "cacheWriteInputTokens", row.CacheWriteInputTokens);
+            LedgerFormat.WriteNullable(writer, "uncachedInputTokens", row.UncachedInputTokens);
+            LedgerFormat.WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
+            LedgerFormat.WriteNullable(writer, "inputDeltaFromPreviousTurn", row.InputDeltaFromPreviousTurn);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
+    private static void WriteBloatJson(
+        CliContext context,
+        Period period,
+        string? repository,
+        int limit,
+        ContextBloatReport report)
+    {
+        using MemoryStream stream = new();
+        using Utf8JsonWriter writer = new(stream, JsonOptions);
+        writer.WriteStartObject();
+        writer.WriteString("period", period.Label);
+        LedgerFormat.WriteTime(writer, "from", period.From);
+        LedgerFormat.WriteNullable(writer, "repository", repository);
+        writer.WriteNumber("limit", limit);
+        WriteChains(writer, "byUncachedInput", report.ByUncachedInput);
+        writer.WriteStartArray("byInputGrowth");
+        for (int index = 0; index < report.ByInputGrowth.Count; index++)
+        {
+            InputGrowthRow row = report.ByInputGrowth[index];
+            writer.WriteStartObject();
+            writer.WriteNumber("rank", index + 1);
+            writer.WriteString("traceId", row.TraceId);
+            LedgerFormat.WriteNullable(writer, "conversationId", row.ConversationId);
+            writer.WriteString("agentSpanId", row.AgentSpanId);
+            LedgerFormat.WriteNullable(writer, "agent", row.Agent);
+            writer.WriteString("model", row.Model);
+            writer.WriteString("repository", row.Repository);
+            writer.WriteString("branch", row.Branch);
+            LedgerFormat.WriteTime(writer, "startTime", row.StartTime);
+            writer.WriteNumber("turns", row.TurnCount);
+            writer.WriteNumber("firstInputTokens", row.FirstInputTokens);
+            writer.WriteNumber("peakInputTokens", row.PeakInputTokens);
+            writer.WriteNumber("inputGrowthTokens", row.InputGrowthTokens);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        WriteChains(writer, "byEstimatedUncachedInput", report.ByEstimatedUncachedInput);
+        writer.WriteNumber("spansWithoutAgent", report.SpansWithoutAgent);
+        writer.WriteEndObject();
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
+    private static void WriteChains(
+        Utf8JsonWriter writer,
+        string name,
+        IReadOnlyList<BloatChainRow> rows)
+    {
+        writer.WriteStartArray(name);
+        for (int index = 0; index < rows.Count; index++)
+        {
+            BloatChainRow row = rows[index];
+            writer.WriteStartObject();
+            writer.WriteNumber("rank", index + 1);
+            writer.WriteString("traceId", row.TraceId);
+            LedgerFormat.WriteNullable(writer, "conversationId", row.ConversationId);
+            LedgerFormat.WriteTime(writer, "startTime", row.StartTime);
+            writer.WriteString("repository", row.Repository);
+            writer.WriteString("branch", row.Branch);
+            writer.WriteNumber("spans", row.SpanCount);
+            writer.WriteNumber("cacheReportedSpans", row.CacheReportedSpanCount);
+            writer.WriteNumber("cacheUnreportedSpans", row.SpanCount - row.CacheReportedSpanCount);
+            writer.WriteNumber("inputTokens", row.InputTokens);
+            writer.WriteNumber("reportedInputTokens", row.ReportedInputTokens);
+            writer.WriteNumber("reportedCacheReadInputTokens", row.ReportedCacheReadInputTokens);
+            LedgerFormat.WriteNullable(
+                writer,
+                "uncachedInputTokens",
+                row.CacheReportedSpanCount == 0 ? null : row.ReportedUncachedInputTokens);
+            writer.WriteNumber("estimatedUncachedInputTokens", row.EstimatedUncachedInputTokens);
+            LedgerFormat.WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+    }
+
     private static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
         new()
         {
@@ -881,11 +1323,32 @@ internal static class ReportCommands
             ? ", pull request #" + number.ToString(CultureInfo.InvariantCulture)
             : string.Empty);
 
+    // + and the input added since the sequence's previous request, the decrease, - for its first request, or n/a when
+    // the request's agent invocation isn't known.
+    private static string Growth(TurnTokenRow row) =>
+        row.AgentSpanId is null
+            ? "n/a"
+            : row.InputDeltaFromPreviousTurn is not long delta
+                ? "-"
+                : delta > 0
+                    ? "+" + LedgerFormat.Count(delta)
+                    : LedgerFormat.Count(delta);
+
+    private static string StateName(CacheCounterState state) => state switch
+    {
+        CacheCounterState.Reported => "reported",
+        CacheCounterState.Absent => "absent",
+        _ => "legacy_unknown",
+    };
+
     private static string Joined(IReadOnlyList<string> values) =>
         values.Count == 0 ? "-" : string.Join(", ", values);
 
     private static string Spans(long count) =>
         $"{LedgerFormat.Count(count)} {(count == 1 ? "span" : "spans")}";
+
+    private static string Requests(long count) =>
+        $"{LedgerFormat.Count(count)} {(count == 1 ? "request" : "requests")}";
 
     private static bool IsOtelEnabled(Func<string, string?> lookup)
     {
