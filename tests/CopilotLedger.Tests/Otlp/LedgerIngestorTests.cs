@@ -395,6 +395,52 @@ public sealed class LedgerIngestorTests
         AssertRollup(model, "mai-code-2-flash", 4, 0.086175m, 0.00086175m);
     }
 
+    [Fact]
+    public async Task IG10_PullRequestCheckout_RecordsThePullRequestAndCacheStates()
+    {
+        using TempDirectory temp = new();
+        Harness harness = await Harness.CreateAsync(temp);
+        string repo = GitFixture.Create(Path.Combine(temp.Path, "pr"), pullRequest: 42);
+
+        AssertResult(
+            await harness.Ingestor.IngestAsync(
+                CopilotTraces.TraceE([Str("process.working_directory", repo)])),
+            1,
+            0,
+            null,
+            1,
+            1);
+        AssertResult(
+            await harness.Ingestor.IngestAsync(CopilotTraces.TraceF()),
+            2,
+            0,
+            null,
+            1,
+            1);
+
+        await using SqliteConnection connection = new($"Data Source={harness.DatabasePath}");
+        await connection.OpenAsync();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT span_id, branch_name, pull_request_number, cache_read_state, cache_write_state, agent_span_id FROM spans ORDER BY span_id;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("0f00000000000002", reader.GetString(0));
+        Assert.True(reader.IsDBNull(1));
+        Assert.True(reader.IsDBNull(2));
+        Assert.Equal("absent", reader.GetString(3));
+        Assert.Equal("absent", reader.GetString(4));
+        Assert.Equal("0f00000000000001", reader.GetString(5));
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("e4c5e6a7b8c9d0e1", reader.GetString(0));
+        Assert.Equal("feature/ledger", reader.GetString(1));
+        Assert.Equal(42L, reader.GetInt64(2));
+        Assert.Equal("reported", reader.GetString(3));
+        Assert.Equal("reported", reader.GetString(4));
+        Assert.True(reader.IsDBNull(5));
+        Assert.False(await reader.ReadAsync());
+    }
+
     private static OtlpSpan IgSpan(string spanId, params OtlpAttribute[] attributes) =>
         Span(
             spanId: spanId,

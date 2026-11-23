@@ -15,7 +15,8 @@ public sealed class SqliteLedgerStore
             start_time_unix_ms, end_time_unix_ms, input_tokens, output_tokens,
             cache_read_input_tokens, cache_write_input_tokens, billing_channel,
             pricing_status, rates_version, cost_usd_pico, saved_usd_pico,
-            repo_root, repo_slug, branch_name, head_commit_sha, recorded_at_unix_ms
+            repo_root, repo_slug, branch_name, head_commit_sha, recorded_at_unix_ms,
+            cache_read_state, cache_write_state, pull_request_number
         ) VALUES (
             @trace_id, @span_id, @parent_span_id, @operation_name, @conversation_id,
             @agent_name, @provider_name, @request_model, @response_model, @model_id,
@@ -23,7 +24,8 @@ public sealed class SqliteLedgerStore
             @start_time_unix_ms, @end_time_unix_ms, @input_tokens, @output_tokens,
             @cache_read_input_tokens, @cache_write_input_tokens, @billing_channel,
             @pricing_status, @rates_version, @cost_usd_pico, @saved_usd_pico,
-            @repo_root, @repo_slug, @branch_name, @head_commit_sha, @recorded_at_unix_ms
+            @repo_root, @repo_slug, @branch_name, @head_commit_sha, @recorded_at_unix_ms,
+            @cache_read_state, @cache_write_state, @pull_request_number
         ) ON CONFLICT (trace_id, span_id) DO NOTHING;
         """;
 
@@ -736,8 +738,9 @@ public sealed class SqliteLedgerStore
         return counts;
     }
 
-    // For each trace, copies each invoke_agent link's agent name, conversation id, and Git slug/branch/sha onto spans rows below it,
-    // without crossing a nested invoke_agent. Returns the total rows changed by all UPDATE statements. One transaction.
+    // For each trace, copies each invoke_agent link's span ID, agent name, conversation id, and Git slug/branch/sha onto spans
+    // rows below it, without crossing a nested invoke_agent, so agent_span_id is each row's nearest invoke_agent ancestor.
+    // Returns the total rows changed by all UPDATE statements. One transaction.
     // Throws InvalidOperationException if InitializeAsync hasn't run.
     public async Task<int> BackfillFromAgentSpansAsync(
         IEnumerable<string> traceIds,
@@ -780,9 +783,8 @@ public sealed class SqliteLedgerStore
 
             foreach (AgentLink agent in agents)
             {
-                if (agent.AgentName is not null || agent.ConversationId is not null)
+                await using (SqliteCommand command = connection.CreateCommand())
                 {
-                    await using SqliteCommand command = connection.CreateCommand();
                     command.Transaction = transaction;
                     command.CommandText = """
                         WITH RECURSIVE sub(span_id) AS (
@@ -796,11 +798,13 @@ public sealed class SqliteLedgerStore
                         )
                         UPDATE spans
                            SET agent_name      = COALESCE(agent_name, @agentName),
-                               conversation_id = COALESCE(conversation_id, @conversationId)
+                               conversation_id = COALESCE(conversation_id, @conversationId),
+                               agent_span_id   = COALESCE(agent_span_id, @agentSpanId)
                          WHERE trace_id = @trace
                            AND span_id IN (SELECT span_id FROM sub)
                            AND ((agent_name IS NULL AND @agentName IS NOT NULL)
-                             OR (conversation_id IS NULL AND @conversationId IS NOT NULL));
+                             OR (conversation_id IS NULL AND @conversationId IS NOT NULL)
+                             OR agent_span_id IS NULL);
                         """;
                     command.Parameters.AddWithValue("@trace", trace);
                     command.Parameters.AddWithValue("@agentSpanId", agent.SpanId);
@@ -1180,6 +1184,21 @@ public sealed class SqliteLedgerStore
                 "Entries must be billable and all token counts must be non-negative.",
                 parameterName);
         }
+
+        if (span.CacheReadState is not (CacheCounterState.Reported or CacheCounterState.Absent)
+            || span.CacheWriteState is not (CacheCounterState.Reported or CacheCounterState.Absent)
+            || (span.CacheReadState == CacheCounterState.Absent && span.CacheReadInputTokens != 0)
+            || (span.CacheWriteState == CacheCounterState.Absent && span.CacheWriteInputTokens != 0))
+        {
+            throw new ArgumentException(
+                "Cache counter states must be Reported or Absent, and an Absent counter must be 0.",
+                parameterName);
+        }
+
+        if (entry.Git?.PullRequestNumber is <= 0)
+        {
+            throw new ArgumentException("Pull request numbers must be positive.", parameterName);
+        }
     }
 
     private static void AddInsertParameters(
@@ -1238,6 +1257,11 @@ public sealed class SqliteLedgerStore
             "@head_commit_sha",
             OrDbNull(entry.Git?.HeadCommitSha));
         command.Parameters.AddWithValue("@recorded_at_unix_ms", recordedAtUnixMs);
+        command.Parameters.AddWithValue("@cache_read_state", ToDatabaseString(span.CacheReadState));
+        command.Parameters.AddWithValue("@cache_write_state", ToDatabaseString(span.CacheWriteState));
+        command.Parameters.AddWithValue(
+            "@pull_request_number",
+            OrDbNull(entry.Git?.PullRequestNumber));
     }
 
     private static string GetRollupSql(LedgerGrouping grouping)
@@ -1318,6 +1342,14 @@ public sealed class SqliteLedgerStore
         PricingStatus.InvalidUsage => "invalid_usage",
         PricingStatus.NotBillableOperation => "not_billable_operation",
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+    };
+
+    private static string ToDatabaseString(CacheCounterState state) => state switch
+    {
+        CacheCounterState.Reported => "reported",
+        CacheCounterState.Absent => "absent",
+        CacheCounterState.LegacyUnknown => "legacy_unknown",
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
     };
 
     private static object OrDbNull<T>(T? value) where T : struct =>

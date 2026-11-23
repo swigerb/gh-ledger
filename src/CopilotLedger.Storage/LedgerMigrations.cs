@@ -114,5 +114,41 @@ internal static class LedgerMigrations
             INSERT INTO breaker_settings (id, velocity_threshold_usd_pico, velocity_window_minutes, churn_failures, flag_file, notifications, updated_at_unix_ms)
             VALUES (1, 1500000000000, 5, 5, 0, 1, 0);
             """),
+
+        // Rows recorded before version 4 get legacy_unknown cache states, except that a nonzero counter can only have been
+        // reported. agent_span_id is each span's nearest invoke_agent ancestor, filled from the span links not yet pruned.
+        (4, """
+            ALTER TABLE spans ADD COLUMN cache_read_state TEXT NOT NULL DEFAULT 'legacy_unknown'
+                CHECK (cache_read_state IN ('reported', 'absent', 'legacy_unknown'));
+            ALTER TABLE spans ADD COLUMN cache_write_state TEXT NOT NULL DEFAULT 'legacy_unknown'
+                CHECK (cache_write_state IN ('reported', 'absent', 'legacy_unknown'));
+            ALTER TABLE spans ADD COLUMN pull_request_number INTEGER
+                CHECK (pull_request_number IS NULL OR pull_request_number > 0);
+            ALTER TABLE spans ADD COLUMN agent_span_id TEXT;
+
+            CREATE INDEX IF NOT EXISTS ix_spans_conversation_start ON spans (conversation_id, start_time_unix_ms);
+
+            UPDATE spans SET cache_read_state = 'reported' WHERE cache_read_input_tokens > 0;
+            UPDATE spans SET cache_write_state = 'reported' WHERE cache_write_input_tokens > 0;
+
+            WITH RECURSIVE below (trace_id, span_id, agent_span_id) AS (
+                SELECT child.trace_id, child.span_id, agent.span_id
+                  FROM span_links AS agent
+                  JOIN span_links AS child
+                    ON child.trace_id = agent.trace_id AND child.parent_span_id = agent.span_id
+                 WHERE agent.operation_name = 'invoke_agent'
+                   AND (child.operation_name IS NULL OR child.operation_name <> 'invoke_agent')
+                UNION
+                SELECT child.trace_id, child.span_id, below.agent_span_id
+                  FROM below
+                  JOIN span_links AS child
+                    ON child.trace_id = below.trace_id AND child.parent_span_id = below.span_id
+                 WHERE child.operation_name IS NULL OR child.operation_name <> 'invoke_agent'
+            )
+            UPDATE spans
+               SET agent_span_id = below.agent_span_id
+              FROM below
+             WHERE below.trace_id = spans.trace_id AND below.span_id = spans.span_id;
+            """),
     ];
 }

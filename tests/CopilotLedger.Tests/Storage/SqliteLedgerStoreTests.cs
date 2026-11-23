@@ -35,7 +35,7 @@ public sealed class SqliteLedgerStoreTests
             await using (SqliteCommand versionCommand = connection.CreateCommand())
             {
                 versionCommand.CommandText = "PRAGMA user_version;";
-                Assert.Equal(3L, await versionCommand.ExecuteScalarAsync());
+                Assert.Equal(4L, await versionCommand.ExecuteScalarAsync());
             }
         }
 
@@ -384,6 +384,101 @@ public sealed class SqliteLedgerStoreTests
                 LedgerFilter.All));
         Assert.Equal(0.000000025m, v12.AiCreditsUsd);
         Assert.Equal(0.0000025m, v12.AiCredits);
+    }
+
+    [Fact]
+    public async Task S12_RecordAsync_StoresCacheStatesAndPullRequest()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+        JsonRateCardCalculator calculator = JsonRateCardCalculator.LoadEmbedded();
+        NormalizedGenAiSpan reported = TestSpans.Chat(
+            requestModel: "claude-opus-5.5",
+            inputTokens: 1_000,
+            outputTokens: 10,
+            cacheReadInputTokens: 600,
+            cacheWriteState: CacheCounterState.Reported) with
+        {
+            TraceId = new string('a', 32),
+            SpanId = "aaaaaaaaaaaaaaa1",
+        };
+        NormalizedGenAiSpan absent = TestSpans.Chat(
+            requestModel: "mai-code-2",
+            inputTokens: 500,
+            outputTokens: 5) with
+        {
+            TraceId = new string('a', 32),
+            SpanId = "aaaaaaaaaaaaaaa2",
+        };
+        GitWorkspaceContext pullRequest =
+            Git(temp.Path, "swigerb/copilot-ledger", "feature/ledger") with { PullRequestNumber = 42 };
+
+        Assert.Equal(2, await store.RecordAsync(
+        [
+            new LedgerEntry(reported, calculator.Calculate(reported), pullRequest),
+            new LedgerEntry(absent, calculator.Calculate(absent), null),
+        ]));
+
+        await using SqliteConnection connection = new($"Data Source={DatabasePath(temp)}");
+        await connection.OpenAsync();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT span_id, cache_read_state, cache_write_state, pull_request_number, agent_span_id FROM spans ORDER BY span_id;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("aaaaaaaaaaaaaaa1", reader.GetString(0));
+        Assert.Equal("reported", reader.GetString(1));
+        Assert.Equal("reported", reader.GetString(2));
+        Assert.Equal(42L, reader.GetInt64(3));
+        Assert.True(reader.IsDBNull(4));
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("aaaaaaaaaaaaaaa2", reader.GetString(0));
+        Assert.Equal("absent", reader.GetString(1));
+        Assert.Equal("absent", reader.GetString(2));
+        Assert.True(reader.IsDBNull(3));
+        Assert.True(reader.IsDBNull(4));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [Theory]
+    [InlineData(0, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(1, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(2, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(3, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(4, "Cache counter states must be Reported or Absent, and an Absent counter must be 0. (Parameter 'entries')")]
+    [InlineData(5, "Pull request numbers must be positive. (Parameter 'entries')")]
+    [InlineData(6, "Pull request numbers must be positive. (Parameter 'entries')")]
+    public async Task S13_RecordAsync_RejectsInconsistentCacheStatesAndPullRequests(int caseNumber, string message)
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+        IReadOnlyList<LedgerEntry> seed = CreateSeedEntries(temp.Path);
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            requestModel: "mai-code-2",
+            inputTokens: 1_000,
+            outputTokens: 10);
+        span = caseNumber switch
+        {
+            0 => span with { CacheReadState = CacheCounterState.LegacyUnknown },
+            1 => span with { CacheWriteState = CacheCounterState.LegacyUnknown },
+            2 => span with { CacheReadInputTokens = 5 },
+            3 => span with { CacheWriteInputTokens = 5 },
+            4 => span with { CacheReadState = (CacheCounterState)7 },
+            _ => span,
+        };
+        GitWorkspaceContext? git = caseNumber switch
+        {
+            5 => Git(temp.Path, "swigerb/copilot-ledger", "main") with { PullRequestNumber = 0 },
+            6 => Git(temp.Path, "swigerb/copilot-ledger", "main") with { PullRequestNumber = -1 },
+            _ => null,
+        };
+        LedgerEntry invalid = new(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), git);
+
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => store.RecordAsync([seed[0], invalid]));
+
+        Assert.Equal(message, exception.Message);
+        Assert.Empty(await store.GetRollupAsync(LedgerGrouping.Repository, LedgerFilter.All));
     }
 
     private static async Task<SqliteLedgerStore> SeededStoreAsync(TempDirectory temp)

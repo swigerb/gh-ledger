@@ -22,6 +22,11 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                DROP INDEX ix_spans_conversation_start;
+                ALTER TABLE spans DROP COLUMN cache_read_state;
+                ALTER TABLE spans DROP COLUMN cache_write_state;
+                ALTER TABLE spans DROP COLUMN pull_request_number;
+                ALTER TABLE spans DROP COLUMN agent_span_id;
                 DROP INDEX ix_spans_trace;
                 DROP TABLE span_links;
                 DROP TABLE breaker_trips;
@@ -31,9 +36,11 @@ public sealed class SpanLinkStoreTests
                 """);
         }
 
+        // A new process starts with no pooled connections; see SL8.
+        SqliteConnection.ClearAllPools();
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(3L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(
             "span_links",
             await ScalarAsync(
@@ -358,6 +365,11 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                DROP INDEX ix_spans_conversation_start;
+                ALTER TABLE spans DROP COLUMN cache_read_state;
+                ALTER TABLE spans DROP COLUMN cache_write_state;
+                ALTER TABLE spans DROP COLUMN pull_request_number;
+                ALTER TABLE spans DROP COLUMN agent_span_id;
                 DROP TABLE breaker_trips;
                 DROP TABLE branch_budgets;
                 DROP TABLE breaker_settings;
@@ -374,7 +386,7 @@ public sealed class SpanLinkStoreTests
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(3L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM spans;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM span_links;"));
         Assert.Equal(
@@ -471,7 +483,7 @@ public sealed class SpanLinkStoreTests
         await StoreAsync(temp);
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
-            await ExecuteAsync(connection, "PRAGMA user_version = 2;");
+            await ExecuteAsync(connection, "PRAGMA user_version = 3;");
         }
 
         await using SqliteConnection holder = await OpenAsync(DatabasePath(temp));
@@ -484,7 +496,7 @@ public sealed class SpanLinkStoreTests
         await using (SqliteCommand version = holder.CreateCommand())
         {
             version.Transaction = held;
-            version.CommandText = "PRAGMA user_version = 3;";
+            version.CommandText = "PRAGMA user_version = 4;";
             await version.ExecuteNonQueryAsync();
         }
 
@@ -492,13 +504,141 @@ public sealed class SpanLinkStoreTests
         await init;
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(3L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM breaker_settings;"));
         Assert.Equal(
             1L,
             await ScalarAsync(
                 check,
                 "SELECT COUNT(*) FROM pragma_table_info('span_links') WHERE name = 'tool_name';"));
+    }
+
+    [Fact]
+    public async Task SL11_Migration4_KeepsRowsMarksLegacyStatesAndFillsAgents()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore first = await StoreAsync(temp);
+        const string trace = "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c";
+        await first.RecordAsync(
+        [
+            ChatEntry(trace, "c000000000000001", "a000000000000001", 1_000, 800, 100),
+            ChatEntry(trace, "c000000000000002", "e000000000000001", 1_000, 300, 0),
+            ChatEntry(trace, "c000000000000003", "a000000000000002", 1_000, 0, 200),
+            ChatEntry(trace, "c000000000000004", "f000000000000009", 1_000, 0, 0),
+        ]);
+        await first.RecordSpanLinksAsync(
+        [
+            Link(trace, "a000000000000001", null, "invoke_agent"),
+            Link(trace, "e000000000000001", "a000000000000001", "execute_tool"),
+            Link(trace, "a000000000000002", "e000000000000001", "invoke_agent", "explore"),
+            Link(trace, "c000000000000001", "a000000000000001", "chat"),
+            Link(trace, "c000000000000002", "e000000000000001", "chat"),
+            Link(trace, "c000000000000003", "a000000000000002", "chat"),
+            Link(trace, "c000000000000004", "f000000000000009", "chat"),
+        ]);
+        await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
+        {
+            await ExecuteAsync(connection, """
+                DROP INDEX ix_spans_conversation_start;
+                ALTER TABLE spans DROP COLUMN cache_read_state;
+                ALTER TABLE spans DROP COLUMN cache_write_state;
+                ALTER TABLE spans DROP COLUMN pull_request_number;
+                ALTER TABLE spans DROP COLUMN agent_span_id;
+                PRAGMA user_version = 3;
+                """);
+        }
+
+        // A new process starts with no pooled connections; see SL8.
+        SqliteConnection.ClearAllPools();
+        await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
+
+        await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
+        Assert.Equal(4L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(
+            "ix_spans_conversation_start",
+            await ScalarAsync(
+                check,
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'ix_spans_conversation_start';"));
+        Assert.Equal(4_000L, await ScalarAsync(check, "SELECT SUM(input_tokens) FROM spans;"));
+        await using SqliteCommand command = check.CreateCommand();
+        command.CommandText =
+            "SELECT span_id, cache_read_state, cache_write_state, pull_request_number, agent_span_id FROM spans ORDER BY span_id;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        string?[][] rows =
+        [
+            ["c000000000000001", "reported", "reported", null, "a000000000000001"],
+            ["c000000000000002", "reported", "legacy_unknown", null, "a000000000000001"],
+            ["c000000000000003", "legacy_unknown", "reported", null, "a000000000000002"],
+            ["c000000000000004", "legacy_unknown", "legacy_unknown", null, null],
+        ];
+        foreach (string?[] row in rows)
+        {
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(row[0], reader.GetString(0));
+            Assert.Equal(row[1], reader.GetString(1));
+            Assert.Equal(row[2], reader.GetString(2));
+            Assert.True(reader.IsDBNull(3));
+            Assert.Equal(row[4], reader.IsDBNull(4) ? null : reader.GetString(4));
+        }
+
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [Fact]
+    public async Task SL12_Backfill_RecordsEachSpansNearestAgent()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        const string trace = "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d";
+        await store.RecordAsync(
+        [
+            ChatEntry(trace, "c000000000000001", "a000000000000001", 1_000, 0, 0),
+            ChatEntry(trace, "c000000000000002", "a000000000000002", 2_000, 0, 0),
+            ChatEntry(trace, "c000000000000003", "a000000000000002", 3_000, 0, 0),
+        ]);
+        await store.RecordSpanLinksAsync(
+        [
+            Link(trace, "c000000000000001", "a000000000000001", "chat"),
+            Link(trace, "c000000000000002", "a000000000000002", "chat"),
+            Link(trace, "c000000000000003", "a000000000000002", "chat"),
+        ]);
+        Assert.Equal(0, await store.BackfillFromAgentSpansAsync([trace]));
+
+        await store.RecordSpanLinksAsync(
+        [
+            Link(trace, "a000000000000002", "e000000000000001", "invoke_agent", "explore", "conv-d"),
+        ]);
+        Assert.Equal(2, await store.BackfillFromAgentSpansAsync([trace]));
+
+        await store.RecordSpanLinksAsync(
+        [
+            Link(trace, "e000000000000001", "a000000000000001", "execute_tool"),
+            Link(trace, "a000000000000001", null, "invoke_agent"),
+        ]);
+        Assert.Equal(1, await store.BackfillFromAgentSpansAsync([trace]));
+        Assert.Equal(0, await store.BackfillFromAgentSpansAsync([trace]));
+
+        await using SqliteConnection connection = await OpenAsync(DatabasePath(temp));
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT span_id, agent_span_id, agent_name, conversation_id FROM spans ORDER BY span_id;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("c000000000000001", reader.GetString(0));
+        Assert.Equal("a000000000000001", reader.GetString(1));
+        Assert.True(reader.IsDBNull(2));
+        Assert.True(reader.IsDBNull(3));
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("c000000000000002", reader.GetString(0));
+        Assert.Equal("a000000000000002", reader.GetString(1));
+        Assert.Equal("explore", reader.GetString(2));
+        Assert.Equal("conv-d", reader.GetString(3));
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("c000000000000003", reader.GetString(0));
+        Assert.Equal("a000000000000002", reader.GetString(1));
+        Assert.Equal("explore", reader.GetString(2));
+        Assert.Equal("conv-d", reader.GetString(3));
+        Assert.False(await reader.ReadAsync());
     }
 
     private static void AssertChain(
@@ -554,6 +694,29 @@ public sealed class SpanLinkStoreTests
             ParentSpanId = "eee19b7ec3c1b173",
         };
         return new LedgerEntry(span, Calculator.Calculate(span), null);
+    }
+
+    // A mai-code-2 chat span; a nonzero cache counter is Reported and a zero one is Absent, as TestSpans.Chat sets them.
+    private static LedgerEntry ChatEntry(
+        string trace,
+        string span,
+        string parent,
+        long input,
+        long cacheRead,
+        long cacheWrite)
+    {
+        NormalizedGenAiSpan chat = TestSpans.Chat(
+            requestModel: "mai-code-2",
+            inputTokens: input,
+            outputTokens: 10,
+            cacheReadInputTokens: cacheRead,
+            cacheWriteInputTokens: cacheWrite) with
+        {
+            TraceId = trace,
+            SpanId = span,
+            ParentSpanId = parent,
+        };
+        return new LedgerEntry(chat, Calculator.Calculate(chat), null);
     }
 
     private static GenAiSpanLink Link(
