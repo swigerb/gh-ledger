@@ -285,15 +285,40 @@ public sealed class SqliteLedgerStore
         };
     }
 
+    public Task<IReadOnlyList<LedgerRollupRow>> GetRollupAsync(
+        LedgerGrouping grouping,
+        LedgerFilter filter,
+        CancellationToken cancellationToken = default) =>
+        GetRollupAsync(grouping, filter, null, cancellationToken);
+
+    // whatIf: null for the API-equivalent results recorded with the spans. Otherwise, a rate card that prices every span
+    // again, as LedgerIngestor would have priced it with that card, for the three ApiEquivalent fields only; every other field
+    // is as recorded, and nothing is written.
     public async Task<IReadOnlyList<LedgerRollupRow>> GetRollupAsync(
         LedgerGrouping grouping,
         LedgerFilter filter,
+        JsonRateCardCalculator? whatIf,
         CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
 
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+
+        // One read transaction, so both queries see the same spans.
+        await using SqliteTransaction snapshot = connection.BeginTransaction(deferred: true);
+        (string keyColumns, string keyAliases) = RollupKey(grouping);
+        Dictionary<string, RetailTotals>? repriced = whatIf is null
+            ? null
+            : await RepriceAsync(
+                snapshot,
+                keyColumns,
+                keyAliases,
+                FilterSql,
+                query => AddFilterParameters(query, filter),
+                whatIf,
+                cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = snapshot;
         command.CommandText = GetRollupSql(grouping);
         AddFilterParameters(command, filter);
 
@@ -303,6 +328,12 @@ public sealed class SqliteLedgerStore
         {
             decimal aiCreditsUsd =
                 PicoUsd.ToUsd(reader.GetInt64(reader.GetOrdinal("github_usd_pico")));
+            RetailTotals retail = repriced is null
+                ? new RetailTotals(
+                    ReadUsd(reader, "api_equivalent_usd_pico"),
+                    reader.GetInt64(reader.GetOrdinal("api_equivalent_unpriced_span_count")),
+                    reader.GetInt64(reader.GetOrdinal("api_equivalent_estimated_span_count")))
+                : repriced[GroupKey(reader, keyAliases)];
             rows.Add(new LedgerRollupRow
             {
                 Repository = grouping is LedgerGrouping.Repository or LedgerGrouping.Branch
@@ -341,11 +372,9 @@ public sealed class SqliteLedgerStore
                     PicoUsd.ToUsd(reader.GetInt64(reader.GetOrdinal("byok_usd_pico"))),
                 LocalSavedUsd =
                     PicoUsd.ToUsd(reader.GetInt64(reader.GetOrdinal("saved_usd_pico"))),
-                ApiEquivalentUsd = ReadUsd(reader, "api_equivalent_usd_pico"),
-                ApiEquivalentUnpricedSpanCount =
-                    reader.GetInt64(reader.GetOrdinal("api_equivalent_unpriced_span_count")),
-                ApiEquivalentEstimatedSpanCount =
-                    reader.GetInt64(reader.GetOrdinal("api_equivalent_estimated_span_count")),
+                ApiEquivalentUsd = retail.Usd,
+                ApiEquivalentUnpricedSpanCount = retail.UnpricedSpanCount,
+                ApiEquivalentEstimatedSpanCount = retail.EstimatedSpanCount,
             });
         }
 
@@ -1109,9 +1138,17 @@ public sealed class SqliteLedgerStore
     }
 
     // Prompt chains (one per trace_id), most expensive first. Throws ArgumentOutOfRangeException unless 1 <= limit <= 1000.
+    public Task<IReadOnlyList<PromptChainRow>> GetTopPromptChainsAsync(
+        LedgerFilter filter,
+        int limit,
+        CancellationToken cancellationToken = default) =>
+        GetTopPromptChainsAsync(filter, limit, null, cancellationToken);
+
+    // whatIf as in GetRollupAsync. The chains and their order don't depend on it.
     public async Task<IReadOnlyList<PromptChainRow>> GetTopPromptChainsAsync(
         LedgerFilter filter,
         int limit,
+        JsonRateCardCalculator? whatIf,
         CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
@@ -1121,9 +1158,13 @@ public sealed class SqliteLedgerStore
         }
 
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+
+        // One read transaction, so every query sees the same spans.
+        await using SqliteTransaction snapshot = connection.BeginTransaction(deferred: true);
         List<PromptChainData> data = [];
         await using (SqliteCommand query = connection.CreateCommand())
         {
+            query.Transaction = snapshot;
             query.CommandText = $"""
                 SELECT trace_id,
                        MIN(start_time_unix_ms)                                                            AS start_ms,
@@ -1192,22 +1233,28 @@ public sealed class SqliteLedgerStore
             row => row.TraceId,
             _ => new List<string>(),
             StringComparer.Ordinal);
+        string traceParameters = string.Join(
+            ", ",
+            Enumerable.Range(0, data.Count).Select(index => $"@t{index}"));
+        void AddTraceParameters(SqliteCommand query)
+        {
+            AddFilterParameters(query, filter);
+            for (int index = 0; index < data.Count; index++)
+            {
+                query.Parameters.AddWithValue($"@t{index}", data[index].TraceId);
+            }
+        }
+
         await using (SqliteCommand query = connection.CreateCommand())
         {
-            string traceParameters = string.Join(
-                ", ",
-                Enumerable.Range(0, data.Count).Select(index => $"@t{index}"));
+            query.Transaction = snapshot;
             query.CommandText = $"""
                 SELECT DISTINCT trace_id, agent_name, model_id
                 FROM spans
                 WHERE {FilterSql}
                   AND trace_id IN ({traceParameters});
                 """;
-            AddFilterParameters(query, filter);
-            for (int index = 0; index < data.Count; index++)
-            {
-                query.Parameters.AddWithValue($"@t{index}", data[index].TraceId);
-            }
+            AddTraceParameters(query);
 
             await using SqliteDataReader reader =
                 await query.ExecuteReaderAsync(cancellationToken);
@@ -1226,10 +1273,26 @@ public sealed class SqliteLedgerStore
             }
         }
 
+        Dictionary<string, RetailTotals>? repriced = whatIf is null
+            ? null
+            : await RepriceAsync(
+                snapshot,
+                "trace_id",
+                "trace_id",
+                $"{FilterSql} AND trace_id IN ({traceParameters})",
+                AddTraceParameters,
+                whatIf,
+                cancellationToken);
         List<PromptChainRow> rows = [];
         foreach (PromptChainData item in data)
         {
             decimal aiCreditsUsd = PicoUsd.ToUsd(item.GitHubUsdPico);
+            RetailTotals retail = repriced is null
+                ? new RetailTotals(
+                    item.ApiEquivalentUsd,
+                    item.ApiEquivalentUnpricedSpanCount,
+                    item.ApiEquivalentEstimatedSpanCount)
+                : repriced[GroupKey([item.TraceId])];
             rows.Add(new PromptChainRow
             {
                 TraceId = item.TraceId,
@@ -1252,9 +1315,9 @@ public sealed class SqliteLedgerStore
                 AiCreditsUsd = aiCreditsUsd,
                 FoundryByokUsd = PicoUsd.ToUsd(item.ByokUsdPico),
                 LocalSavedUsd = PicoUsd.ToUsd(item.SavedUsdPico),
-                ApiEquivalentUsd = item.ApiEquivalentUsd,
-                ApiEquivalentUnpricedSpanCount = item.ApiEquivalentUnpricedSpanCount,
-                ApiEquivalentEstimatedSpanCount = item.ApiEquivalentEstimatedSpanCount,
+                ApiEquivalentUsd = retail.Usd,
+                ApiEquivalentUnpricedSpanCount = retail.UnpricedSpanCount,
+                ApiEquivalentEstimatedSpanCount = retail.EstimatedSpanCount,
             });
         }
 
@@ -1776,33 +1839,36 @@ public sealed class SqliteLedgerStore
         command.Parameters.AddWithValue("@api_rate_card_sha256", retail.RateCardSha256);
     }
 
+    // A rollup's group key: its SELECT expressions, and their aliases separated by ", ".
+    private static (string Columns, string Aliases) RollupKey(LedgerGrouping grouping) => grouping switch
+    {
+        LedgerGrouping.Repository =>
+            ("COALESCE(repo_slug, repo_root, '(none)') AS repository",
+             "repository"),
+        LedgerGrouping.Branch =>
+            ("""
+             COALESCE(repo_slug, repo_root, '(none)') AS repository,
+                      COALESCE(branch_name, '(none)') AS branch
+             """,
+             "repository, branch"),
+        LedgerGrouping.Model =>
+            ("COALESCE(model_id, '(none)') AS model",
+             "model"),
+        LedgerGrouping.Agent =>
+            ("COALESCE(agent_name, '(none)') AS agent",
+             "agent"),
+        LedgerGrouping.ChannelModel =>
+            ("""
+             billing_channel AS channel,
+                      COALESCE(model_id, '(none)') AS model
+             """,
+             "channel, model"),
+        _ => throw new ArgumentOutOfRangeException(nameof(grouping), grouping, null),
+    };
+
     private static string GetRollupSql(LedgerGrouping grouping)
     {
-        (string keyColumns, string keyAliases) = grouping switch
-        {
-            LedgerGrouping.Repository =>
-                ("COALESCE(repo_slug, repo_root, '(none)') AS repository",
-                 "repository"),
-            LedgerGrouping.Branch =>
-                ("""
-                 COALESCE(repo_slug, repo_root, '(none)') AS repository,
-                          COALESCE(branch_name, '(none)') AS branch
-                 """,
-                 "repository, branch"),
-            LedgerGrouping.Model =>
-                ("COALESCE(model_id, '(none)') AS model",
-                 "model"),
-            LedgerGrouping.Agent =>
-                ("COALESCE(agent_name, '(none)') AS agent",
-                 "agent"),
-            LedgerGrouping.ChannelModel =>
-                ("""
-                 billing_channel AS channel,
-                          COALESCE(model_id, '(none)') AS model
-                 """,
-                 "channel, model"),
-            _ => throw new ArgumentOutOfRangeException(nameof(grouping), grouping, null),
-        };
+        (string keyColumns, string keyAliases) = RollupKey(grouping);
 
         return $"""
             SELECT {keyColumns},
@@ -1838,6 +1904,72 @@ public sealed class SqliteLedgerStore
         BillingChannel.Unpriced => "unpriced",
         _ => throw new ArgumentOutOfRangeException(nameof(channel), channel, null),
     };
+
+    // The API-equivalent totals of the spans that match where, priced with whatIf instead of their recorded results, by
+    // group key (GroupKey of the keyAliases columns). Streams the spans, never writes, and never reads a recorded result.
+    private static async Task<Dictionary<string, RetailTotals>> RepriceAsync(
+        SqliteTransaction snapshot,
+        string keyColumns,
+        string keyAliases,
+        string where,
+        Action<SqliteCommand> addParameters,
+        JsonRateCardCalculator whatIf,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, RetailTotals> totals = new(StringComparer.Ordinal);
+        await using SqliteCommand command = snapshot.Connection!.CreateCommand();
+        command.Transaction = snapshot;
+        command.CommandText = $"""
+            SELECT {keyColumns},
+                   operation_name                                AS what_if_operation,
+                   billing_channel                               AS what_if_channel,
+                   model_id                                      AS what_if_model,
+                   start_time_unix_ms                            AS what_if_start,
+                   input_tokens                                  AS what_if_input,
+                   output_tokens                                 AS what_if_output,
+                   cache_read_input_tokens                       AS what_if_cache_read,
+                   cache_write_input_tokens                      AS what_if_cache_write,
+                   CASE WHEN {ReportedSql} THEN 1 ELSE 0 END     AS what_if_reported
+            FROM spans
+            WHERE {where};
+            """;
+        addParameters(command);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            int model = reader.GetOrdinal("what_if_model");
+            ApiEquivalentCost cost = whatIf.CalculateApiEquivalent(new ApiEquivalentRequest
+            {
+                OperationName = reader.GetString(reader.GetOrdinal("what_if_operation")),
+                Channel = ToBillingChannel(reader.GetString(reader.GetOrdinal("what_if_channel"))),
+                ModelId = reader.IsDBNull(model) ? null : reader.GetString(model),
+                StartTime = DateTimeOffset.FromUnixTimeMilliseconds(
+                    reader.GetInt64(reader.GetOrdinal("what_if_start"))),
+                InputTokens = reader.GetInt64(reader.GetOrdinal("what_if_input")),
+                OutputTokens = reader.GetInt64(reader.GetOrdinal("what_if_output")),
+                CacheReadInputTokens = reader.GetInt64(reader.GetOrdinal("what_if_cache_read")),
+                CacheWriteInputTokens = reader.GetInt64(reader.GetOrdinal("what_if_cache_write")),
+            });
+            string key = GroupKey(reader, keyAliases);
+            if (!totals.TryGetValue(key, out RetailTotals? group))
+            {
+                group = new RetailTotals();
+                totals.Add(key, group);
+            }
+
+            group.Add(cost, reader.GetInt64(reader.GetOrdinal("what_if_reported")) == 1);
+        }
+
+        return totals;
+    }
+
+    // The values of the keyAliases columns, each prefixed with its length so that different keys never collide.
+    private static string GroupKey(SqliteDataReader reader, string keyAliases) =>
+        GroupKey(keyAliases.Split(", ").Select(alias => reader.GetString(reader.GetOrdinal(alias))));
+
+    private static string GroupKey(IEnumerable<string> values) =>
+        string.Concat(values.Select(value =>
+            $"{value.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)}:{value}"));
 
     private static BillingChannel ToBillingChannel(string value) => value switch
     {
@@ -1904,6 +2036,29 @@ public sealed class SqliteLedgerStore
         string? GitRepositorySlug,
         string? GitBranch,
         string? GitCommitSha);
+
+    // A group's API-equivalent totals: as recorded, or summed by Add as spans are priced again.
+    private sealed class RetailTotals(decimal? usd = null, long unpricedSpanCount = 0, long estimatedSpanCount = 0)
+    {
+        public decimal? Usd { get; private set; } = usd;
+        public long UnpricedSpanCount { get; private set; } = unpricedSpanCount;
+        public long EstimatedSpanCount { get; private set; } = estimatedSpanCount;
+
+        public void Add(ApiEquivalentCost cost, bool cacheReported)
+        {
+            if (cost.UsdCost is not decimal usdCost)
+            {
+                UnpricedSpanCount++;
+                return;
+            }
+
+            Usd = (Usd ?? 0m) + usdCost;
+            if (!cacheReported)
+            {
+                EstimatedSpanCount++;
+            }
+        }
+    }
 
     private sealed record PromptChainData(
         string TraceId,
