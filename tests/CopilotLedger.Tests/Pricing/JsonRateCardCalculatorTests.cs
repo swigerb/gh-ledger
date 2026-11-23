@@ -24,7 +24,7 @@ public sealed class JsonRateCardCalculatorTests
     [Fact]
     public void LoadEmbedded_Succeeds()
     {
-        Assert.Equal("2026-11-20", JsonRateCardCalculator.LoadEmbedded().RatesVersion);
+        Assert.Equal("2026-11-23", JsonRateCardCalculator.LoadEmbedded().RatesVersion);
     }
 
     [Theory]

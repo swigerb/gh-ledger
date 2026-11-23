@@ -17,10 +17,10 @@ public static class PublishedRates
         return reader.ReadToEnd();
     }
 
-    // The embedded rates with "ratesVersion": "2026-11-20" replaced by ratesVersion.
+    // The embedded rates with "ratesVersion": "2026-11-23" replaced by ratesVersion.
     public static string WithVersion(string ratesVersion) =>
         Embedded().Replace(
-            "\"ratesVersion\": \"2026-11-20\"",
+            "\"ratesVersion\": \"2026-11-23\"",
             $"\"ratesVersion\": \"{ratesVersion}\"",
             StringComparison.Ordinal);
 

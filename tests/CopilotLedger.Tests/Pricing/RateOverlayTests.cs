@@ -129,7 +129,7 @@ public sealed class RateOverlayTests
         Assert.Equal("gpt-6.1-sol", result.ModelId);
         Assert.Equal(0.315m, result.UsdCost);
         Assert.Equal(0m, result.AiCredits);
-        Assert.Equal("2026-11-20+contoso-2026-11", result.RatesVersion);
+        Assert.Equal("2026-11-23+contoso-2026-11", result.RatesVersion);
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public sealed class RateOverlayTests
         Assert.Equal(PricingStatus.LocalOffload, result.Status);
         Assert.Equal(0.92m, result.EstimatedCloudSavedUsd);
         Assert.Equal("claude-sonnet-5.5", result.RateCardModelId);
-        Assert.Equal("2026-11-20+user", result.RatesVersion);
+        Assert.Equal("2026-11-23+user", result.RatesVersion);
     }
 
     [Fact]
@@ -374,7 +374,7 @@ public sealed class RateOverlayTests
         JsonRateCardCalculator calculator = JsonRateCardCalculator.LoadEmbeddedWithOverlay(
             WriteOverlay(temp, """{ "schemaVersion": 1, "ratesVersion": " custom " }"""));
 
-        Assert.Equal("2026-11-20+ custom ", calculator.RatesVersion);
+        Assert.Equal("2026-11-23+ custom ", calculator.RatesVersion);
     }
 
     private static string WriteOverlay(TempDirectory temp, string overlay)

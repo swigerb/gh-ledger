@@ -164,6 +164,6 @@ public sealed class RatesRefreshTests
     [Fact]
     public void RR4_RatesVersion_IsUnchanged() =>
         Assert.Equal(
-            "2026-11-20",
+            "2026-11-23",
             JsonRateCardCalculator.LoadEmbedded().RatesVersion);
 }

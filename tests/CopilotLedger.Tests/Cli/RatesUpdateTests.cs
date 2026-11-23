@@ -21,7 +21,7 @@ public sealed class RatesUpdateTests
         CliRun run = await harness.RunWithHttpAsync(handler, "rates", "update");
 
         Assert.Equal(0, run.ExitCode);
-        Assert.Equal("Updated rates from 2026-11-20 to 2026-12-01.\n", run.Out);
+        Assert.Equal("Updated rates from 2026-11-23 to 2026-12-01.\n", run.Out);
         Assert.Equal(string.Empty, run.Error);
         Assert.Equal(
             [new HttpCall("GET", PublishedRates.Url, $"gh-ledger/{GhLedgerCli.Version}")],
@@ -47,8 +47,8 @@ public sealed class RatesUpdateTests
 
     public static TheoryData<string, string> NotNewer => new()
     {
-        { "2026-11-20", "Rates are up to date (2026-11-20).\n" },
-        { "2026-10-01", "The published rates (2026-10-01) are older than the rates in use (2026-11-20); nothing changed.\n" },
+        { "2026-11-23", "Rates are up to date (2026-11-23).\n" },
+        { "2026-10-01", "The published rates (2026-10-01) are older than the rates in use (2026-11-23); nothing changed.\n" },
     };
 
     [Theory]
@@ -177,17 +177,17 @@ public sealed class RatesUpdateTests
 
         Assert.Equal(0, validate.ExitCode);
         Assert.Equal(
-            warning + $"No rates overlay at {Path.Combine(temp.Path, "data", "rates.json")}; using the built-in rates (2026-11-20).\n",
+            warning + $"No rates overlay at {Path.Combine(temp.Path, "data", "rates.json")}; using the built-in rates (2026-11-23).\n",
             validate.Out);
         Assert.Equal(0, status.ExitCode);
         using JsonDocument document = JsonDocument.Parse(status.Out);
-        Assert.Equal("2026-11-20", document.RootElement.GetProperty("ratesVersion").GetString());
+        Assert.Equal("2026-11-23", document.RootElement.GetProperty("ratesVersion").GetString());
         Assert.Equal("built-in", document.RootElement.GetProperty("ratesSource").GetString());
         Assert.Equal(
             [warning[9..^1]],
             document.RootElement.GetProperty("warnings").EnumerateArray().Select(item => item.GetString()));
         Assert.Equal(0, update.ExitCode);
-        Assert.Equal(warning + "Updated rates from 2026-11-20 to 2026-12-01.\n", update.Out);
+        Assert.Equal(warning + "Updated rates from 2026-11-23 to 2026-12-01.\n", update.Out);
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public sealed class RatesUpdateTests
 
         Assert.Equal(0, validate.ExitCode);
         Assert.Equal(
-            $"No rates overlay at {Path.Combine(temp.Path, "data", "rates.json")}; using the built-in rates (2026-11-20).\n",
+            $"No rates overlay at {Path.Combine(temp.Path, "data", "rates.json")}; using the built-in rates (2026-11-23).\n",
             validate.Out);
     }
 

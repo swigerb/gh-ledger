@@ -50,7 +50,7 @@ gh ledger status
 gh-ledger 0.4.1 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 16:20
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
-Rates:   2026-11-20
+Rates:   2026-11-23
 Copilot: OTel export enabled (COPILOT_OTEL_ENABLED=true)
 
 Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
@@ -80,7 +80,7 @@ gh ledger status
 gh-ledger 0.4.1 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 08:02
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
-Rates:   2026-11-20+contoso-2026-11
+Rates:   2026-11-23+contoso-2026-11
 Copilot: OTel export enabled (COPILOT_OTEL_ENABLED=true)
 
 Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
@@ -503,7 +503,7 @@ gh ledger rates validate
 ```
 
 ```text
-C:\Users\you\.copilot-ledger\rates.json is valid. Rates version: 2026-11-20+contoso-2026-11.
+C:\Users\you\.copilot-ledger\rates.json is valid. Rates version: 2026-11-23+contoso-2026-11.
 ```
 <!-- /sample -->
 
@@ -589,7 +589,7 @@ gh ledger rates update
 ```
 
 ```text
-Updated rates from 2026-11-20 to 2026-12-15.
+Updated rates from 2026-11-23 to 2026-12-15.
 Restart the daemon to price new spans with them: gh ledger daemon stop, then gh ledger daemon start.
 ```
 <!-- /sample -->

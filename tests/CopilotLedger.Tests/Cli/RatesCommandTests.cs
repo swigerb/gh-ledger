@@ -57,13 +57,13 @@ public sealed class RatesCommandTests
         CliRun missing = await harness.RunAsync("rates", "validate");
         Assert.Equal(0, missing.ExitCode);
         Assert.Equal(
-            $"No rates overlay at {path}; using the built-in rates (2026-11-20).\n",
+            $"No rates overlay at {path}; using the built-in rates (2026-11-23).\n",
             missing.Out);
         await harness.RunAsync("rates", "init");
         CliRun created = await harness.RunAsync("rates", "validate");
         Assert.Equal(0, created.ExitCode);
         Assert.Equal(
-            $"{path} is valid. Rates version: 2026-11-20+user.\n",
+            $"{path} is valid. Rates version: 2026-11-23+user.\n",
             created.Out);
     }
 

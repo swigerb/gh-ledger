@@ -64,6 +64,13 @@ Besides what each request is billed, CopilotLedger records what the same request
 - A request with inconsistent token counts (`invalid_usage`) gets no API-equivalent cost either.
 - Cache reads and writes are priced at the list prices for them, as billing is. A request that reported no cache counters is priced as if all of its input were uncached, so its API-equivalent cost is an estimate, and reports mark it as one.
 
+The built-in API list prices are each vendor's public prices on 2026-11-23 for the 31 GitHub models that have them, for standard processing on the vendor's global endpoint: not batch, flex, priority, fast mode, or regional endpoints. Each model's `sourceUrl` is its vendor's price page. Where a list price differs from GitHub's rate, as Grok 4.5's cached input and GPT-5.6 Luna's long-context threshold do, the list price is used. Where the vendors' pages leave a choice open:
+
+- MAI Code 2, MAI Code 2 Flash, and MAI Code 1.1 Flash have no public API list price, so their requests are unpriced in this view. So are local requests, because their baseline is MAI Code 2; to price them, set `apiEquivalent.localBaselineModel` in your overlay.
+- Cache writes are priced for the vendor's default cache lifetime: 5 minutes at Anthropic and Moonshot, and 30 minutes at OpenAI. Longer lifetimes cost more. Google and xAI list no cache-write price, so cache writes are priced as input.
+- Prices start and end at 00:00 UTC. A promotion ends the day after its last day. Google publishes the prices that follow its promotions; OpenAI publishes none after GPT-5.6 Sol's, which ends on 2026-12-01. A retired or shut-down model has no list price from that date: Claude Sonnet 4 from 2026-06-15, and GPT-5.3-Codex and GPT-5.4 nano from 2027-04-01. Vendors publish only current prices, so they're assumed for earlier dates, except after a documented change: GPT-5.6 Luna's prices start on 2026-07-30, and GPT-5.6 Sol's on 2026-08-21.
+- Vendor API ids, such as `claude-opus-4-8`, and dated snapshot ids, such as `claude-haiku-4-5-20251001`, are aliases.
+
 ## Why Foundry BYOK is unpriced by default
 
 With bring-your-own-key (BYOK), Microsoft Foundry bills you directly, not GitHub. Azure prices depend on region, deployment type, and your agreement, so CopilotLedger can't know yours.
@@ -90,7 +97,7 @@ Run `gh ledger rates init` to create a starter file, and `gh ledger rates valida
 - A model with a new `id` is added. A model with the same `id` as a built-in one replaces it.
 - Host and provider lists are added to the built-in lists.
 - `localOffload.baselineModel` and `apiEquivalent.localBaselineModel` replace the built-in values.
-- `ratesVersion` is an optional label. Each request in the ledger records which rates priced it, for example `2026-11-20+contoso-2026-11`, or `2026-11-20+user` if you leave the label out.
+- `ratesVersion` is an optional label. Each request in the ledger records which rates priced it, for example `2026-11-23+contoso-2026-11`, or `2026-11-23+user` if you leave the label out.
 - JSON doesn't allow comments, so put your own notes in the optional `notes` array.
 
 If the file is invalid, CopilotLedger refuses to load it and reports the first problem it finds. It never silently ignores a broken file. Each error starts with the file's path, then says where the problem is and what's wrong:

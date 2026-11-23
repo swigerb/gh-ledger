@@ -48,7 +48,7 @@ public sealed class ReportCommandTests
             daemon.GetProperty("endpoint").GetString());
         Assert.True(root.GetProperty("copilotOtelEnabled").GetBoolean());
         Assert.Empty(root.GetProperty("warnings").EnumerateArray());
-        Assert.Equal("2026-11-20", root.GetProperty("ratesVersion").GetString());
+        Assert.Equal("2026-11-23", root.GetProperty("ratesVersion").GetString());
         JsonElement[] periods = root.GetProperty("periods").EnumerateArray().ToArray();
         Assert.Equal(3, periods.Length);
         AssertPeriod(periods[0], "today", "2026-11-21T05:00:00.0000000+00:00", 3, 342m, 3.42m, 0m, 0.23m);
@@ -349,7 +349,7 @@ public sealed class ReportCommandTests
         Assert.Equal(0, text.ExitCode);
         Assert.Equal(
             StatusText(temp.Path).Replace(
-                "Rates:   2026-11-20",
+                "Rates:   2026-11-23",
                 $"Rates:   invalid overlay: {expectedError}",
                 StringComparison.Ordinal),
             text.Out);
@@ -648,7 +648,7 @@ public sealed class ReportCommandTests
         gh-ledger 0.4.1
         Daemon:  not running; start it with: gh-ledger daemon start
         Ledger:  {Path.Combine(root, "data", "ledger.db")}
-        Rates:   2026-11-20
+        Rates:   2026-11-23
         Copilot: OTel export not enabled; run: gh-ledger install
 
         Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
