@@ -41,7 +41,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 9: status --cache --turns and --bloat (CopilotLedger.Cli & tests). The per-request breakdown of one trace or conversation, and the context-bloat rankings, as tables and JSON, with their option rules.
 - [x] Task 10: MCP get_cache_efficiency (CopilotLedger.Storage, Cli, Mcp, docs & tests). A fifth MCP tool, read-only. `get_branch_ledger` and `get_agent_breakdown` add `uncachedInputTokens`, `cacheReportedSpans`, and `cacheHitRatio`. The `--since` grammar moves to a shared `LedgerPeriod`.
 - [x] Task 11: Docs and the Context-Bloat Walkthrough (docs & tests). `docs/cli.md` documents prompt-cache efficiency, `docs/configuration.md` explains how requests without cache counters are priced and reported, and `docs/guide.md` gains a tested "Find context bloat" walkthrough.
-- [ ] Task 12: Document Unreported Cache Misses (docs). Review fix: `docs/cli.md` and `docs/configuration.md` explain that a cache miss that writes nothing to the cache sends no cache counters, so it's left out of `Hit %`, which is then too high for a model whose provider reports cache reads but never cache writes (the bias D1 leaves).
+- [x] Task 12: Document Unreported Cache Misses (docs). Review fix: `docs/cli.md` and `docs/configuration.md` explain that a cache miss that writes nothing to the cache sends no cache counters, so it's left out of `Hit %`, which is then too high for a model whose provider reports cache reads but never cache writes (the bias D1 leaves).
 
 ## Starting point
 
