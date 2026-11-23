@@ -37,14 +37,27 @@ The built-in prices are GitHub's rates for every text model on [Models and prici
 - Claude Opus 4.8 (fast mode) isn't built in, because the model name Copilot reports for it isn't known yet. If you use it, add it under `githubAiCredits.models` with the model name Copilot reports.
 - GitHub hasn't published the prices that follow the promotions for Gemini 4 Argon (ending 2026-12-01) and Gemini 3.8 Flash (ending after 2026-12-31). Later requests for them are recorded with status `no_rate_for_date` until you add a price window or a CopilotLedger update adds the price.
 
+### Which model prices a request
+
+A request can report two model names: the model that answered it (`gen_ai.response.model`) and the model it asked for (`gen_ai.request.model`). They're usually the same, but Copilot CLI 1.0.114, for example, reports a Claude Haiku 4.5 request with Anthropic's dated id, `claude-haiku-4-5-20251001`, as the response model and `claude-haiku-4.5` as the request model.
+
+A model name matches a model's `id` or one of its `aliases`, case-insensitively and with spaces treated as `-`. A GitHub or Foundry BYOK request is priced as the first of these that the channel's models have:
+
+1. The response model.
+2. The request model.
+
+The request is recorded with that model's `id`, and its API-equivalent cost is for the same model. So a response model that the channel has is used even when the request asked for another model, and one that the channel doesn't have never hides a request model that it has. When the channel has neither, the request is unpriced, as `unknown_model` on GitHub or `byok_unpriced` on Foundry BYOK, and it's recorded with its response model, or with its request model when it reports no response model. A local request matches local models only by its response model, or by its request model when it reports no response model; either way, its savings don't depend on the model.
+
+The built-in GitHub models have the vendors' API ids and dated snapshot ids as aliases, the same ones as their API list prices. If your overlay adds one of these names as a GitHub model or alias, for example to price `claude-haiku-4-5-20251001` before CopilotLedger did, remove it: a name that a built-in model of the same section already uses makes the overlay invalid.
+
 ### Pricing statuses
 
 | Status | Meaning | Fix |
 |---|---|---|
 | `priced` | Priced from a rate card | — |
 | `local_offload` | Local model: $0.00 billed, savings estimated | — |
-| `byok_unpriced` | Foundry BYOK endpoint, but no price for the model | Add the model under `foundryByok.models` |
-| `unknown_model` | No model on the request, or the model isn't in the price list | Add the model, or an alias for it, under `githubAiCredits.models` or `foundryByok.models` |
+| `byok_unpriced` | Foundry BYOK endpoint, but no price for its response model or its request model | Add the model under `foundryByok.models` |
+| `unknown_model` | No model on the request, or neither its response model nor its request model is in the price list | Add the model, or an alias for it, under `githubAiCredits.models` or `foundryByok.models` |
 | `no_rate_for_date` | The model has no price for the request's date | Add a price window that covers the date |
 | `unrecognized_endpoint` | The endpoint isn't GitHub, Foundry, or local | Add its host to the matching `hostSuffixes` or `additionalHosts` list |
 | `invalid_usage` | Token counts are inconsistent, for example more cached tokens than input tokens | Report it; it usually means a telemetry exporter bug |
@@ -55,6 +68,24 @@ A request's input tokens include the tokens the model read from its prompt cache
 
 Cache-efficiency reports, such as `gh ledger status --cache`, don't treat such a request as a cache miss: its cache use is unknown, so hit ratios and observed cache totals leave it out, and a group of such requests shows `n/a` rather than `0.0%`. A cache miss that writes nothing to the cache also reports neither count, so it's left out too, and a hit ratio can be higher than the real one. See [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
 
+### API-equivalent prices
+
+Besides what each request is billed, CopilotLedger records what the same request would cost at its model's API list prices, from the `apiEquivalent` section of the rates (see [API list prices](#api-list-prices)). This API-equivalent cost is a comparison. It's never added to billed spend, and budgets and the circuit breaker ignore it.
+
+- A request is priced as the model it's recorded with: a GitHub or Foundry BYOK model's id once its aliases are resolved, or else the model name the request reported (see [Which model prices a request](#which-model-prices-a-request)). When no section of the rates has that name, the request model is priced instead, so a Foundry BYOK request that reports a dated response model, such as `gpt-6.1-sol-2026-10-01`, is priced as its request model, `gpt-6.1-sol`. A name that the rates have is never replaced: a request that MAI Code 2 answered is unpriced in this view, whatever model it asked for. A local request is priced as the local baseline instead. Nothing else depends on the billing channel, so a request to an unrecognized endpoint still gets an API-equivalent cost when its model has a list price.
+- A request whose model has no API list price, or no price for the request's date, is unpriced in this view. It has no API-equivalent cost, never $0.00.
+- A request with inconsistent token counts (`invalid_usage`) gets no API-equivalent cost either.
+- Cache reads and writes are priced at the list prices for them, as billing is. A request that reported no cache counters is priced as if all of its input were uncached, so its API-equivalent cost is an estimate, and reports mark it as one.
+
+Each request keeps the API-equivalent result it was recorded with, along with the rates version and the SHA-256 of the API list prices that gave it. Requests recorded before gh-ledger had API list prices have none, and reports count them as unpriced until you run `gh ledger rates backfill-api-equivalent`. It prices them with the rates in use, your overlay included, as of each request's start time, and records that rates version and hash beside the request's billing rates version. It never changes what a request was billed or saved, and it skips requests that already have a result. With `--dry-run`, it shows the counts and writes nothing. A request whose API-equivalent cost would be beyond the ledger's range of about $9.2 million keeps no result; CopilotLedger doesn't record a new request with such a cost at all.
+
+The built-in API list prices are each vendor's public prices on 2026-11-23 for the 31 GitHub models that have them, for standard processing on the vendor's global endpoint: not batch, flex, priority, fast mode, or regional endpoints. Each model's `sourceUrl` is its vendor's price page. Where a list price differs from GitHub's rate, as Grok 4.5's cached input and GPT-5.6 Luna's long-context threshold do, the list price is used. Where the vendors' pages leave a choice open:
+
+- MAI Code 2, MAI Code 2 Flash, and MAI Code 1.1 Flash have no public API list price, so their requests are unpriced in this view. So are local requests, because their baseline is MAI Code 2; to price them, set `apiEquivalent.localBaselineModel` in your overlay.
+- Cache writes are priced for the vendor's default cache lifetime: 5 minutes at Anthropic and Moonshot, and 30 minutes at OpenAI. Longer lifetimes cost more. Google and xAI list no cache-write price, so cache writes are priced as input.
+- Prices start and end at 00:00 UTC. A promotion ends the day after its last day. Google publishes the prices that follow its promotions; OpenAI publishes none after GPT-5.6 Sol's, which ends on 2026-12-01. A retired or shut-down model has no list price from that date: Claude Sonnet 4 from 2026-06-15, and GPT-5.3-Codex and GPT-5.4 nano from 2027-04-01. Vendors publish only current prices, so they're assumed for earlier dates, except after a documented change: GPT-5.6 Luna's prices start on 2026-07-30, and GPT-5.6 Sol's on 2026-08-21.
+- Vendor API ids, such as `claude-opus-4-8`, and dated snapshot ids, such as `claude-haiku-4-5-20251001`, are aliases.
+
 ## Why Foundry BYOK is unpriced by default
 
 With bring-your-own-key (BYOK), Microsoft Foundry bills you directly, not GitHub. Azure prices depend on region, deployment type, and your agreement, so CopilotLedger can't know yours.
@@ -63,11 +94,11 @@ Until you add prices, BYOK requests are still counted and attributed to reposito
 
 ## Newer rates between releases: `gh ledger rates update`
 
-Each gh-ledger release attaches the `rates.json` it was built with. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.json`, through your system proxy, and checks it with the same rules as the built-in rates.
+Each gh-ledger release attaches the rates it was built with as `rates.v2.json`. It also attaches them as `rates.json`, with `schemaVersion` 1 and without API list prices, for gh-ledger 0.4.1 and earlier, which read only `schemaVersion` 1. Its GitHub models keep their aliases, so after `gh ledger rates update`, those versions also price a request whose response model is a vendor's id, such as `claude-haiku-4-5-20251001`, although they never try the request model. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.v2.json`, through your system proxy, and checks it with the same rules as the built-in rates. If the latest release has no `rates.v2.json`, it downloads that release's `rates.json` instead.
 
-Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
+Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. A newer download with `schemaVersion` 1 isn't saved either, because it has no API list prices, and `rates update` reports an error. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
 
-CopilotLedger's base rates are `rates.downloaded.json` when that file is valid and newer than the built-in rates, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read is ignored with a warning in `gh ledger status`, `gh ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh ledger status` shows `(downloaded)` after the rates version when the download is in use.
+CopilotLedger's base rates are `rates.downloaded.json` when that file is valid, newer than the built-in rates, and has `schemaVersion` 2, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read, and a newer one with `schemaVersion` 1, such as one that an older gh-ledger saved, are ignored with a warning in `gh ledger status`, `gh ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh ledger status` shows `(downloaded)` after the rates version when the download is in use.
 
 The daemon reads rates when it starts, so restart it after an update. Spans already recorded keep the prices they were recorded with.
 
@@ -77,18 +108,18 @@ To change pricing, create `~/.copilot-ledger/rates.json`. CopilotLedger merges i
 
 Run `gh ledger rates init` to create a starter file, and `gh ledger rates validate` to check it against the same rules the daemon uses. The daemon reads the file when it starts, so restart it after a change: `gh ledger daemon stop`, then `gh ledger daemon start`.
 
-- Every section is optional except `"schemaVersion": 1`.
+- Every section is optional except `schemaVersion`, which is `1`, or `2` when the file has an `apiEquivalent` section (see [API list prices](#api-list-prices)).
 - A model with a new `id` is added. A model with the same `id` as a built-in one replaces it.
 - Host and provider lists are added to the built-in lists.
-- `localOffload.baselineModel` replaces the built-in value.
-- `ratesVersion` is an optional label. Each request in the ledger records which rates priced it, for example `2026-11-20+contoso-2026-11`, or `2026-11-20+user` if you leave the label out.
+- `localOffload.baselineModel` and `apiEquivalent.localBaselineModel` replace the built-in values.
+- `ratesVersion` is an optional label. Each request in the ledger records which rates priced it, for example `2026-11-23+contoso-2026-11`, or `2026-11-23+user` if you leave the label out.
 - JSON doesn't allow comments, so put your own notes in the optional `notes` array.
 
 If the file is invalid, CopilotLedger refuses to load it and reports the first problem it finds. It never silently ignores a broken file. Each error starts with the file's path, then says where the problem is and what's wrong:
 
 - Most errors give a path into your file, such as `foundryByok.models[0].windows[0].tiers[0].outputPer1M`. Indexes count from 0, and they count only the entries in your file.
 - If the file isn't valid JSON, the error gives the line and column where reading stopped, counting from 1.
-- Two checks compare your file with the built-in rates: a model `id` or alias that a built-in model already uses, and a `localOffload.baselineModel` that isn't a GitHub model. These errors say `in the merged rates`.
+- Three checks compare your file with the built-in rates: a model `id` or alias that a built-in model of the same section already uses, a `localOffload.baselineModel` that isn't a GitHub model, and an `apiEquivalent.localBaselineModel` that isn't an API-equivalent model. These errors say `in the merged rates`.
 - Property names are case-sensitive, and each property can appear only once in its object.
 
 For example, this file leaves out a tier's `outputPer1M`:
@@ -234,13 +265,53 @@ For tiered or time-limited prices:
 - `maxInputTokens` is an inclusive input-token limit. Set it on every tier except the last.
 - `effectiveFrom` (inclusive) and `effectiveUntil` (exclusive) bound a price window. Use UTC timestamps such as `2027-05-17T00:00:00Z`.
 
+### API list prices
+
+The `apiEquivalent` section holds API list prices: what a model costs when you call its vendor's API yourself, in USD per 1,000,000 tokens. They're for comparison only. They never change AI credits, Foundry BYOK spend, local savings, or budgets. The section needs `"schemaVersion": 2`. For example, to compare with a price list your company negotiated:
+
+```json
+{
+  "schemaVersion": 2,
+  "ratesVersion": "contoso-2026-12",
+  "apiEquivalent": {
+    "models": [
+      {
+        "id": "claude-sonnet-5.5",
+        "vendor": "anthropic",
+        "sourceUrl": "https://contoso.example/agreements/anthropic-2026",
+        "windows": [
+          { "tiers": [ { "name": "default", "inputPer1M": 1.60, "cachedInputPer1M": 0.08, "cacheWritePer1M": 2.00, "outputPer1M": 8.00 } ] }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- API-equivalent models have the same fields and rules as the other priced models, plus `vendor` and `sourceUrl`, which are optional notes for people. Their ids and aliases must be unique within `apiEquivalent`, but a GitHub or Foundry BYOK model can have the same id.
+- A model with the same `id` as a built-in API-equivalent model replaces it, and a model with a new `id` is added.
+- `localBaselineModel` is optional. It names the API-equivalent model whose list prices value local requests, and it must be one of them. Without it, local requests use the list prices of `localOffload.baselineModel`, if it has any.
+- `description` is optional text.
+
+An overlay changes the API-equivalent prices of requests recorded from then on. To see what requests already recorded would cost at other prices, use `--pricing` instead.
+
+### Compare with other prices: `--pricing`
+
+`gh ledger status`, `branch`, `agents`, `top-prompts`, and `export-pr` take `--pricing <path>`, a rates file whose API list prices replace the recorded API-equivalent amounts in that report:
+
+- The file is a complete rates document with `"schemaVersion": 2`, like the built-in rates, not an overlay. It needs every section, and neither your overlay nor downloaded rates apply to it. A release's `rates.v2.json` is a good start.
+- Only the API-equivalent amounts change. AI credits, GitHub USD, BYOK USD, local savings, budgets, and the circuit breaker keep their recorded values, and nothing is written to the ledger.
+- Each request keeps the billing channel and model id it was recorded with, which the rates in use then decided, your overlay's hosts and aliases included. The file's host lists and its GitHub and Foundry BYOK aliases don't resolve them again. The file's API list prices price that model id, by id or alias, as of the request's start time; when no section of the file has the model id, they price its request model instead (see [API-equivalent prices](#api-equivalent-prices)). A local request is priced as the file's local baseline. Requests recorded before gh-ledger had API list prices are priced too.
+- Reports name the file in a `Pricing:` line, and their JSON adds `pricingSource` with its `path`, `ratesVersion`, and `apiRateCardSha256`. A receipt names the file without its folder.
+- `gh ledger rates validate --pricing <path>` checks a file with the same rules and messages.
+
 ## Field reference
 
 Overlay sections:
 
 | Field | Required | Notes |
 |---|---|---|
-| `schemaVersion` | Yes | Must be `1` |
+| `schemaVersion` | Yes | `1`, or `2` when the file has `apiEquivalent` |
 | `ratesVersion` | No | Label recorded with each priced request |
 | `notes` | No | Strings for your own notes |
 | `githubAiCredits.hostSuffixes`, `foundryByok.hostSuffixes` | No | Added to the built-in lists |
@@ -249,12 +320,16 @@ Overlay sections:
 | `localOffload.models` | No | Local model entries: `{ "id": "...", "aliases": ["..."] }` |
 | `localOffload.baselineModel` | No | A GitHub model id or alias used to estimate savings |
 | `localOffload.additionalHosts` | No | Hosts treated as local |
+| `apiEquivalent.models` | No | API list prices, as priced models (see the next table) |
+| `apiEquivalent.localBaselineModel` | No | An API-equivalent model id or alias that values local requests |
+| `apiEquivalent.description` | No | Text for your own notes |
 
 Priced model entries:
 
 | Field | Required | Default |
 |---|---|---|
 | `id` | Yes | — |
+| `vendor`, `sourceUrl` | No; only in `apiEquivalent.models` | None |
 | `aliases` | No | `[]` |
 | `windows` | Yes, at least one | — |
 | `windows[].effectiveFrom`, `windows[].effectiveUntil` | No | Unbounded |

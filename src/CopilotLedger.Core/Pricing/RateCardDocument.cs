@@ -15,6 +15,8 @@ internal sealed class RateCardDocument
     public FoundryRateSection? FoundryByok { get; init; }
 
     public LocalRateSection? LocalOffload { get; init; }
+
+    public ApiEquivalentSection? ApiEquivalent { get; init; }   // schemaVersion 2 only
 }
 
 internal sealed class RateCardSource
@@ -51,9 +53,22 @@ internal sealed class LocalRateSection
     public IReadOnlyList<string>? ProviderNames { get; init; }
 }
 
+internal sealed class ApiEquivalentSection
+{
+    public string? Description { get; init; }
+
+    public string? LocalBaselineModel { get; init; }
+
+    public IReadOnlyList<PricedModelDocument>? Models { get; init; }
+}
+
 internal sealed class PricedModelDocument
 {
     public required string Id { get; init; }
+
+    public string? Vendor { get; init; }      // apiEquivalent models only
+
+    public string? SourceUrl { get; init; }   // apiEquivalent models only
 
     public IReadOnlyList<string> Aliases { get; init; } = [];
 

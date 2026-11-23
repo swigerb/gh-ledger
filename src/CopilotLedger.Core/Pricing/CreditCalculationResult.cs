@@ -22,4 +22,5 @@ public sealed record CreditCalculationResult
     public decimal UsdCost { get; init; }                 // billed USD (GitHub AI credits or Foundry BYOK); otherwise 0
     public decimal AiCredits { get; init; }               // UsdCost / 0.01m when Channel is GitHubAiCredits; otherwise 0
     public decimal EstimatedCloudSavedUsd { get; init; }  // Local only: Breakdown.TotalUsd; otherwise 0
+    public required ApiEquivalentCost ApiEquivalent { get; init; }   // the same request at API list prices
 }

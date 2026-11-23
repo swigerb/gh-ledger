@@ -50,13 +50,18 @@ gh ledger status
 gh-ledger 0.4.1 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 16:20
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
-Rates:   2026-11-20
+Rates:   2026-11-23
 Copilot: OTel export enabled (COPILOT_OTEL_ENABLED=true)
 
-Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-Today             1         0        7.40       $0.07     $0.00        $0.00
-Last 7 days       1         0        7.40       $0.07     $0.00        $0.00
-Last 30 days      1         0        7.40       $0.07     $0.00        $0.00
+Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  API equiv USD  Local saved
+Today             1         0        7.40       $0.07     $0.00          $0.07        $0.00
+Last 7 days       1         0        7.40       $0.07     $0.00          $0.07        $0.00
+Last 30 days      1         0        7.40       $0.07     $0.00          $0.07        $0.00
+
+Period        GitHub USD  At API prices  GitHub/API  Local saved  Local at API prices
+Today              $0.07          $0.07       1.00x        $0.00                $0.00
+Last 7 days        $0.07          $0.07       1.00x        $0.00                $0.00
+Last 30 days       $0.07          $0.07       1.00x        $0.00                $0.00
 
 Period        Cache hit  Cache reported
 Today             66.7%  1 of 1 span
@@ -80,13 +85,21 @@ gh ledger status
 gh-ledger 0.4.1 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 08:02
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
-Rates:   2026-11-20+contoso-2026-11
+Rates:   2026-11-23+contoso-2026-11
 Copilot: OTel export enabled (COPILOT_OTEL_ENABLED=true)
 
-Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-Today             8         0      617.75       $6.18     $0.49        $0.17
-Last 7 days      10         0      764.00       $7.64     $0.49        $0.17
-Last 30 days     11         0      908.00       $9.08     $0.49        $0.17
+Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  API equiv USD  Local saved
+Today             8         0      617.75       $6.18     $0.49        ~$6.49*        $0.17
+Last 7 days      10         0      764.00       $7.64     $0.49        ~$7.69*        $0.17
+Last 30 days     11         0      908.00       $9.08     $0.49        ~$9.13*        $0.17
+
+Period        GitHub USD  At API prices  GitHub/API  Local saved  Local at API prices
+Today              $6.18         $5.99*         n/a        $0.17             Unpriced
+Last 7 days        $7.64         $7.19*         n/a        $0.17             Unpriced
+Last 30 days       $9.08         $8.63*         n/a        $0.17             Unpriced
+
+3 of 11 spans in the last 30 days had no API-equivalent price. API-equivalent amounts leave them out; * marks a partial amount.
+1 priced span in the last 30 days reported no cache counters, so all of its input is priced as uncached; ~ marks an estimate.
 
 Period        Cache hit  Cache reported
 Today             53.7%  6 of 8 spans
@@ -103,14 +116,20 @@ gh ledger branch
 ```text
 Branches in contoso/webapp (last 30 days)
 
-Branch             Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-feature/search         8         0      617.75       $6.18     $0.49        $0.17
-main                   2         0      170.25       $1.70     $0.00        $0.00
-fix/login-timeout      1         0      120.00       $1.20     $0.00        $0.00
+Branch             Spans  Unpriced  AI credits  GitHub USD  BYOK USD  API equiv USD  Local saved
+feature/search         8         0      617.75       $6.18     $0.49        ~$6.49*        $0.17
+main                   2         0      170.25       $1.70     $0.00         $1.44*        $0.00
+fix/login-timeout      1         0      120.00       $1.20     $0.00          $1.20        $0.00
+
+3 of 11 spans had no API-equivalent price. API-equivalent amounts leave them out; * marks a partial amount.
+1 priced span reported no cache counters, so all of its input is priced as uncached; ~ marks an estimate.
 ```
 <!-- /sample -->
 
 - `AI credits` and `GitHub USD` are what GitHub bills; 1 AI credit is $0.01. `BYOK USD` is what Microsoft Foundry bills you directly, and `Local saved` is what local models saved you. `Unpriced` counts requests that have no price.
+- `API equiv USD` is what the same requests would cost at each model's API list price, for comparison only. It shows `Unpriced` when no request had a list price, `*` when some had none and are left out, such as MAI models and local models, and `~` when it's an estimate because some requests didn't report their cache use. See [API-equivalent prices](configuration.md#api-equivalent-prices).
+- In `status`, the second table compares what GitHub billed with the same requests at API list prices, and local savings with the local requests at API list prices. `GitHub/API` is their ratio, shown only when every GitHub request has both prices.
+- To compare with other prices, such as a price list your company negotiated, add `--pricing <file>` to `status`, `branch`, `agents`, `top-prompts`, or `export-pr`. Only the API-equivalent amounts change; see [Compare with other prices](configuration.md#compare-with-other-prices---pricing).
 - `branch` covers the current repository. Add `--all-repos` for every repository, `--since` for another period, such as `today`, `7d`, `all`, or a date, and `--json` for exact amounts.
 
 ## Find the most expensive prompts
@@ -125,10 +144,10 @@ gh ledger top-prompts --limit 3
 ```text
 Top 3 prompts by cost in all repositories (last 30 days)
 
-#  Started           Repository      Agents       Models           Spans  AI credits  GitHub USD  BYOK USD  Local saved  Trace
-1  2026-11-21 11:20  contoso/webapp  -            claude-opus-5.5      4      504.00       $5.04     $0.00        $0.00  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
-2  2026-11-03 10:30  contoso/webapp  explore      claude-opus-5.5      1      144.00       $1.44     $0.00        $0.00  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00a7
-3  2026-11-19 10:00  contoso/webapp  code-review  claude-opus-5.5      1      120.00       $1.20     $0.00        $0.00  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00e5
+#  Started           Repository      Agents       Models           Spans  AI credits  GitHub USD  BYOK USD  API equiv USD  Local saved  Trace
+1  2026-11-21 11:20  contoso/webapp  -            claude-opus-5.5      4      504.00       $5.04     $0.00          $5.04        $0.00  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
+2  2026-11-03 10:30  contoso/webapp  explore      claude-opus-5.5      1      144.00       $1.44     $0.00          $1.44        $0.00  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00a7
+3  2026-11-19 10:00  contoso/webapp  code-review  claude-opus-5.5      1      120.00       $1.20     $0.00          $1.20        $0.00  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00e5
 ```
 <!-- /sample -->
 
@@ -146,10 +165,13 @@ gh ledger agents
 ```text
 Agents in all repositories (last 30 days)
 
-Agent        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-(none)           8         0      625.25       $6.25     $0.49        $0.17
-explore          2         0      162.75       $1.63     $0.00        $0.00
-code-review      1         0      120.00       $1.20     $0.00        $0.00
+Agent        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  API equiv USD  Local saved
+(none)           8         0      625.25       $6.25     $0.49        ~$6.49*        $0.17
+explore          2         0      162.75       $1.63     $0.00         $1.44*        $0.00
+code-review      1         0      120.00       $1.20     $0.00          $1.20        $0.00
+
+3 of 11 spans had no API-equivalent price. API-equivalent amounts leave them out; * marks a partial amount.
+1 priced span reported no cache counters, so all of its input is priced as uncached; ~ marks an estimate.
 ```
 <!-- /sample -->
 
@@ -358,17 +380,18 @@ The action posts the receipt as a comment on the pull request:
 > - **GitHub AI Credits:** 617.75 credits ($6.18) across 6 turns: `claude-opus-5.5` 599.00, `mai-code-2` 18.75
 > - **Foundry BYOK:** $0.49 across 1 turn: `gpt-6.1-sol` $0.49
 > - **Local offload:** 309,000 tokens across 1 turn ($0.00 billed • $0.17 cloud spend avoided): `qwen3.8-27b` 309,000
+> - **API-equivalent (retail):** $6.49 at API list prices • 2 turns unpriced • estimated: 1 turn reported no cache counters
 > - **Circuit breaker:** 1 trip • max single-prompt burn: 504.00 credits
 >
 > <details>
 > <summary>Details and data</summary>
 >
-> | Billing | Model | Turns | Unpriced | Input tokens | Output tokens | Cost | Cloud spend avoided |
-> | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-> | GitHub AI Credits | `claude-opus-5.5` | 5 | 0 | 2,400,000 | 95,000 | 599.00 credits ($5.99) | $0.00 |
-> | Foundry BYOK | `gpt-6.1-sol` | 1 | 0 | 200,000 | 10,000 | $0.49 | $0.00 |
-> | GitHub AI Credits | `mai-code-2` | 1 | 0 | 300,000 | 15,000 | 18.75 credits ($0.19) | $0.00 |
-> | Local | `qwen3.8-27b` | 1 | 0 | 300,000 | 9,000 | $0.00 | $0.17 |
+> | Billing | Model | Turns | Unpriced | Input tokens | Output tokens | Cost | API-equivalent | Cloud spend avoided |
+> | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+> | GitHub AI Credits | `claude-opus-5.5` | 5 | 0 | 2,400,000 | 95,000 | 599.00 credits ($5.99) | $5.99 | $0.00 |
+> | Foundry BYOK | `gpt-6.1-sol` | 1 | 0 | 200,000 | 10,000 | $0.49 | $0.50 (estimate) | $0.00 |
+> | GitHub AI Credits | `mai-code-2` | 1 | 0 | 300,000 | 15,000 | 18.75 credits ($0.19) | Unpriced | $0.00 |
+> | Local | `qwen3.8-27b` | 1 | 0 | 300,000 | 9,000 | $0.00 | Unpriced | $0.17 |
 >
 > Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.4.1
 >
@@ -392,7 +415,10 @@ The action posts the receipt as a comment on the pull request:
 >     "aiCredits": 617.75,
 >     "aiCreditsUsd": 6.1775,
 >     "foundryByokUsd": 0.49,
->     "localSavedUsd": 0.1725
+>     "localSavedUsd": 0.1725,
+>     "apiEquivalentUsd": 6.49,
+>     "apiEquivalentUnpricedSpans": 2,
+>     "apiEquivalentEstimatedSpans": 1
 >   },
 >   "prompts": 4,
 >   "maxPromptCredits": 504,
@@ -410,7 +436,10 @@ The action posts the receipt as a comment on the pull request:
 >       "aiCredits": 599,
 >       "aiCreditsUsd": 5.99,
 >       "foundryByokUsd": 0,
->       "localSavedUsd": 0
+>       "localSavedUsd": 0,
+>       "apiEquivalentUsd": 5.99,
+>       "apiEquivalentUnpricedSpans": 0,
+>       "apiEquivalentEstimatedSpans": 0
 >     },
 >     {
 >       "channel": "foundry_byok",
@@ -424,7 +453,10 @@ The action posts the receipt as a comment on the pull request:
 >       "aiCredits": 0,
 >       "aiCreditsUsd": 0,
 >       "foundryByokUsd": 0.49,
->       "localSavedUsd": 0
+>       "localSavedUsd": 0,
+>       "apiEquivalentUsd": 0.5,
+>       "apiEquivalentUnpricedSpans": 0,
+>       "apiEquivalentEstimatedSpans": 1
 >     },
 >     {
 >       "channel": "github_ai_credits",
@@ -438,7 +470,10 @@ The action posts the receipt as a comment on the pull request:
 >       "aiCredits": 18.75,
 >       "aiCreditsUsd": 0.1875,
 >       "foundryByokUsd": 0,
->       "localSavedUsd": 0
+>       "localSavedUsd": 0,
+>       "apiEquivalentUsd": null,
+>       "apiEquivalentUnpricedSpans": 1,
+>       "apiEquivalentEstimatedSpans": 0
 >     },
 >     {
 >       "channel": "local",
@@ -452,7 +487,10 @@ The action posts the receipt as a comment on the pull request:
 >       "aiCredits": 0,
 >       "aiCreditsUsd": 0,
 >       "foundryByokUsd": 0,
->       "localSavedUsd": 0.1725
+>       "localSavedUsd": 0.1725,
+>       "apiEquivalentUsd": null,
+>       "apiEquivalentUnpricedSpans": 1,
+>       "apiEquivalentEstimatedSpans": 0
 >     }
 >   ]
 > }
@@ -503,7 +541,7 @@ gh ledger rates validate
 ```
 
 ```text
-C:\Users\you\.copilot-ledger\rates.json is valid. Rates version: 2026-11-20+contoso-2026-11.
+C:\Users\you\.copilot-ledger\rates.json is valid. Rates version: 2026-11-23+contoso-2026-11.
 ```
 <!-- /sample -->
 
@@ -546,6 +584,9 @@ WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/sear
   "aiCreditsUsd": 6.1775,
   "foundryByokUsd": 0.49,
   "localSavedUsd": 0.1725,
+  "apiEquivalentUsd": 6.49,
+  "apiEquivalentUnpricedSpans": 2,
+  "apiEquivalentEstimatedSpans": 1,
   "billedAiCredits": 666.75,
   "topModel": "claude-opus-5.5",
   "budget": {
@@ -589,7 +630,7 @@ gh ledger rates update
 ```
 
 ```text
-Updated rates from 2026-11-20 to 2026-12-15.
+Updated rates from 2026-11-23 to 2026-12-15.
 Restart the daemon to price new spans with them: gh ledger daemon stop, then gh ledger daemon start.
 ```
 <!-- /sample -->

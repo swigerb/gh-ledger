@@ -28,7 +28,7 @@ public sealed class RateOverlayTests
     public static TheoryData<string, string> InvalidOverlays => new()
     {
         // Sprint 1's invalid overlays, now with exact messages.
-        { """{ "schemaVersion": 2 }""", "<file>: schemaVersion: must be 1" },
+        { """{ "schemaVersion": 3 }""", "<file>: schemaVersion: must be 1 or 2" },
         { """{ "schemaVersion": 1, "foundryBYOK": { } }""", "<file>: foundryBYOK: is not a known property; did you mean foundryByok?" },
         { """{ "schemaVersion": 1, "localOffload": { "baselineModel": "gpt-missing" } }""", "<file>: localOffload.baselineModel: does not resolve to a githubAiCredits model in the merged rates: gpt-missing" },
         { """{ "schemaVersion": 1, "foundryByok": { "models": [ { "id": "gpt-6.1-sol", "windows": [ { "tiers": [ { "name": "default", "inputPer1M": 1.75 } ] } ] } ] } }""", "<file>: foundryByok.models[0].windows[0].tiers[0].outputPer1M: is required" },
@@ -46,7 +46,7 @@ public sealed class RateOverlayTests
         // schemaVersion is checked first.
         { """{ "schemaVersion": null }""", "<file>: schemaVersion: is required" },
         { """{ "schemaVersion": "1" }""", "<file>: schemaVersion: must be an integer" },
-        { """{ "foundryBYOK": { }, "schemaVersion": 2 }""", "<file>: schemaVersion: must be 1" },
+        { """{ "foundryBYOK": { }, "schemaVersion": 3 }""", "<file>: schemaVersion: must be 1 or 2" },
 
         // Unknown and repeated properties.
         { """{ "schemaVersion": 1, "currency": "USD" }""", "<file>: currency: is not a known property" },
@@ -129,7 +129,7 @@ public sealed class RateOverlayTests
         Assert.Equal("gpt-6.1-sol", result.ModelId);
         Assert.Equal(0.315m, result.UsdCost);
         Assert.Equal(0m, result.AiCredits);
-        Assert.Equal("2026-11-20+contoso-2026-11", result.RatesVersion);
+        Assert.Equal("2026-11-23+contoso-2026-11", result.RatesVersion);
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public sealed class RateOverlayTests
         Assert.Equal(PricingStatus.LocalOffload, result.Status);
         Assert.Equal(0.92m, result.EstimatedCloudSavedUsd);
         Assert.Equal("claude-sonnet-5.5", result.RateCardModelId);
-        Assert.Equal("2026-11-20+user", result.RatesVersion);
+        Assert.Equal("2026-11-23+user", result.RatesVersion);
     }
 
     [Fact]
@@ -374,7 +374,7 @@ public sealed class RateOverlayTests
         JsonRateCardCalculator calculator = JsonRateCardCalculator.LoadEmbeddedWithOverlay(
             WriteOverlay(temp, """{ "schemaVersion": 1, "ratesVersion": " custom " }"""));
 
-        Assert.Equal("2026-11-20+ custom ", calculator.RatesVersion);
+        Assert.Equal("2026-11-23+ custom ", calculator.RatesVersion);
     }
 
     private static string WriteOverlay(TempDirectory temp, string overlay)

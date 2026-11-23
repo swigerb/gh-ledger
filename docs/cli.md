@@ -70,18 +70,35 @@ The port defaults to 4318. Only one daemon runs at a time. Copilot's telemetry i
 
 | Command | Reports |
 |---|---|
-| `gh ledger status [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals and cache hit ratios for today and the last 7 and 30 days |
-| `gh ledger branch [--repo <key> \| --all-repos] [--since <period>] [--json]` | Spend by branch in the current repository, or in another or every repository; outside a Git repository, every repository |
-| `gh ledger agents [--repo <key>] [--since <period>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
-| `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
+| `gh ledger status [--pricing <path>] [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals, billed amounts compared with API list prices, and cache hit ratios for today and the last 7 and 30 days |
+| `gh ledger branch [--repo <key> \| --all-repos] [--since <period>] [--pricing <path>] [--json]` | Spend by branch in the current repository, or in another or every repository; outside a Git repository, every repository |
+| `gh ledger agents [--repo <key>] [--since <period>] [--pricing <path>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
+| `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--pricing <path>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
 | `gh ledger status --cache ...` | Prompt-cache efficiency; see [Prompt-cache efficiency](#prompt-cache-efficiency) |
 
 - A repository key is an `owner/repo` slug, a local repository root for a repository whose `origin` has no `owner/repo` path, or `(none)` for spend outside any repository.
 - `--since` takes `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date; the default is `30d`.
 - Tables round money to cents; JSON keeps exact amounts.
-- Spend is split into GitHub AI credits (`AI credits` and `GitHub USD`), Foundry BYOK (`BYOK USD`), and local models, whose `Local saved` is the cloud spend they avoided. `Unpriced` counts requests without a price; see [configuration.md](configuration.md).
+- Spend is split into GitHub AI credits (`AI credits` and `GitHub USD`), Foundry BYOK (`BYOK USD`), and local models, whose `Local saved` is the cloud spend they avoided. `Unpriced` counts requests without a price; see [configuration.md](configuration.md). `API equiv USD` compares the same requests with API list prices; see [API-equivalent USD](#api-equivalent-usd).
 - An agent shows as `(none)` when Copilot reports no agent name, as its default agent does. Built-in subagents such as `explore` report their own names, and a custom agent reports the `name` in its `.agent.md` file, or the file's name without `.agent.md`.
 - `status --json` adds a `cache` object to each period, and each row of `branch --json` and `agents --json` adds `cacheReportedSpans`, `cacheUnreportedSpans`, and `cacheHitRatio`. See [Prompt-cache efficiency](#prompt-cache-efficiency).
+
+### API-equivalent USD
+
+`API equiv USD` is what the same requests would cost at each model's API list prices: a comparison, never part of what you're billed, and never counted toward budgets or the circuit breaker. See [API-equivalent prices](configuration.md#api-equivalent-prices) for how requests are priced.
+
+- `Unpriced` means no request in the row has an API-equivalent price, never $0.00. A row with no requests shows `$0.00`.
+- `*` after an amount means some of the row's requests have no API-equivalent price and are left out: their model has no list price, such as the MAI models, the request is local and the local baseline has none, its token counts are inconsistent, or it was recorded before gh-ledger had API list prices (see `gh ledger rates backfill-api-equivalent` in [Rates](#rates)).
+- `~` before an amount means it's an estimate: some of its requests reported no cache counters, so all of their input is priced as uncached, which can be more than they cost.
+- A footnote under the table counts the requests behind each mark it uses. In `status`, it counts the last 30 days, which include the other periods.
+- `status` adds a table that compares, for each period, `GitHub USD` with the same GitHub-billed requests `At API prices`, and `Local saved` with the local requests at API list prices (`Local at API prices`). `GitHub/API` is GitHub USD divided by the API-equivalent amount, with AI credits at $0.01, rounded to two decimal places; it shows `n/a` unless every GitHub-billed request in the period has both prices and the API-equivalent amount isn't 0, and `~` marks an estimate. Retail and avoided amounts are never added to billed spend.
+
+In JSON, amounts are exact. The names follow the other fields: GitHub AI credits used are `aiCredits`, local-offload savings are `localSavedUsd`, and API-equivalent USD is `apiEquivalentUsd`.
+
+- `status --json` periods, rows of `branch --json` and `agents --json`, and rows of `top-prompts --json` add, after `localSavedUsd`: `apiEquivalentUsd` (`null` when no request has an API-equivalent price), `apiEquivalentUnpricedSpans` (the requests without one), and `apiEquivalentEstimatedSpans` (priced requests that reported no cache counters).
+- `status --json` periods also add `lenses`, before `cache`. `lenses.copilot` covers the GitHub-billed requests: `spans`, `unpricedSpans`, `aiCredits`, `aiCreditsUsd`, the three API-equivalent fields, and `billedToApiRatio`, the exact `GitHub/API` ratio or `null`. `lenses.local` covers the local requests: `spans`, `localSavedUsd`, and the three API-equivalent fields.
+
+`--pricing <path>` prices the API-equivalent amounts with a complete rates file instead of the results recorded with each request, for example a price list your company negotiated, and changes nothing else; see [Compare with other prices](configuration.md#compare-with-other-prices---pricing). The report's second line, or the line after `Rates:` in `status`, names the file, and the JSON adds `pricingSource`: `kind` (`whatIf`), `path`, `ratesVersion`, and `apiRateCardSha256`, after `repository`, or after `ratesError` in `status`. `--pricing` can't be used with `--cache`. A file that can't be used stops the command with `Invalid pricing file:` and the problem.
 
 ## Prompt-cache efficiency
 
@@ -138,8 +155,11 @@ A budget is a soft cap in AI credits for one branch. When the branch's billed sp
 
 The receipt covers all spend recorded on the branch: GitHub AI credits by model, Foundry BYOK spend, local-model tokens and the cloud spend they avoided, unpriced requests, circuit-breaker trips, and the most expensive prompt, with the data as JSON. A turn is one model request. Its totals equal the branch's row in `gh ledger branch --since all --json`. Branch and model names appear in code spans, so they never become mentions or links.
 
+The `API-equivalent (retail)` line and column compare the same turns with API list prices; they're never part of the billed amounts (see [API-equivalent USD](#api-equivalent-usd)). The line shows `none` without turns and `Unpriced` when no turn has an API-equivalent price, and otherwise says how many turns it leaves out and how many make it an estimate. The column writes `partial` and `estimate` instead of `*` and `~`, which are Markdown syntax. The JSON data adds `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans` to `totals` and to each model, and keeps `schemaVersion` 1.
+
 - `--stdout` writes the Markdown to standard output instead of the file.
 - `--json` writes the JSON data to standard output instead of the file.
+- `--pricing <path>` prices the API-equivalent line and column with another rates file, as the reports do. The receipt names the file and its `ratesVersion` but not its folder, and the JSON adds `pricingSource` after `generator`.
 
 `export-pr` needs a branch with at least one commit and a GitHub remote named `origin`, and it refuses a receipt over 65,536 bytes, the most the action posts.
 
@@ -162,18 +182,21 @@ That adds `ledger` to `~/.copilot/mcp-config.json`, which VS Code's Copilot agen
 The server has five tools. All but `get_cache_efficiency` use the current repository and branch unless you pass `repository` and `branch`:
 
 - `get_branch_ledger`: the branch's spend, top model, budget, circuit-breaker state, and prompt-cache hit ratio.
-- `get_top_expensive_prompts`: the branch's most expensive prompt chains, with output tokens and failed tool calls; `limit` (1 to 20, default 5) and `orderBy` (`cost`, `outputTokens`, or `failedToolCalls`).
+- `get_top_expensive_prompts`: the branch's most expensive prompt chains, with output tokens and failed tool calls; `limit` (1 to 20, default 5) and `orderBy` (`cost`, `outputTokens`, `failedToolCalls`, or `apiEquivalentUsd`, which lists the chains without an API-equivalent price last).
 - `get_agent_breakdown`: the branch's spend and prompt-cache hit ratio by agent.
 - `get_cache_efficiency`: prompt-cache efficiency in the current repository, or in `repository`, like `status --cache`. `by` groups rows by `model` (the default), `branch`, `pr`, or `agent`; `branch` and `pullRequest` keep one branch or pull request; `since` takes the same periods as `--since`; and `limit` (1 to 50, default 10) keeps the rows with the most input.
 - `set_branch_budget`: sets the branch's budget in AI credits (`aiCredits`).
 
 The first four are read-only. `set_branch_budget` changes only the budget, so Copilot asks before running it; in prompt mode, allow it with `--allow-tool 'ledger(set_branch_budget)'`. While the breaker is open for the branch or the session, or the branch is over budget, every result starts with a `WARNING:` line; for `get_cache_efficiency`, the branch is the current one. No tool can reset the breaker.
 
+`get_branch_ledger`, `get_top_expensive_prompts`, and `get_agent_breakdown` add `apiEquivalentUsd` (`null` when no request has an API-equivalent price), `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans` after `localSavedUsd`, as the reports do; see [API-equivalent USD](#api-equivalent-usd). They're for comparison: budgets and `billedAiCredits` count only billed spend. No tool takes a file path, so `--pricing` isn't available to Copilot.
+
 ## Rates
 
 - `gh ledger rates init [--force]` creates a starter rates overlay, `rates.json` in the data directory.
-- `gh ledger rates validate [--file <path>]` checks the overlay, or another file, with the same rules the daemon uses.
-- `gh ledger rates update` downloads `rates.json` from the latest gh-ledger release and keeps it when it's newer than the rates in use and your overlay still applies. It uses your system proxy. Restart the daemon afterward; it reads rates when it starts.
+- `gh ledger rates validate [--file <path> | --pricing <path>]` checks the overlay, or another file, with the same rules the daemon uses. With `--pricing`, it checks a complete rates file the way the reports' `--pricing` does.
+- `gh ledger rates update` downloads `rates.v2.json` from the latest gh-ledger release, or its `rates.json` if it has none, and keeps it when it's newer than the rates in use, has API list prices (`schemaVersion` 2), and your overlay still applies. It uses your system proxy. Restart the daemon afterward; it reads rates when it starts.
+- `gh ledger rates backfill-api-equivalent [--dry-run]` gives the requests recorded before gh-ledger had API list prices their API-equivalent prices, with the rates in use, and prints how many were priced. It changes nothing else, and `--dry-run` writes nothing. See [API-equivalent prices](configuration.md#api-equivalent-prices).
 
 See [configuration.md](configuration.md) for pricing, the overlay format, and where files are kept.
 

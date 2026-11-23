@@ -1,7 +1,11 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using CopilotLedger.Core.Telemetry;
 
 namespace CopilotLedger.Core.Pricing;
@@ -21,6 +25,8 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
     private readonly IReadOnlyList<string> _localHosts;
     private readonly IReadOnlyList<string> _localProviders;
     private readonly ModelRateCard _baselineCard;
+    private readonly IReadOnlyList<ModelRateCard> _retailModels;
+    private readonly ModelRateCard? _retailLocalBaseline;
 
     private JsonRateCardCalculator(
         string ratesVersion,
@@ -32,7 +38,10 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         IReadOnlyList<string> foundryProviders,
         IReadOnlyList<string> localHosts,
         IReadOnlyList<string> localProviders,
-        ModelRateCard baselineCard)
+        ModelRateCard baselineCard,
+        int schemaVersion,
+        IReadOnlyList<ModelRateCard> retailModels,
+        ModelRateCard? retailLocalBaseline)
     {
         RatesVersion = ratesVersion;
         _githubModels = githubModels;
@@ -44,9 +53,19 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         _localHosts = localHosts;
         _localProviders = localProviders;
         _baselineCard = baselineCard;
+        _retailModels = retailModels;
+        _retailLocalBaseline = retailLocalBaseline;
+        SchemaVersion = schemaVersion;
+        ApiRateCardSha256 = ApiRateCardHash(retailModels, retailLocalBaseline);
     }
 
     public string RatesVersion { get; }
+
+    // 1, or 2 when the card can have an apiEquivalent section. A merged card has the higher of the two versions.
+    public int SchemaVersion { get; }
+
+    // The SHA-256 of the canonical API-equivalent card, in lowercase hex; see ApiRateCardHash.
+    public string ApiRateCardSha256 { get; }
 
     public static JsonRateCardCalculator LoadEmbedded() =>
         Create(ReadEmbedded(), null, null);
@@ -103,14 +122,17 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
     {
         ArgumentNullException.ThrowIfNull(span);
 
+        // The reported model is the response model, or the request model when there's no response model. A priced
+        // channel that has no model for it tries the request model too (see FindModel).
         string? model = NormalizeModel(
             !string.IsNullOrWhiteSpace(span.ResponseModel)
                 ? span.ResponseModel
                 : span.RequestModel);
+        string? requestModel = NormalizeModel(span.RequestModel);
 
         if (!GenAiOperationNames.IsInference(span.OperationName))
         {
-            return Result(BillingChannel.Unpriced, PricingStatus.NotBillableOperation, model);
+            return Result(span, BillingChannel.Unpriced, PricingStatus.NotBillableOperation, model);
         }
 
         if (span.InputTokens < 0 ||
@@ -120,7 +142,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             span.CacheReadInputTokens > span.InputTokens ||
             span.CacheWriteInputTokens > span.InputTokens - span.CacheReadInputTokens)
         {
-            return Result(BillingChannel.Unpriced, PricingStatus.InvalidUsage, model);
+            return Result(span, BillingChannel.Unpriced, PricingStatus.InvalidUsage, model);
         }
 
         long uncached = span.InputTokens - span.CacheReadInputTokens - span.CacheWriteInputTokens;
@@ -138,6 +160,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (selection is null)
             {
                 return Result(
+                    span,
                     BillingChannel.Local,
                     PricingStatus.NoRateForDate,
                     localModelId,
@@ -146,6 +169,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
 
             TokenCostBreakdown breakdown = Price(span, selection.Tier, uncached);
             return Result(
+                span,
                 BillingChannel.Local,
                 PricingStatus.LocalOffload,
                 localModelId,
@@ -161,16 +185,18 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (model is null)
             {
                 return Result(
+                    span,
                     BillingChannel.FoundryByok,
                     PricingStatus.UnknownModel,
                     null,
                     uncachedInputTokens: uncached);
             }
 
-            ModelRateCard? card = FindModel(_foundryModels, model);
+            ModelRateCard? card = FindModel(_foundryModels, model, requestModel);
             if (card is null)
             {
                 return Result(
+                    span,
                     BillingChannel.FoundryByok,
                     PricingStatus.ByokUnpriced,
                     model,
@@ -181,6 +207,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (selection is null)
             {
                 return Result(
+                    span,
                     BillingChannel.FoundryByok,
                     PricingStatus.NoRateForDate,
                     card.ModelId,
@@ -189,6 +216,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
 
             TokenCostBreakdown breakdown = Price(span, selection.Tier, uncached);
             return Result(
+                span,
                 BillingChannel.FoundryByok,
                 PricingStatus.Priced,
                 card.ModelId,
@@ -204,16 +232,18 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (model is null)
             {
                 return Result(
+                    span,
                     BillingChannel.GitHubAiCredits,
                     PricingStatus.UnknownModel,
                     null,
                     uncachedInputTokens: uncached);
             }
 
-            ModelRateCard? card = FindModel(_githubModels, model);
+            ModelRateCard? card = FindModel(_githubModels, model, requestModel);
             if (card is null)
             {
                 return Result(
+                    span,
                     BillingChannel.GitHubAiCredits,
                     PricingStatus.UnknownModel,
                     model,
@@ -224,6 +254,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (selection is null)
             {
                 return Result(
+                    span,
                     BillingChannel.GitHubAiCredits,
                     PricingStatus.NoRateForDate,
                     card.ModelId,
@@ -232,6 +263,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
 
             TokenCostBreakdown breakdown = Price(span, selection.Tier, uncached);
             return Result(
+                span,
                 BillingChannel.GitHubAiCredits,
                 PricingStatus.Priced,
                 card.ModelId,
@@ -244,11 +276,66 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         }
 
         return Result(
+            span,
             BillingChannel.Unpriced,
             PricingStatus.UnrecognizedEndpoint,
             model,
             uncachedInputTokens: uncached);
     }
+
+    // Prices one request at this card's API list prices (apiEquivalent), whatever its billing channel priced: a local
+    // request as the local retail baseline, and any other request as its ModelId, or as its RequestModel when no section
+    // of this card has ModelId. So a response model that the card doesn't know, such as a dated id that a Foundry BYOK
+    // endpoint reports, never hides a request model with a list price, and a model that the card knows without a list
+    // price, such as mai-code-2, is never priced as another. Pure and thread-safe. Throws only ArgumentNullException; an
+    // unknown model or date is Unpriced, and a non-inference operation or inconsistent token counts are NotApplicable.
+    public ApiEquivalentCost CalculateApiEquivalent(ApiEquivalentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!GenAiOperationNames.IsInference(request.OperationName) ||
+            request.InputTokens < 0 ||
+            request.OutputTokens < 0 ||
+            request.CacheReadInputTokens < 0 ||
+            request.CacheWriteInputTokens < 0 ||
+            request.CacheReadInputTokens > request.InputTokens ||
+            request.CacheWriteInputTokens > request.InputTokens - request.CacheReadInputTokens)
+        {
+            return Retail(ApiEquivalentStatus.NotApplicable);
+        }
+
+        string? model = NormalizeModel(request.ModelId);
+        string? requestModel = NormalizeModel(request.RequestModel);
+        if (requestModel is not null && (model is null || !IsKnown(model)))
+        {
+            model = requestModel;
+        }
+
+        ModelRateCard? card = request.Channel == BillingChannel.Local
+            ? _retailLocalBaseline
+            : model is null ? null : FindModel(_retailModels, model);
+        PricedSelection? selection = card is null
+            ? null
+            : Select(card, request.StartTime, request.InputTokens);
+        if (selection is null)
+        {
+            return Retail(ApiEquivalentStatus.Unpriced);
+        }
+
+        long uncached = request.InputTokens - request.CacheReadInputTokens - request.CacheWriteInputTokens;
+        return Retail(
+            ApiEquivalentStatus.Priced,
+            card!.ModelId,
+            selection.Tier.Name,
+            Price(request, selection.Tier, uncached));
+    }
+
+    // Whether any section of this card has model as an id or alias.
+    private bool IsKnown(string model) =>
+        FindModel(_githubModels, model) is not null ||
+        FindModel(_foundryModels, model) is not null ||
+        FindModel(_retailModels, model) is not null ||
+        _localModels.Any(item => item.Matches(model));
 
     private static JsonRateCardCalculator Create(string baseJson, string? overlayJson, string? overlayName)
     {
@@ -326,6 +413,20 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         {
             _ = ValidateNames(overlay.LocalOffload.ProviderNames, "localOffload.providerNames");
         }
+
+        if (overlay.ApiEquivalent?.Models is not null)
+        {
+            _ = ValidateModels(
+                overlay.ApiEquivalent.Models,
+                BillingChannel.Unpriced,
+                "apiEquivalent.models");
+        }
+
+        if (overlay.ApiEquivalent?.LocalBaselineModel is not null &&
+            NormalizeModel(overlay.ApiEquivalent.LocalBaselineModel) is null)
+        {
+            throw Invalid(null, "apiEquivalent.localBaselineModel", "must not be blank");
+        }
     }
 
     private static RateCardDocument Merge(RateCardDocument baseDocument, RateCardDocument overlay)
@@ -334,7 +435,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
 
         return new RateCardDocument
         {
-            SchemaVersion = 1,
+            SchemaVersion = Math.Max(baseDocument.SchemaVersion ?? 1, overlay.SchemaVersion ?? 1),
             RatesVersion = ratesVersion,
             Source = baseDocument.Source,
             Notes = baseDocument.Notes,
@@ -356,6 +457,15 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
                 AdditionalHosts = MergeStrings(baseDocument.LocalOffload!.AdditionalHosts!, overlay.LocalOffload?.AdditionalHosts),
                 ProviderNames = MergeStrings(baseDocument.LocalOffload!.ProviderNames!, overlay.LocalOffload?.ProviderNames),
             },
+            ApiEquivalent = baseDocument.ApiEquivalent is null && overlay.ApiEquivalent is null
+                ? null
+                : new ApiEquivalentSection
+                {
+                    Description = baseDocument.ApiEquivalent?.Description,
+                    LocalBaselineModel = overlay.ApiEquivalent?.LocalBaselineModel
+                        ?? baseDocument.ApiEquivalent?.LocalBaselineModel,
+                    Models = MergeModels(baseDocument.ApiEquivalent?.Models ?? [], overlay.ApiEquivalent?.Models),
+                },
         };
     }
 
@@ -388,6 +498,14 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
                 "localOffload.models");
         }
 
+        if (overlay.ApiEquivalent?.Models is not null)
+        {
+            ValidateMergedModelIdentities(
+                baseDocument.ApiEquivalent?.Models ?? [],
+                overlay.ApiEquivalent.Models,
+                "apiEquivalent.models");
+        }
+
         string baseline = NormalizeModel(merged.LocalOffload!.BaselineModel)!;
         bool resolves = merged.GithubAiCredits!.Models!.Any(model =>
             NormalizeModel(model.Id) == baseline ||
@@ -398,6 +516,18 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
                 null,
                 "localOffload.baselineModel",
                 $"does not resolve to a githubAiCredits model in the merged rates: {baseline}");
+        }
+
+        string? retailBaseline = NormalizeModel(merged.ApiEquivalent?.LocalBaselineModel);
+        if (retailBaseline is not null &&
+            !merged.ApiEquivalent!.Models!.Any(model =>
+                NormalizeModel(model.Id) == retailBaseline ||
+                model.Aliases.Any(alias => NormalizeModel(alias) == retailBaseline)))
+        {
+            throw Invalid(
+                null,
+                "apiEquivalent.localBaselineModel",
+                $"does not resolve to an apiEquivalent model in the merged rates: {retailBaseline}");
         }
     }
 
@@ -518,6 +648,24 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             throw Invalid(null, "localOffload.baselineModel", $"does not resolve to a githubAiCredits model: {normalizedBaseline}");
         }
 
+        IReadOnlyList<ModelRateCard> retailModels = document.ApiEquivalent?.Models is null
+            ? []
+            : ValidateModels(document.ApiEquivalent.Models, BillingChannel.Unpriced, "apiEquivalent.models");
+
+        // Local requests are priced at retail as apiEquivalent.localBaselineModel when it's set, or else as the
+        // localOffload baseline, which may have no apiEquivalent price.
+        ModelRateCard? retailLocalBaseline = FindModel(retailModels, normalizedBaseline);
+        if (document.ApiEquivalent?.LocalBaselineModel is not null)
+        {
+            string retailBaseline = NormalizeModel(document.ApiEquivalent.LocalBaselineModel)
+                ?? throw Invalid(null, "apiEquivalent.localBaselineModel", "must not be blank");
+            retailLocalBaseline = FindModel(retailModels, retailBaseline)
+                ?? throw Invalid(
+                    null,
+                    "apiEquivalent.localBaselineModel",
+                    $"does not resolve to an apiEquivalent model: {retailBaseline}");
+        }
+
         return new JsonRateCardCalculator(
             document.RatesVersion,
             githubModels,
@@ -528,7 +676,10 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             ValidateNames(document.FoundryByok.ProviderNames!, "foundryByok.providerNames"),
             ValidateNames(document.LocalOffload.AdditionalHosts!, "localOffload.additionalHosts"),
             ValidateNames(document.LocalOffload.ProviderNames!, "localOffload.providerNames"),
-            baseline);
+            baseline,
+            document.SchemaVersion ?? 1,
+            retailModels,
+            retailLocalBaseline);
     }
 
     private static IReadOnlyList<ModelRateCard> ValidateModels(
@@ -907,6 +1058,12 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             card.ModelId.Equals(model, StringComparison.Ordinal) ||
             card.Aliases.Contains(model, StringComparer.Ordinal));
 
+    // The model in models for a request: the one its reported model names, or else the one its request model names.
+    // So a response model that models doesn't have, such as a vendor's dated id, never hides a request model that it
+    // has, and one that it has is never replaced. Null when models has neither.
+    private static ModelRateCard? FindModel(IEnumerable<ModelRateCard> models, string model, string? requestModel) =>
+        FindModel(models, model) ?? (requestModel is null ? null : FindModel(models, requestModel));
+
     private static PricedSelection? Select(ModelRateCard card, DateTimeOffset instant, long inputTokens)
     {
         RateWindow? window = card.Windows.FirstOrDefault(item =>
@@ -929,7 +1086,16 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             AiCreditMath.CostUsd(span.CacheWriteInputTokens, tier.CacheWritePer1M ?? tier.InputPer1M),
             AiCreditMath.CostUsd(span.OutputTokens, tier.OutputPer1M));
 
+    private static TokenCostBreakdown Price(ApiEquivalentRequest request, RateTier tier, long uncached) =>
+        new(
+            AiCreditMath.CostUsd(uncached, tier.InputPer1M),
+            AiCreditMath.CostUsd(request.CacheReadInputTokens, tier.CachedInputPer1M ?? tier.InputPer1M),
+            AiCreditMath.CostUsd(request.CacheWriteInputTokens, tier.CacheWritePer1M ?? tier.InputPer1M),
+            AiCreditMath.CostUsd(request.OutputTokens, tier.OutputPer1M));
+
+    // The credit lens's result for span, with the same request priced in the API-equivalent lens.
     private CreditCalculationResult Result(
+        NormalizedGenAiSpan span,
         BillingChannel channel,
         PricingStatus status,
         string? modelId,
@@ -953,7 +1119,134 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             UsdCost = usdCost,
             AiCredits = aiCredits,
             EstimatedCloudSavedUsd = estimatedCloudSavedUsd,
+            ApiEquivalent = CalculateApiEquivalent(new ApiEquivalentRequest
+            {
+                OperationName = span.OperationName,
+                Channel = channel,
+                ModelId = modelId,
+                RequestModel = span.RequestModel,
+                StartTime = span.StartTime,
+                InputTokens = span.InputTokens,
+                OutputTokens = span.OutputTokens,
+                CacheReadInputTokens = span.CacheReadInputTokens,
+                CacheWriteInputTokens = span.CacheWriteInputTokens,
+            }),
         };
+
+    private ApiEquivalentCost Retail(
+        ApiEquivalentStatus status,
+        string? rateCardModelId = null,
+        string? tierName = null,
+        TokenCostBreakdown? breakdown = null) =>
+        new()
+        {
+            Status = status,
+            RatesVersion = RatesVersion,
+            RateCardSha256 = ApiRateCardSha256,
+            RateCardModelId = rateCardModelId,
+            TierName = tierName,
+            Breakdown = breakdown,
+        };
+
+    // SHA-256 of the canonical API-equivalent card: compact UTF-8 JSON {"localBaselineModel":…,"models":[…]}. The local
+    // baseline is the ID of the apiEquivalent model that prices local requests, or null. Models are in ordinal ID order,
+    // each with its normalized ID, its normalized aliases in ordinal order, and its windows and tiers in card order. Rates
+    // are JSON numbers without trailing zeros, window bounds are UTC "O" timestamps or null, and maxInputTokens is a
+    // number or null. vendor, sourceUrl, description, and notes don't change any price, so they aren't hashed.
+    private static string ApiRateCardHash(IReadOnlyList<ModelRateCard> models, ModelRateCard? localBaseline)
+    {
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(
+            stream,
+            new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+        {
+            writer.WriteStartObject();
+            if (localBaseline is null)
+            {
+                writer.WriteNull("localBaselineModel");
+            }
+            else
+            {
+                writer.WriteString("localBaselineModel", localBaseline.ModelId);
+            }
+
+            writer.WriteStartArray("models");
+            foreach (ModelRateCard model in models.OrderBy(item => item.ModelId, StringComparer.Ordinal))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("id", model.ModelId);
+                writer.WriteStartArray("aliases");
+                foreach (string alias in model.Aliases.Order(StringComparer.Ordinal))
+                {
+                    writer.WriteStringValue(alias);
+                }
+
+                writer.WriteEndArray();
+                writer.WriteStartArray("windows");
+                foreach (RateWindow window in model.Windows)
+                {
+                    writer.WriteStartObject();
+                    WriteInstant(writer, "effectiveFrom", window.EffectiveFrom);
+                    WriteInstant(writer, "effectiveUntil", window.EffectiveUntil);
+                    writer.WriteStartArray("tiers");
+                    foreach (RateTier tier in window.Tiers)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("name", tier.Name);
+                        if (tier.MaxInputTokens is long maxInputTokens)
+                        {
+                            writer.WriteNumber("maxInputTokens", maxInputTokens);
+                        }
+                        else
+                        {
+                            writer.WriteNull("maxInputTokens");
+                        }
+
+                        WriteRate(writer, "inputPer1M", tier.InputPer1M);
+                        WriteRate(writer, "cachedInputPer1M", tier.CachedInputPer1M);
+                        WriteRate(writer, "cacheWritePer1M", tier.CacheWritePer1M);
+                        WriteRate(writer, "outputPer1M", tier.OutputPer1M);
+                        writer.WriteEndObject();
+                    }
+
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        return Convert.ToHexStringLower(SHA256.HashData(stream.ToArray()));
+    }
+
+    private static void WriteInstant(Utf8JsonWriter writer, string name, DateTimeOffset? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNull(name);
+            return;
+        }
+
+        writer.WriteString(name, value.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+    }
+
+    // A validated rate has at most 6 decimal places, so "0.######" writes it exactly.
+    private static void WriteRate(Utf8JsonWriter writer, string name, decimal? rate)
+    {
+        if (rate is null)
+        {
+            writer.WriteNull(name);
+            return;
+        }
+
+        writer.WritePropertyName(name);
+        writer.WriteRawValue(rate.Value.ToString("0.######", CultureInfo.InvariantCulture));
+    }
 
     private static string ReadEmbedded()
     {

@@ -17,6 +17,20 @@ internal static class LedgerFormat
     public static string Count(long value) =>
         value.ToString("N0", CultureInfo.InvariantCulture);
 
+    // An API-equivalent amount: Unpriced when nothing was priced (usd is null), never $0.00. Otherwise the amount, with "~"
+    // before it when it's an estimate (estimatedSpans reported no cache counters, so all of their input was priced as
+    // uncached) and "*" after it when it leaves out unpricedSpans, which have no price.
+    public static string ApiEquivalent(decimal? usd, long unpricedSpans, long estimatedSpans) =>
+        usd is null
+            ? "Unpriced"
+            : $"{(estimatedSpans > 0 ? "~" : "")}{Usd(usd.Value)}{(unpricedSpans > 0 ? "*" : "")}";
+
+    public static string ApiEquivalent(LedgerRollupRow row) =>
+        ApiEquivalent(row.ApiEquivalentUsd, row.ApiEquivalentUnpricedSpanCount, row.ApiEquivalentEstimatedSpanCount);
+
+    public static string ApiEquivalent(PromptChainRow row) =>
+        ApiEquivalent(row.ApiEquivalentUsd, row.ApiEquivalentUnpricedSpanCount, row.ApiEquivalentEstimatedSpanCount);
+
     // ratio as a percentage with one decimal place, rounded half away from zero; n/a for null, never 0.0%.
     public static string Percent(decimal? ratio) =>
         ratio is null
@@ -39,6 +53,42 @@ internal static class LedgerFormat
     {
         writer.WritePropertyName(name);
         writer.WriteRawValue(value.ToString("0.############", CultureInfo.InvariantCulture));
+    }
+
+    // The API-equivalent fields that report rows have after WriteTotals.
+    public static void WriteApiEquivalent(Utf8JsonWriter writer, LedgerRollupRow row) =>
+        WriteApiEquivalent(
+            writer,
+            row.ApiEquivalentUsd,
+            row.ApiEquivalentUnpricedSpanCount,
+            row.ApiEquivalentEstimatedSpanCount);
+
+    public static void WriteApiEquivalent(Utf8JsonWriter writer, PromptChainRow row) =>
+        WriteApiEquivalent(
+            writer,
+            row.ApiEquivalentUsd,
+            row.ApiEquivalentUnpricedSpanCount,
+            row.ApiEquivalentEstimatedSpanCount);
+
+    // apiEquivalentUsd (null when nothing was priced, never 0 for unknown prices), apiEquivalentUnpricedSpans, and
+    // apiEquivalentEstimatedSpans.
+    public static void WriteApiEquivalent(
+        Utf8JsonWriter writer,
+        decimal? usd,
+        long unpricedSpans,
+        long estimatedSpans)
+    {
+        if (usd is null)
+        {
+            writer.WriteNull("apiEquivalentUsd");
+        }
+        else
+        {
+            WriteMoney(writer, "apiEquivalentUsd", usd.Value);
+        }
+
+        writer.WriteNumber("apiEquivalentUnpricedSpans", unpricedSpans);
+        writer.WriteNumber("apiEquivalentEstimatedSpans", estimatedSpans);
     }
 
     // value with every digit decimal division gave it, or null. Used for ratios and averages.

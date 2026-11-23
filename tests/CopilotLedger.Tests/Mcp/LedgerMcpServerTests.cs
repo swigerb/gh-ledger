@@ -44,7 +44,7 @@ public sealed class LedgerMcpServerTests
             "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Pass with branch." },
             "branch": { "type": "string", "minLength": 1, "description": "Branch name, or (none). Pass with repository." },
             "limit": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5, "description": "Number of prompt chains." },
-            "orderBy": { "type": "string", "enum": ["cost", "outputTokens", "failedToolCalls"], "default": "cost", "description": "Sort key, highest first." }
+            "orderBy": { "type": "string", "enum": ["cost", "outputTokens", "failedToolCalls", "apiEquivalentUsd"], "default": "cost", "description": "Sort key, highest first. With apiEquivalentUsd, prompt chains without an API-equivalent price come last." }
           },
           "additionalProperties": false
         }
@@ -95,6 +95,9 @@ public sealed class LedgerMcpServerTests
           "aiCreditsUsd": 1.765,
           "foundryByokUsd": 0,
           "localSavedUsd": 0.23,
+          "apiEquivalentUsd": 0.7,
+          "apiEquivalentUnpricedSpans": 3,
+          "apiEquivalentEstimatedSpans": 1,
           "billedAiCredits": 176.5,
           "topModel": "mai-code-2",
           "budget": null,
@@ -126,7 +129,7 @@ public sealed class LedgerMcpServerTests
                 tool,
                 "get_branch_ledger",
                 "Branch ledger",
-                "Spend on one Git branch: AI credits, USD, BYOK USD, local savings, top model, budget, and circuit-breaker status. Uses the current repository and branch unless you pass both.",
+                "Spend on one Git branch: AI credits, USD, BYOK USD, local savings, API-equivalent USD (the same requests at API list prices, for comparison only), top model, budget, and circuit-breaker status. Uses the current repository and branch unless you pass both.",
                 BranchSchema,
                 readOnly: true,
                 destructive: null,
@@ -279,7 +282,7 @@ public sealed class LedgerMcpServerTests
                 "get_branch_ledger",
                 """{"repository":"contoso/api","branch":"main"}"""),
             """
-            {"repository":"contoso/api","branch":"main","spans":1,"unpricedSpans":0,"inputTokens":100000,"outputTokens":10000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0.315,"localSavedUsd":0,"billedAiCredits":31.5,"topModel":"gpt-6.1-sol","budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            {"repository":"contoso/api","branch":"main","spans":1,"unpricedSpans":0,"inputTokens":100000,"outputTokens":10000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0.315,"localSavedUsd":0,"apiEquivalentUsd":null,"apiEquivalentUnpricedSpans":1,"apiEquivalentEstimatedSpans":0,"billedAiCredits":31.5,"topModel":"gpt-6.1-sol","budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
             """);
         await AssertResultAsync(
             await CallAsync(
@@ -287,7 +290,7 @@ public sealed class LedgerMcpServerTests
                 "get_branch_ledger",
                 """{"repository":"swigerb/copilot-ledger","branch":"nope"}"""),
             """
-            {"repository":"swigerb/copilot-ledger","branch":"nope","spans":0,"unpricedSpans":0,"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":0,"topModel":null,"budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            {"repository":"swigerb/copilot-ledger","branch":"nope","spans":0,"unpricedSpans":0,"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":0,"aiCreditsUsd":0,"foundryByokUsd":0,"localSavedUsd":0,"apiEquivalentUsd":0,"apiEquivalentUnpricedSpans":0,"apiEquivalentEstimatedSpans":0,"billedAiCredits":0,"topModel":null,"budget":null,"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
             """);
     }
 
@@ -327,7 +330,7 @@ public sealed class LedgerMcpServerTests
         await AssertResultAsync(
             await CallAsync(harness, "get_agent_breakdown", "{}"),
             """
-            {"repository":"swigerb/copilot-ledger","branch":"feature/ledger","agents":[{"agent":"(none)","spans":2,"unpricedSpans":0,"inputTokens":110000,"outputTokens":250000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":120.5,"aiCreditsUsd":1.205,"foundryByokUsd":0,"localSavedUsd":0,"billedAiCredits":120.5},{"agent":"ledger-builder","spans":2,"unpricedSpans":0,"inputTokens":1400000,"outputTokens":112000,"cacheReadInputTokens":400000,"cacheWriteInputTokens":0,"uncachedInputTokens":600000,"cacheReportedSpans":1,"cacheHitRatio":0.4,"aiCredits":56,"aiCreditsUsd":0.56,"foundryByokUsd":0,"localSavedUsd":0.23,"billedAiCredits":56}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
+            {"repository":"swigerb/copilot-ledger","branch":"feature/ledger","agents":[{"agent":"(none)","spans":2,"unpricedSpans":0,"inputTokens":110000,"outputTokens":250000,"cacheReadInputTokens":0,"cacheWriteInputTokens":0,"uncachedInputTokens":null,"cacheReportedSpans":0,"cacheHitRatio":null,"aiCredits":120.5,"aiCreditsUsd":1.205,"foundryByokUsd":0,"localSavedUsd":0,"apiEquivalentUsd":0.7,"apiEquivalentUnpricedSpans":1,"apiEquivalentEstimatedSpans":1,"billedAiCredits":120.5},{"agent":"ledger-builder","spans":2,"unpricedSpans":0,"inputTokens":1400000,"outputTokens":112000,"cacheReadInputTokens":400000,"cacheWriteInputTokens":0,"uncachedInputTokens":600000,"cacheReportedSpans":1,"cacheHitRatio":0.4,"aiCredits":56,"aiCreditsUsd":0.56,"foundryByokUsd":0,"localSavedUsd":0.23,"apiEquivalentUsd":null,"apiEquivalentUnpricedSpans":2,"apiEquivalentEstimatedSpans":0,"billedAiCredits":56}],"circuitBreaker":{"state":"closed","openTrips":[]},"warnings":[]}
             """);
     }
 
@@ -391,8 +394,11 @@ public sealed class LedgerMcpServerTests
         { "get_top_expensive_prompts", """{"limit":21}""", "limit must be an integer from 1 to 20." },
         { "get_top_expensive_prompts", """{"limit":5.5}""", "limit must be an integer from 1 to 20." },
         { "get_top_expensive_prompts", """{"limit":"5"}""", "limit must be an integer from 1 to 20." },
-        { "get_top_expensive_prompts", """{"orderBy":"Cost"}""", "orderBy must be cost, outputTokens, or failedToolCalls." },
-        { "get_top_expensive_prompts", """{"orderBy":null}""", "orderBy must be cost, outputTokens, or failedToolCalls." },
+        { "get_top_expensive_prompts", """{"orderBy":"Cost"}""", "orderBy must be cost, outputTokens, failedToolCalls, or apiEquivalentUsd." },
+        { "get_top_expensive_prompts", """{"orderBy":null}""", "orderBy must be cost, outputTokens, failedToolCalls, or apiEquivalentUsd." },
+        { "get_top_expensive_prompts", """{"pricing":"rates.json"}""", "Unknown argument: pricing." },
+        { "get_branch_ledger", """{"pricing":"rates.json"}""", "Unknown argument: pricing." },
+        { "get_agent_breakdown", """{"pricing":"rates.json"}""", "Unknown argument: pricing." },
         { "set_branch_budget", "{}", "aiCredits is required." },
         { "set_branch_budget", """{"aiCredits":0}""", "aiCredits must be a number greater than 0 and at most 1000000, with at most 2 decimal places." },
         { "set_branch_budget", """{"aiCredits":-1}""", "aiCredits must be a number greater than 0 and at most 1000000, with at most 2 decimal places." },
@@ -775,6 +781,58 @@ public sealed class LedgerMcpServerTests
     private static SqliteLedgerStore Store(string root) =>
         new(Path.Combine(root, "data", "ledger.db"), new ManualTimeProvider(Now));
 
+    // Prompt chains with an API-equivalent price come first, highest first; the rest keep their cost order.
+    [Fact]
+    public async Task MC15_TopPromptsByApiEquivalentUsd()
+    {
+        using TempDirectory temp = new();
+        GitFixture.Create(temp.Path);
+        SqliteLedgerStore store = Store(temp.Path);
+        await store.InitializeAsync();
+        JsonRateCardCalculator rates = JsonRateCardCalculator.LoadEmbedded();
+        (string Trace, string Model, long Input, long Output)[] requests =
+        [
+            ("a", "claude-sonnet-5.5", 10_000, 1_000),
+            ("b", "mai-code-2", 1_000_000, 100_000),
+            ("c", "claude-opus-5.5", 100_000, 10_000),
+        ];
+        await store.RecordAsync(requests.Select(request =>
+        {
+            NormalizedGenAiSpan span = TestSpans.Chat(
+                startTime: Now,
+                requestModel: request.Model,
+                inputTokens: request.Input,
+                outputTokens: request.Output) with
+            {
+                TraceId = new string(request.Trace[0], 32),
+                SpanId = new string(request.Trace[0], 16),
+            };
+            return new LedgerEntry(span, rates.Calculate(span), GitFixture.Feature(temp.Path));
+        }));
+        await using McpTestHarness harness = await StartAsync(Context(temp.Path, []));
+
+        CallToolResult byCost = await CallAsync(harness, "get_top_expensive_prompts", "{}");
+        CallToolResult byApi = await CallAsync(
+            harness,
+            "get_top_expensive_prompts",
+            """{"orderBy":"apiEquivalentUsd"}""");
+
+        Assert.Equal(["b", "c", "a"], Traces(byCost));
+        Assert.Equal(["c", "a", "b"], Traces(byApi));
+        JsonNode result = JsonNode.Parse(Assert.NotNull(byApi.StructuredContent).GetRawText())!;
+        Assert.Equal("apiEquivalentUsd", result["orderBy"]!.GetValue<string>());
+        Assert.Equal(
+            "[0.6,0.03,null]",
+            new JsonArray(result["prompts"]!.AsArray()
+                .Select(prompt => prompt!["apiEquivalentUsd"]?.DeepClone())
+                .ToArray()).ToJsonString());
+
+        static string[] Traces(CallToolResult result) =>
+            JsonNode.Parse(Assert.NotNull(result.StructuredContent).GetRawText())!["prompts"]!.AsArray()
+                .Select(prompt => prompt!["traceId"]!.GetValue<string>()[..1])
+                .ToArray();
+    }
+
     private static async Task SeedAsync(string root)
     {
         SqliteLedgerStore store = Store(root);
@@ -973,6 +1031,9 @@ public sealed class LedgerMcpServerTests
         ["aiCreditsUsd"] = 0.7m,
         ["foundryByokUsd"] = 0,
         ["localSavedUsd"] = 0,
+        ["apiEquivalentUsd"] = 0.7m,
+        ["apiEquivalentUnpricedSpans"] = 0,
+        ["apiEquivalentEstimatedSpans"] = 1,
         ["billedAiCredits"] = 70,
         ["failedToolCalls"] = 5,
     };
@@ -996,6 +1057,9 @@ public sealed class LedgerMcpServerTests
         ["aiCreditsUsd"] = 0.56m,
         ["foundryByokUsd"] = 0,
         ["localSavedUsd"] = 0.23m,
+        ["apiEquivalentUsd"] = null,
+        ["apiEquivalentUnpricedSpans"] = 2,
+        ["apiEquivalentEstimatedSpans"] = 0,
         ["billedAiCredits"] = 56,
         ["failedToolCalls"] = 0,
     };
@@ -1019,6 +1083,9 @@ public sealed class LedgerMcpServerTests
         ["aiCreditsUsd"] = 0.505m,
         ["foundryByokUsd"] = 0,
         ["localSavedUsd"] = 0,
+        ["apiEquivalentUsd"] = null,
+        ["apiEquivalentUnpricedSpans"] = 1,
+        ["apiEquivalentEstimatedSpans"] = 0,
         ["billedAiCredits"] = 50.5m,
         ["failedToolCalls"] = 1,
     };

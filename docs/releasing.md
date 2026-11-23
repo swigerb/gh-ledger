@@ -1,6 +1,6 @@
 # Releasing gh-ledger
 
-Releases are GitHub Releases of this repository. They make `gh extension install swigerb/gh-ledger` work, and `gh ledger rates update` downloads their `rates.json`. The CopilotLedger PR Receipt action is released from [its own repository](https://github.com/swigerb/copilot-ledger-action).
+Releases are GitHub Releases of this repository. They make `gh extension install swigerb/gh-ledger` work, and `gh ledger rates update` downloads their `rates.v2.json`. The CopilotLedger PR Receipt action is released from [its own repository](https://github.com/swigerb/copilot-ledger-action).
 
 ## Cut a release
 
@@ -10,7 +10,7 @@ Releases are GitHub Releases of this repository. They make `gh extension install
    - the version that the smoke test in `.github/workflows/ci.yml` compares with;
    - the tests that expect it: `DaemonCommandTests.DM1` and `ReportCommandTests.StatusText`;
    - the samples in `docs/guide.md` that show it: both `status` samples and the receipt. `GuideSamplesTests` fails until they match.
-2. If `src/CopilotLedger.Core/Pricing/rates.json` changed since the latest release, set its `ratesVersion` to the date of the change (`yyyy-MM-dd`), later than the latest release's. `gh ledger rates update` only takes rates with a later version, and the Release workflow fails when `rates.json` changed but its `ratesVersion` didn't move forward. In the same change, replace the old date wherever it's shown:
+2. If `src/CopilotLedger.Core/Pricing/rates.json` changed since the latest release, set its `ratesVersion` to the date of the change (`yyyy-MM-dd`), later than the latest release's. `gh ledger rates update` only takes rates with a later version, and the Release workflow fails when `rates.json` changed but its `ratesVersion` didn't move forward; it compares `rates.json` with the latest release's `rates.v2.json`, or with its `rates.json` when it has none. In the same change, replace the old date wherever it's shown:
    - the samples in `docs/guide.md` that show it: `status-first`, `status`, `rates-validate`, and `rates-update`. The `rates-update` sample and `GuideSamplesTests.GS4` download version `2026-12-15`; if that isn't later than the new date, change it in both;
    - the tests that expect it: in `ReportCommandTests` (including `StatusText`), `RatesCommandTests`, `RatesUpdateTests`, `RateOverlayTests`, and `JsonRateCardCalculatorTests`, and in `TestSupport/PublishedRates.cs`. `RatesUpdateTests` downloads versions before, equal to, and after the old date; keep each in the same place relative to the new one.
 
@@ -23,7 +23,7 @@ Releases are GitHub Releases of this repository. They make `gh extension install
    git push origin v0.4.1
    ```
 
-When a `v*` tag is pushed, the Release workflow checks that the tag equals `v` plus the project version, builds a single-file binary for each platform, smoke-tests the same three, checks `ratesVersion` against the latest release's `rates.json`, and creates the release with these assets:
+When a `v*` tag is pushed, the Release workflow checks that the tag equals `v` plus the project version, builds a single-file binary for each platform, smoke-tests the same three, checks `ratesVersion` against the latest release's rates, and creates the release with these assets:
 
 | Asset | Platform |
 |---|---|
@@ -33,7 +33,8 @@ When a `v*` tag is pushed, the Release workflow checks that the tag equals `v` p
 | `gh-ledger-linux-arm64` | Linux Arm64 |
 | `gh-ledger-darwin-amd64` | macOS x64 |
 | `gh-ledger-darwin-arm64` | macOS Apple silicon |
-| `rates.json` | The built-in rates, for `gh ledger rates update` |
+| `rates.v2.json` | The built-in rates, for `gh ledger rates update` |
+| `rates.json` | The built-in rates without `apiEquivalent`, as `schemaVersion` 1, for `gh ledger rates update` in gh-ledger 0.4.1 and earlier, which refuse `schemaVersion` 2 |
 | `gh-ledger-checksums.txt` | SHA-256 checksums of the files above |
 
 GitHub CLI picks a release asset by the `<os>-<arch>` suffix of its name, so keep these names. A tag with a hyphen, such as `v0.5.0-rc.1`, makes a prerelease, which `gh extension install` and `rates update` ignore because they use the latest release.

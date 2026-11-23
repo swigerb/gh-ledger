@@ -34,7 +34,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Pass with branch." },
             "branch": { "type": "string", "minLength": 1, "description": "Branch name, or (none). Pass with repository." },
             "limit": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5, "description": "Number of prompt chains." },
-            "orderBy": { "type": "string", "enum": ["cost", "outputTokens", "failedToolCalls"], "default": "cost", "description": "Sort key, highest first." }
+            "orderBy": { "type": "string", "enum": ["cost", "outputTokens", "failedToolCalls", "apiEquivalentUsd"], "default": "cost", "description": "Sort key, highest first. With apiEquivalentUsd, prompt chains without an API-equivalent price come last." }
           },
           "additionalProperties": false
         }
@@ -81,7 +81,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         {
             Name = "get_branch_ledger",
             Title = "Branch ledger",
-            Description = "Spend on one Git branch: AI credits, USD, BYOK USD, local savings, top model, budget, and circuit-breaker status. Uses the current repository and branch unless you pass both.",
+            Description = "Spend on one Git branch: AI credits, USD, BYOK USD, local savings, API-equivalent USD (the same requests at API list prices, for comparison only), top model, budget, and circuit-breaker status. Uses the current repository and branch unless you pass both.",
             InputSchema = BranchSchema.Clone(),
             Annotations = new ToolAnnotations
             {
@@ -310,13 +310,13 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         {
             if (orderByElement.ValueKind != JsonValueKind.String)
             {
-                return Error("orderBy must be cost, outputTokens, or failedToolCalls.");
+                return Error("orderBy must be cost, outputTokens, failedToolCalls, or apiEquivalentUsd.");
             }
 
             string? requested = orderByElement.GetString();
-            if (requested is not ("cost" or "outputTokens" or "failedToolCalls"))
+            if (requested is not ("cost" or "outputTokens" or "failedToolCalls" or "apiEquivalentUsd"))
             {
-                return Error("orderBy must be cost, outputTokens, or failedToolCalls.");
+                return Error("orderBy must be cost, outputTokens, failedToolCalls, or apiEquivalentUsd.");
             }
 
             orderBy = requested;
@@ -491,6 +491,9 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             ["aiCreditsUsd"] = Money(total.AiCreditsUsd),
             ["foundryByokUsd"] = Money(total.FoundryByokUsd),
             ["localSavedUsd"] = Money(total.LocalSavedUsd),
+            ["apiEquivalentUsd"] = NullableMoney(total.ApiEquivalentUsd),
+            ["apiEquivalentUnpricedSpans"] = total.ApiEquivalentUnpricedSpanCount,
+            ["apiEquivalentEstimatedSpans"] = total.ApiEquivalentEstimatedSpanCount,
             ["billedAiCredits"] = Money(
                 BilledAiCredits(total.AiCredits, total.FoundryByokUsd)),
             ["topModel"] = models.FirstOrDefault()?.Model,
@@ -523,6 +526,9 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             "outputTokens" => candidates.OrderByDescending(row => row.OutputTokens),
             "failedToolCalls" => candidates.OrderByDescending(
                 row => failures.GetValueOrDefault(row.TraceId)),
+            "apiEquivalentUsd" => candidates
+                .OrderBy(row => row.ApiEquivalentUsd is null)
+                .ThenByDescending(row => row.ApiEquivalentUsd ?? 0m),
             _ => candidates.OrderByDescending(
                 row => row.AiCreditsUsd + row.FoundryByokUsd),
         };
@@ -562,6 +568,9 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 ["aiCreditsUsd"] = Money(row.AiCreditsUsd),
                 ["foundryByokUsd"] = Money(row.FoundryByokUsd),
                 ["localSavedUsd"] = Money(row.LocalSavedUsd),
+                ["apiEquivalentUsd"] = NullableMoney(row.ApiEquivalentUsd),
+                ["apiEquivalentUnpricedSpans"] = row.ApiEquivalentUnpricedSpanCount,
+                ["apiEquivalentEstimatedSpans"] = row.ApiEquivalentEstimatedSpanCount,
                 ["billedAiCredits"] = Money(
                     BilledAiCredits(row.AiCredits, row.FoundryByokUsd)),
                 ["failedToolCalls"] = failures.GetValueOrDefault(row.TraceId),
@@ -615,6 +624,9 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 ["aiCreditsUsd"] = Money(row.AiCreditsUsd),
                 ["foundryByokUsd"] = Money(row.FoundryByokUsd),
                 ["localSavedUsd"] = Money(row.LocalSavedUsd),
+                ["apiEquivalentUsd"] = NullableMoney(row.ApiEquivalentUsd),
+                ["apiEquivalentUnpricedSpans"] = row.ApiEquivalentUnpricedSpanCount,
+                ["apiEquivalentEstimatedSpans"] = row.ApiEquivalentEstimatedSpanCount,
                 ["billedAiCredits"] = Money(
                     BilledAiCredits(row.AiCredits, row.FoundryByokUsd)),
             });
@@ -871,6 +883,9 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         AiCreditsUsd = 0m,
         FoundryByokUsd = 0m,
         LocalSavedUsd = 0m,
+        ApiEquivalentUsd = 0m,
+        ApiEquivalentUnpricedSpanCount = 0,
+        ApiEquivalentEstimatedSpanCount = 0,
     };
 
     private static JsonElement ParseSchema(string json)
@@ -885,6 +900,10 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
     private static JsonNode Money(decimal value) =>
         JsonNode.Parse(
             value.ToString("0.############", CultureInfo.InvariantCulture))!;
+
+    // An API-equivalent amount, or null when nothing was priced: never 0 for an unknown price.
+    private static JsonNode? NullableMoney(decimal? value) =>
+        value is null ? null : Money(value.Value);
 
     // value with every digit decimal division gave it, or null.
     private static JsonNode? Ratio(decimal? value) =>

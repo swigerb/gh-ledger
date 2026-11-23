@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "ratesVersion": "2026-11-20",
+  "schemaVersion": 2,
+  "ratesVersion": "2026-11-23",
   "source": {
     "url": "https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing",
     "retrievedOn": "2026-11-20"
@@ -15,15 +15,22 @@
     "Promotional windows end at 00:00:00Z on the date the pricing page gives: gemini-4-argon and gemini-4-carbon on 2026-12-01, mai-code-2-flash on 2027-05-17, and gemini-3.8-flash on 2027-01-01 (the page says through December 31, 2026).",
     "gemini-4-argon and gemini-3.8-flash have no published price after their promotions, so later requests are recorded as no_rate_for_date until a price is added.",
     "Model ids are the ids Copilot reports. gpt-5.4-nano, claude-sonnet-4, claude-opus-4.8, claude-fable-5, claude-fable-5.1, claude-fable-5.2, gemini-4-neon, grok-4.5, and kimi-k3 are derived from the pricing page's display names. Claude Opus 4.8 (fast mode) is omitted because its id is unknown.",
+    "githubAiCredits aliases add the vendors' own API ids and dated snapshot ids, the same as apiEquivalent's, because Copilot can report them: Copilot CLI 1.0.114 reports claude-haiku-4.5's response model as claude-haiku-4-5-20251001.",
     "foundryByok.models is empty because Azure prices vary by region, deployment type, and agreement; add yours in ~/.copilot-ledger/rates.json (see docs/configuration.md).",
-    "Local spans bill 0 USD; savings price the same tokens at the GitHub rates of localOffload.baselineModel. localOffload.models maps local runtime ids to one canonical model."
+    "Local spans bill 0 USD; savings price the same tokens at the GitHub rates of localOffload.baselineModel. localOffload.models maps local runtime ids to one canonical model.",
+    "apiEquivalent holds each vendor's public API list prices (standard processing, global endpoint; not batch, flex, priority, fast mode, or regional prices), retrieved on 2026-11-23 from each model's sourceUrl. They are a comparison and are never billed.",
+    "apiEquivalent ids are the ids Copilot reports. Aliases add the vendor's own API ids, such as claude-opus-4-8, and dated snapshot ids, but not moving aliases such as grok-4.5-latest.",
+    "API cache writes use the vendor's default cache lifetime: 5 minutes at Anthropic and Moonshot, 30 minutes at OpenAI. Google and xAI list no cache-write price, so their cache writes are priced at inputPer1M.",
+    "API tiers: OpenAI's long-context prices apply above 272,000 input tokens, Claude Haiku 5.5's above 100,000, and xAI's from 200,000, so xAI's default tiers end at 199999. Thresholds count all input tokens, including cache reads and writes.",
+    "API windows start and end at 00:00:00Z. A promotion ends on the day after its last day: gemini-4-argon's and gemini-4-carbon's on 2026-12-01 and gemini-3.8-flash's on 2027-01-01, where Google's published later prices begin, and gpt-5.6-sol's on 2026-12-01, after which OpenAI publishes no price. A retired or shut-down model's prices end on that date: claude-sonnet-4's on 2026-06-15, and gpt-5.3-codex's and gpt-5.4-nano's on 2027-04-01. A documented price change starts a window: gpt-5.6-luna's on 2026-07-30 and gpt-5.6-sol's on 2026-08-21. Earlier prices that vendors don't publish are left out.",
+    "mai-code-2, mai-code-2-flash, and mai-code-1.1-flash have no public API list price, so they have no apiEquivalent entry and are unpriced in that view. Local requests are too, because their baseline is mai-code-2, unless an overlay sets apiEquivalent.localBaselineModel."
   ],
   "githubAiCredits": {
     "hostSuffixes": ["githubcopilot.com"],
     "models": [
       {
         "id": "claude-opus-5.5",
-        "aliases": [],
+        "aliases": ["claude-opus-5-5"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -36,7 +43,7 @@
       },
       {
         "id": "claude-sonnet-5.5",
-        "aliases": [],
+        "aliases": ["claude-sonnet-5-5"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -110,7 +117,7 @@
       },
       {
         "id": "gpt-5.4-nano",
-        "aliases": [],
+        "aliases": ["gpt-5.4-nano-2026-03-17"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -221,7 +228,7 @@
       },
       {
         "id": "claude-haiku-4.5",
-        "aliases": [],
+        "aliases": ["claude-haiku-4-5", "claude-haiku-4-5-20251001"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -234,7 +241,7 @@
       },
       {
         "id": "claude-haiku-5.5",
-        "aliases": [],
+        "aliases": ["claude-haiku-5-5"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -248,7 +255,7 @@
       },
       {
         "id": "claude-sonnet-4",
-        "aliases": [],
+        "aliases": ["claude-sonnet-4-20250514"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -261,7 +268,7 @@
       },
       {
         "id": "claude-sonnet-4.6",
-        "aliases": [],
+        "aliases": ["claude-sonnet-4-6"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -274,7 +281,7 @@
       },
       {
         "id": "claude-opus-4.8",
-        "aliases": [],
+        "aliases": ["claude-opus-4-8"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -313,7 +320,7 @@
       },
       {
         "id": "claude-fable-5.1",
-        "aliases": [],
+        "aliases": ["claude-fable-5-1"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -326,7 +333,7 @@
       },
       {
         "id": "claude-fable-5.2",
-        "aliases": [],
+        "aliases": ["claude-fable-5-2"],
         "windows": [
           {
             "effectiveFrom": null,
@@ -511,5 +518,509 @@
     ],
     "additionalHosts": [],
     "providerNames": ["ollama", "lm_studio", "foundry_local", "llama_cpp"]
+  },
+  "apiEquivalent": {
+    "description": "Public API list prices of each model's vendor, in USD per 1,000,000 tokens, retrieved 2026-11-23. For comparison only; never billed.",
+    "models": [
+      {
+        "id": "claude-opus-5.5",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": ["claude-opus-5-5"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 4.00, "cachedInputPer1M": 0.20, "cacheWritePer1M": 5.00, "outputPer1M": 20.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-sonnet-5.5",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": ["claude-sonnet-5-5"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 2.00, "cachedInputPer1M": 0.10, "cacheWritePer1M": 2.50, "outputPer1M": 10.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-6.1-sol",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 272000, "inputPer1M": 2.00, "cachedInputPer1M": 0.10, "cacheWritePer1M": 2.50, "outputPer1M": 10.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 4.00, "cachedInputPer1M": 0.20, "cacheWritePer1M": 5.00, "outputPer1M": 15.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-astra",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 272000, "inputPer1M": 10.00, "cachedInputPer1M": 1.00, "cacheWritePer1M": 12.50, "outputPer1M": 50.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 20.00, "cachedInputPer1M": 2.00, "cacheWritePer1M": 25.00, "outputPer1M": 75.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-5.3-codex",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": "2027-04-01T00:00:00Z",
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 1.75, "cachedInputPer1M": 0.175, "cacheWritePer1M": null, "outputPer1M": 14.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-5.4-nano",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": ["gpt-5.4-nano-2026-03-17"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": "2027-04-01T00:00:00Z",
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 0.20, "cachedInputPer1M": 0.02, "cacheWritePer1M": null, "outputPer1M": 1.25 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": "2026-07-30T00:00:00Z",
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 272000, "inputPer1M": 0.20, "cachedInputPer1M": 0.02, "cacheWritePer1M": 0.25, "outputPer1M": 1.20 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 0.40, "cachedInputPer1M": 0.04, "cacheWritePer1M": 0.50, "outputPer1M": 1.80 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": "2026-08-21T00:00:00Z",
+            "effectiveUntil": "2026-12-01T00:00:00Z",
+            "tiers": [
+              { "name": "default", "maxInputTokens": 272000, "inputPer1M": 4.00, "cachedInputPer1M": 0.40, "cacheWritePer1M": 5.00, "outputPer1M": 20.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 8.00, "cachedInputPer1M": 0.80, "cacheWritePer1M": 10.00, "outputPer1M": 30.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-luna",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 272000, "inputPer1M": 0.10, "cachedInputPer1M": 0.01, "cacheWritePer1M": 0.125, "outputPer1M": 0.50 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 0.20, "cachedInputPer1M": 0.02, "cacheWritePer1M": 0.25, "outputPer1M": 0.75 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-sol",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 272000, "inputPer1M": 2.00, "cachedInputPer1M": 0.20, "cacheWritePer1M": 2.50, "outputPer1M": 10.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 4.00, "cachedInputPer1M": 0.40, "cacheWritePer1M": 5.00, "outputPer1M": 15.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-6.1-terra",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 272000, "inputPer1M": 1.00, "cachedInputPer1M": 0.05, "cacheWritePer1M": 1.25, "outputPer1M": 5.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 2.00, "cachedInputPer1M": 0.10, "cacheWritePer1M": 2.50, "outputPer1M": 7.50 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-6.2-astra",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 272000, "inputPer1M": 8.00, "cachedInputPer1M": 0.40, "cacheWritePer1M": 10.00, "outputPer1M": 40.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 16.00, "cachedInputPer1M": 0.80, "cacheWritePer1M": 20.00, "outputPer1M": 60.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gpt-6.2-sol",
+        "vendor": "openai",
+        "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 272000, "inputPer1M": 2.00, "cachedInputPer1M": 0.10, "cacheWritePer1M": 2.50, "outputPer1M": 10.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 4.00, "cachedInputPer1M": 0.20, "cacheWritePer1M": 5.00, "outputPer1M": 15.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-haiku-4.5",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": ["claude-haiku-4-5", "claude-haiku-4-5-20251001"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 1.00, "cachedInputPer1M": 0.10, "cacheWritePer1M": 1.25, "outputPer1M": 5.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-haiku-5.5",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": ["claude-haiku-5-5"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 100000, "inputPer1M": 0.10, "cachedInputPer1M": 0.01, "cacheWritePer1M": 0.125, "outputPer1M": 0.50 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 0.50, "cachedInputPer1M": 0.05, "cacheWritePer1M": 0.625, "outputPer1M": 2.50 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-sonnet-4",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": ["claude-sonnet-4-20250514"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": "2026-06-15T00:00:00Z",
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 3.00, "cachedInputPer1M": 0.30, "cacheWritePer1M": 3.75, "outputPer1M": 15.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-sonnet-4.6",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": ["claude-sonnet-4-6"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 3.00, "cachedInputPer1M": 0.30, "cacheWritePer1M": 3.75, "outputPer1M": 15.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-opus-4.8",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": ["claude-opus-4-8"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 5.00, "cachedInputPer1M": 0.50, "cacheWritePer1M": 6.25, "outputPer1M": 25.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-sonnet-5",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 2.00, "cachedInputPer1M": 0.20, "cacheWritePer1M": 2.50, "outputPer1M": 10.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-fable-5",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 10.00, "cachedInputPer1M": 1.00, "cacheWritePer1M": 12.50, "outputPer1M": 50.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-fable-5.1",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": ["claude-fable-5-1"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 10.00, "cachedInputPer1M": 0.25, "cacheWritePer1M": 12.50, "outputPer1M": 50.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "claude-fable-5.2",
+        "vendor": "anthropic",
+        "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "aliases": ["claude-fable-5-2"],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 8.00, "cachedInputPer1M": 0.20, "cacheWritePer1M": 10.00, "outputPer1M": 40.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gemini-3.8-flash",
+        "vendor": "google",
+        "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": "2027-01-01T00:00:00Z",
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 0.75, "cachedInputPer1M": 0.075, "cacheWritePer1M": null, "outputPer1M": 3.75 }
+            ]
+          },
+          {
+            "effectiveFrom": "2027-01-01T00:00:00Z",
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 1.50, "cachedInputPer1M": 0.15, "cacheWritePer1M": null, "outputPer1M": 7.50 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gemini-4-argon",
+        "vendor": "google",
+        "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": "2026-12-01T00:00:00Z",
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 2.00, "cachedInputPer1M": 0.10, "cacheWritePer1M": null, "outputPer1M": 10.00 }
+            ]
+          },
+          {
+            "effectiveFrom": "2026-12-01T00:00:00Z",
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 4.00, "cachedInputPer1M": 0.20, "cacheWritePer1M": null, "outputPer1M": 20.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gemini-4-carbon",
+        "vendor": "google",
+        "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": "2026-12-01T00:00:00Z",
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 2.00, "cachedInputPer1M": 0.10, "cacheWritePer1M": null, "outputPer1M": 10.00 }
+            ]
+          },
+          {
+            "effectiveFrom": "2026-12-01T00:00:00Z",
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 4.00, "cachedInputPer1M": 0.20, "cacheWritePer1M": null, "outputPer1M": 20.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gemini-4-hydrogen",
+        "vendor": "google",
+        "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 1.50, "cachedInputPer1M": 0.075, "cacheWritePer1M": null, "outputPer1M": 7.50 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gemini-4-neon",
+        "vendor": "google",
+        "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 3.00, "cachedInputPer1M": 0.15, "cacheWritePer1M": null, "outputPer1M": 15.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "grok-4.5",
+        "vendor": "xai",
+        "sourceUrl": "https://docs.x.ai/developers/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 199999, "inputPer1M": 2.00, "cachedInputPer1M": 0.30, "cacheWritePer1M": null, "outputPer1M": 6.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 4.00, "cachedInputPer1M": 0.60, "cacheWritePer1M": null, "outputPer1M": 12.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "grok-4.6",
+        "vendor": "xai",
+        "sourceUrl": "https://docs.x.ai/developers/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 199999, "inputPer1M": 2.00, "cachedInputPer1M": 0.50, "cacheWritePer1M": null, "outputPer1M": 6.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 4.00, "cachedInputPer1M": 1.00, "cacheWritePer1M": null, "outputPer1M": 12.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "grok-4.7",
+        "vendor": "xai",
+        "sourceUrl": "https://docs.x.ai/developers/pricing",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": 199999, "inputPer1M": 2.00, "cachedInputPer1M": 0.50, "cacheWritePer1M": null, "outputPer1M": 6.00 },
+              { "name": "long_context", "maxInputTokens": null, "inputPer1M": 4.00, "cachedInputPer1M": 1.00, "cacheWritePer1M": null, "outputPer1M": 12.00 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "kimi-k3",
+        "vendor": "moonshot",
+        "sourceUrl": "https://platform.kimi.ai/docs/pricing/chat",
+        "aliases": [],
+        "windows": [
+          {
+            "effectiveFrom": null,
+            "effectiveUntil": null,
+            "tiers": [
+              { "name": "default", "maxInputTokens": null, "inputPer1M": 3.00, "cachedInputPer1M": 0.30, "cacheWritePer1M": 3.00, "outputPer1M": 15.00 }
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

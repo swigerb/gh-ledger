@@ -12,6 +12,7 @@ It runs on your machine as the `gh ledger` GitHub CLI extension, with no Docker 
 - Pull request receipts, posted by the [CopilotLedger PR Receipt action](https://github.com/swigerb/copilot-ledger-action)
 - An MCP server, so Copilot can check spend, budgets, and the circuit breaker
 - Foundry BYOK prices, local-model savings, and `rates update` for new prices between releases
+- API-equivalent USD: what the same requests would cost at each model's API list prices, or at prices you supply, beside what Copilot billed
 
 ## Requirements
 

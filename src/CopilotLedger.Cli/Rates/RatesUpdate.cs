@@ -9,6 +9,11 @@ namespace CopilotLedger.Cli.Rates;
 internal static class RatesUpdate
 {
     public const string DownloadUrl =
+        "https://github.com/swigerb/gh-ledger/releases/latest/download/rates.v2.json";
+
+    // Releases before rates.v2.json attach only this schemaVersion 1 copy, which RunAsync takes only when it's older or
+    // the same: a newer one would drop the API-equivalent prices.
+    public const string LegacyDownloadUrl =
         "https://github.com/swigerb/gh-ledger/releases/latest/download/rates.json";
 
     private const int MaximumBytes = 1_048_576;
@@ -25,6 +30,7 @@ internal static class RatesUpdate
     public static async Task<int> RunAsync(CliContext context, CancellationToken cancellationToken)
     {
         byte[] bytes;
+        string url = DownloadUrl;
         using (HttpClient client = new(
             context.CreateHttpHandler?.Invoke() ?? CreateDefaultHandler(),
             disposeHandler: true))
@@ -34,27 +40,36 @@ internal static class RatesUpdate
             client.DefaultRequestHeaders.UserAgent.ParseAdd($"gh-ledger/{GhLedgerCli.Version}");
             try
             {
-                using HttpResponseMessage response = await client.GetAsync(
-                    DownloadUrl,
-                    cancellationToken);
-                if (!response.IsSuccessStatusCode)
+                HttpResponseMessage response = await client.GetAsync(url, cancellationToken);
+                if (response.StatusCode == HttpStatusCode.NotFound)
                 {
-                    context.Error.WriteLine(
-                        $"Could not download rates from {DownloadUrl}: HTTP {(int)response.StatusCode}.");
-                    return 1;
+                    // The latest release predates rates.v2.json.
+                    response.Dispose();
+                    url = LegacyDownloadUrl;
+                    response = await client.GetAsync(url, cancellationToken);
                 }
 
-                bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                using (response)
+                {
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        context.Error.WriteLine(
+                            $"Could not download rates from {url}: HTTP {(int)response.StatusCode}.");
+                        return 1;
+                    }
+
+                    bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                }
             }
             catch (HttpRequestException ex)
             {
-                context.Error.WriteLine($"Could not download rates from {DownloadUrl}: {ex.Message}");
+                context.Error.WriteLine($"Could not download rates from {url}: {ex.Message}");
                 return 1;
             }
             catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 context.Error.WriteLine(
-                    $"Could not download rates from {DownloadUrl}: no response within 30 seconds.");
+                    $"Could not download rates from {url}: no response within 30 seconds.");
                 return 1;
             }
         }
@@ -70,10 +85,10 @@ internal static class RatesUpdate
             return 1;
         }
 
-        string version;
+        JsonRateCardCalculator published;
         try
         {
-            version = JsonRateCardCalculator.Parse(json).RatesVersion;
+            published = JsonRateCardCalculator.Parse(json);
         }
         catch (InvalidDataException ex)
         {
@@ -81,7 +96,8 @@ internal static class RatesUpdate
             return 1;
         }
 
-        if (!RateCardFiles.TryParseVersion(version, out DateOnly published))
+        string version = published.RatesVersion;
+        if (!RateCardFiles.TryParseVersion(version, out DateOnly publishedOn))
         {
             context.Error.WriteLine(
                 $"The downloaded rates are invalid: ratesVersion {version} isn't a yyyy-MM-dd date.");
@@ -95,17 +111,25 @@ internal static class RatesUpdate
         }
 
         DateOnly inUse = RateCardFiles.ParseVersion(current.Version);
-        if (published < inUse)
+        if (publishedOn < inUse)
         {
             context.Out.WriteLine(
                 $"The published rates ({version}) are older than the rates in use ({current.Version}); nothing changed.");
             return 0;
         }
 
-        if (published == inUse)
+        if (publishedOn == inUse)
         {
             context.Out.WriteLine($"Rates are up to date ({current.Version}).");
             return 0;
+        }
+
+        int schemaVersion = JsonRateCardCalculator.LoadEmbedded().SchemaVersion;
+        if (published.SchemaVersion < schemaVersion)
+        {
+            context.Error.WriteLine(
+                $"The published rates ({version}) are schemaVersion {published.SchemaVersion}, without API-equivalent prices; this gh-ledger needs schemaVersion {schemaVersion}. Nothing changed.");
+            return 1;
         }
 
         string? overlay = RateCardFiles.OverlayPath(context);

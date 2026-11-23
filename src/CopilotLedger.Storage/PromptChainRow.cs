@@ -20,4 +20,7 @@ public sealed record PromptChainRow
     public required decimal AiCreditsUsd { get; init; }                // GitHubAiCredits channel
     public required decimal FoundryByokUsd { get; init; }
     public required decimal LocalSavedUsd { get; init; }
+    public required decimal? ApiEquivalentUsd { get; init; }               // as in LedgerRollupRow
+    public required long ApiEquivalentUnpricedSpanCount { get; init; }
+    public required long ApiEquivalentEstimatedSpanCount { get; init; }
 }

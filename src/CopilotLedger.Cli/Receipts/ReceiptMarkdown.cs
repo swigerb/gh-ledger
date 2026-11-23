@@ -36,9 +36,11 @@ public static class ReceiptMarkdown
             writer.WriteString("commit", receipt.Commit);
             LedgerFormat.WriteTime(writer, "generatedAt", receipt.GeneratedAt);
             writer.WriteString("generator", $"gh-ledger {GhLedgerCli.Version}");
+            receipt.Pricing?.Write(writer, fileNameOnly: true);
             writer.WritePropertyName("totals");
             writer.WriteStartObject();
             LedgerFormat.WriteTotals(writer, receipt.Totals);
+            LedgerFormat.WriteApiEquivalent(writer, receipt.Totals);
             writer.WriteEndObject();
             writer.WriteNumber("prompts", receipt.Prompts);
             LedgerFormat.WriteMoney(writer, "maxPromptCredits", receipt.MaxPromptCredits);
@@ -50,6 +52,7 @@ public static class ReceiptMarkdown
                 writer.WriteString("channel", ChannelId(row.Channel!.Value));
                 writer.WriteString("model", row.Model);
                 LedgerFormat.WriteTotals(writer, row);
+                LedgerFormat.WriteApiEquivalent(writer, row);
                 writer.WriteEndObject();
             }
 
@@ -119,6 +122,7 @@ public static class ReceiptMarkdown
                 .Append('\n');
         }
 
+        text.Append("- **API-equivalent (retail):** ").Append(ApiEquivalentSummary(receipt)).Append('\n');
         text.Append("- **Circuit breaker:** ").Append(Plural(receipt.BreakerTrips, "trip", "trips"))
             .Append(" • max single-prompt burn: ").Append(LedgerFormat.Credits(receipt.MaxPromptCredits))
             .Append(" credits\n\n");
@@ -130,8 +134,8 @@ public static class ReceiptMarkdown
         }
         else
         {
-            text.Append("| Billing | Model | Turns | Unpriced | Input tokens | Output tokens | Cost | Cloud spend avoided |\n");
-            text.Append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |\n");
+            text.Append("| Billing | Model | Turns | Unpriced | Input tokens | Output tokens | Cost | API-equivalent | Cloud spend avoided |\n");
+            text.Append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n");
             foreach (LedgerRollupRow row in receipt.Models)
             {
                 text.Append("| ").Append(ChannelLabel(row.Channel!.Value))
@@ -141,6 +145,7 @@ public static class ReceiptMarkdown
                     .Append(" | ").Append(LedgerFormat.Count(row.InputTokens))
                     .Append(" | ").Append(LedgerFormat.Count(row.OutputTokens))
                     .Append(" | ").Append(Cost(row))
+                    .Append(" | ").Append(ApiEquivalentCell(row))
                     .Append(" | ").Append(LedgerFormat.Usd(row.LocalSavedUsd))
                     .Append(" |\n");
             }
@@ -232,6 +237,64 @@ public static class ReceiptMarkdown
         BillingChannel.Local or BillingChannel.Unpriced => "$0.00",
         _ => throw new UnreachableException(),
     };
+
+    // The receipt's API-equivalent line: none without spans, and Unpriced when no turn has an API-equivalent price. Otherwise
+    // the amount at API list prices, or at the --pricing file's prices, then the turns it leaves out and the turns that make it
+    // an estimate, in words rather than the report marks, because * and ~ are Markdown syntax.
+    private static string ApiEquivalentSummary(PullRequestReceipt receipt)
+    {
+        LedgerRollupRow totals = receipt.Totals;
+        if (receipt.Models.Count == 0)
+        {
+            return "none";
+        }
+
+        if (totals.ApiEquivalentUsd is not decimal usd)
+        {
+            return $"Unpriced ({Plural(totals.SpanCount, "turn", "turns")} without an API-equivalent price)";
+        }
+
+        StringBuilder line = new();
+        line.Append(LedgerFormat.Usd(usd)).Append(
+            receipt.Pricing is null
+                ? " at API list prices"
+                : $" at what-if prices from {Code(Path.GetFileName(receipt.Pricing.Path))}, ratesVersion {Code(receipt.Pricing.Calculator.RatesVersion)}");
+        if (totals.ApiEquivalentUnpricedSpanCount > 0)
+        {
+            line.Append(" • ").Append(Plural(totals.ApiEquivalentUnpricedSpanCount, "turn", "turns")).Append(" unpriced");
+        }
+
+        if (totals.ApiEquivalentEstimatedSpanCount > 0)
+        {
+            line.Append(" • estimated: ")
+                .Append(Plural(totals.ApiEquivalentEstimatedSpanCount, "turn", "turns"))
+                .Append(" reported no cache counters");
+        }
+
+        return line.ToString();
+    }
+
+    // A model row's API-equivalent amount: Unpriced, or the amount, noting when it leaves out turns or is an estimate.
+    private static string ApiEquivalentCell(LedgerRollupRow row)
+    {
+        if (row.ApiEquivalentUsd is not decimal usd)
+        {
+            return "Unpriced";
+        }
+
+        List<string> notes = [];
+        if (row.ApiEquivalentUnpricedSpanCount > 0)
+        {
+            notes.Add("partial");
+        }
+
+        if (row.ApiEquivalentEstimatedSpanCount > 0)
+        {
+            notes.Add("estimate");
+        }
+
+        return notes.Count == 0 ? LedgerFormat.Usd(usd) : $"{LedgerFormat.Usd(usd)} ({string.Join(", ", notes)})";
+    }
 
     private static LedgerRollupRow[] Rows(PullRequestReceipt receipt, BillingChannel channel) =>
         receipt.Models.Where(row => row.Channel == channel).ToArray();
