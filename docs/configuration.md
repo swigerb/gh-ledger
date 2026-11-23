@@ -87,6 +87,18 @@ The built-in API list prices are each vendor's public prices on 2026-11-23 for t
 - Prices start and end at 00:00 UTC. A promotion ends the day after its last day. Google publishes the prices that follow its promotions; OpenAI publishes none after GPT-5.6 Sol's, which ends on 2026-12-01. A retired or shut-down model has no list price from that date: Claude Sonnet 4 from 2026-06-15, and GPT-5.3-Codex and GPT-5.4 nano from 2027-04-01. Vendors publish only current prices, so they're assumed for earlier dates, except after a documented change: GPT-5.6 Luna's prices start on 2026-07-30, and GPT-5.6 Sol's on 2026-08-21.
 - Vendor API ids, such as `claude-opus-4-8`, and dated snapshot ids, such as `claude-haiku-4-5-20251001`, are aliases.
 
+### Imported requests
+
+`gh ledger import` prices the requests it reads from session logs as the daemon prices live ones: with the rates in use when you run it, your overlay and downloaded rates included, as of each request's start time. A request outside every price window of its model is `no_rate_for_date`; it's never priced at today's price. Each request's response and request models are passed as the log recorded them, so [Which model prices a request](#which-model-prices-a-request) applies unchanged.
+
+A session log has no endpoint, so the channel comes from who billed the request:
+
+- A Copilot request that GitHub billed, and a Copilot compaction, are priced as a live request without an endpoint is: with GitHub AI credits, or as local when the model is one of `localOffload.models`.
+- A Copilot BYOK request is local when its `providerType` is in `localOffload.providerNames`, Foundry BYOK when it's in `foundryByok.providerNames`, and `other_provider` otherwise.
+- A Codex request is classified the same way by its `model_provider`, with Codex's `lmstudio` matched as `lm_studio`. A Codex request to OpenAI is `other_provider`.
+
+So a Copilot BYOK request through a local server that speaks OpenAI's API, which Copilot logs with provider type `openai`, is `other_provider` when it's imported, even though its live span counts as local when its endpoint is `localhost`. An `other_provider` request bills nothing in the ledger, and it still gets an API-equivalent cost when its model has a list price.
+
 ## Why Foundry BYOK is unpriced by default
 
 With bring-your-own-key (BYOK), Microsoft Foundry bills you directly, not GitHub. Azure prices depend on region, deployment type, and your agreement, so CopilotLedger can't know yours.
@@ -316,7 +328,7 @@ Overlay sections:
 | `ratesVersion` | No | Label recorded with each priced request |
 | `notes` | No | Strings for your own notes |
 | `githubAiCredits.hostSuffixes`, `foundryByok.hostSuffixes` | No | Added to the built-in lists |
-| `foundryByok.providerNames`, `localOffload.providerNames` | No | Matched against `gen_ai.provider.name` |
+| `foundryByok.providerNames`, `localOffload.providerNames` | No | Matched against `gen_ai.provider.name`, and against the provider of an imported BYOK or Codex request (see [Imported requests](#imported-requests)) |
 | `githubAiCredits.models`, `foundryByok.models` | No | Priced models (see the next table) |
 | `localOffload.models` | No | Local model entries: `{ "id": "...", "aliases": ["..."] }` |
 | `localOffload.baselineModel` | No | A GitHub model id or alias used to estimate savings |

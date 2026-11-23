@@ -58,6 +58,8 @@ gh extension upgrade ledger
 gh ledger daemon start
 ```
 
+**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 6, for `gh ledger import`, the first time its daemon or any command opens it. To keep the option of going back to an earlier version, copy `ledger.db` while the daemon is stopped, before you upgrade.
+
 ## The daemon
 
 - `gh ledger daemon run [--port <port>] [--log-file <path>]` runs the receiver in the foreground. It logs to standard output, or appends to `--log-file`.
@@ -65,6 +67,123 @@ gh ledger daemon start
 - `gh ledger daemon stop` asks the daemon to stop, waits up to 15 seconds, and then ends its process if it's still running.
 
 The port defaults to 4318. Only one daemon runs at a time. Copilot's telemetry is lost while no daemon is running.
+
+## Import past sessions
+
+`gh ledger import` records requests from the session logs that Copilot CLI and the GitHub Copilot app keep on your machine, and from Codex's if you ask, such as the requests made before you installed gh-ledger or while its daemon wasn't running. It reads only the metadata listed in [What import reads and keeps](#what-import-reads-and-keeps), prices each request with the rates in use as of the request's start time (see [Imported requests](configuration.md#imported-requests)), and records it with the Git context its log recorded, as the daemon records a live request. For a walkthrough, see [Backfill history after installing](guide.md#backfill-history-after-installing).
+
+```text
+gh ledger import (--repo <path> | --all) [--source copilot|codex]... [--since <period>] [--dry-run] [--include-active] [--json]
+```
+
+- `--repo <path>` imports only requests made in the Git repository at `<path>`, a working-tree path such as `.`, unlike the reports' repository key. A session is in the repository when the repository root it recorded is that repository's root, or, when it recorded none, when its working directory is inside it. `--all` imports requests from every repository and from outside any. Use one of the two.
+- `--source copilot`, the default, reads Copilot's session logs, `session-state/<session>/events.jsonl` under `~/.copilot`, or under `COPILOT_HOME` when it's set. `--source codex` reads Codex's rollouts under `sessions` and `archived_sessions` in `~/.codex`, or in `CODEX_HOME` when it's set. Repeat `--source` to read both. `--source claude` is refused: Claude Code's session-log format is internal and undocumented, so gh-ledger doesn't read it.
+- `--since` takes the reports' periods and defaults to `all`. Logs last written before the period starts aren't read, and requests that started before it aren't recorded.
+- `--dry-run` reads the logs and reports what the import would record. It never creates, upgrades, or writes the ledger.
+- `--include-active` also reads Copilot sessions that are still open, which have an `inuse.*.lock` file in their folder. Without it, they're skipped, and you can import them after they end.
+- `--json` writes the report as JSON.
+
+| Source | Versions read | Not imported |
+|---|---|---|
+| Copilot CLI and the GitHub Copilot app | 1.0.103 to 1.0.114, by `copilotVersion` in the session's first event | Sessions that an earlier version started, which log only session totals, even when a supported version resumed them; sessions of later versions, until gh-ledger supports them; a session's earlier journal files |
+| Codex | 0.153.0 to 0.171.0, by `cli_version` | Compressed rollouts (`.jsonl.zst`); tool calls, whose outcome Codex doesn't log; and the requests of another thread that a forked rollout copied |
+
+### Overlap with live spans
+
+Every call is charged once, and live spans win. Requests are never matched by time, model, or token counts:
+
+- A request that GitHub billed carries a service request ID, and so does a compaction, the request that summarizes a long conversation. The live span of the same call carries the same ID, as `github.copilot.service_request_id`. An imported request whose ID a live span has isn't recorded (`Overlap-skipped`), and neither is one whose ID an imported request already has, such as a request in a copy of a session that the GitHub Copilot app made (`Duplicate`).
+- A Copilot BYOK request and a Codex request have no such ID. They're recorded only from sessions that have no live spans. In a session with live spans, they're deferred (`Ambiguous-overlap`).
+- A session's live spans without a service request ID, such as the spans an earlier gh-ledger recorded, can't be matched to anything, so every imported request of that session is deferred.
+- A live span that arrives after its request was imported supersedes the imported row, in the same transaction: the imported row stays in the ledger but no longer counts in any report, MCP tool, budget, or circuit-breaker rule. A live span without a service request ID supersedes every imported row of its session, and any live span supersedes the imported rows of its session that have no ID.
+
+Importing again records nothing twice. A log that was imported completely is skipped while its size and last-write time stay the same. Any other log is read again, and the requests recorded from it before count as `Duplicate`. An import stopped by Ctrl+C or an error keeps the requests it recorded, and running it again completes it.
+
+### The import report
+
+The table has a column for each source:
+
+| Row | What it counts |
+|---|---|
+| Sessions scanned | Logs found |
+| Skipped, unchanged | Logs imported completely before, and unchanged since |
+| Skipped, active | Open Copilot sessions, without `--include-active` |
+| Skipped, out of scope | Logs last written before `--since` |
+| Unsupported sessions | Logs that weren't read: an unsupported or unreadable version, another format, a compressed rollout, or a file that couldn't be opened |
+| Records parsed | Usage records in the logs that were read |
+| Out of scope | Requests from another repository, with `--repo`, or from before `--since` |
+| Recorded | Requests recorded |
+| Duplicate | Requests recorded before |
+| Overlap-skipped | Requests that live spans recorded |
+| Ambiguous-overlap | Requests deferred because their session's live spans can't be matched to them |
+| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete |
+| Unsupported usage shapes | Usage records with a missing or invalid field |
+| Cost out of range | Requests whose cost is beyond the ledger's range of about $9.2 million |
+| Unpriced | Recorded requests without a price; see [Pricing statuses](configuration.md#pricing-statuses) |
+| Coverage | `complete`, or `incomplete` when a log or record that may hold requests wasn't imported |
+
+The next line totals the recorded requests' AI credits, GitHub USD, and API-equivalent USD, with the marks of [API-equivalent USD](#api-equivalent-usd); a line with Foundry BYOK USD and local savings follows when either isn't zero. A dry run says what the import would record. Warnings on standard error name the source, the session or rollout, and the line and byte where each problem first occurred, and nothing else from the log; after 20, the rest are counted.
+
+`--json` writes no warnings; it lists them as `diagnostics`. Its fields are `dryRun`, `period`, `from`, `repository` (the `owner/repo` slug, or the root when the repository has none) and `repositoryRoot` (both `null` with `--all`), `coverage`, and:
+
+- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
+- `totals`: `recorded` and the same amounts over every source.
+- `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Every source's coverage is complete. |
+| 2 | The import finished, but some coverage is incomplete; the warnings say why. Everything that could be imported was. |
+| 1 | The options are invalid, or an error stopped the import. |
+
+Skipped active, unchanged, and out-of-scope logs don't make coverage incomplete. When the only gap is sessions from before Copilot 1.0.103, the report's last line suggests `--since`, which leaves them out. With `--repo`, logs of other repositories are read again on every run, because they may hold requests of this one.
+
+Imported requests count in every report and MCP tool, as live ones do, with the branch their log recorded. Tool calls are imported only from the last 7 days, as long as the ledger keeps tool calls; an older request keeps only the number of tool calls it made. Imported requests have no agent-invocation span, so `status --cache --turns` shows their `Growth` as `n/a`, and the input-growth ranking of `--bloat` leaves them out. `import` warns when the daemon runs another gh-ledger version: restart the daemon, so that the live spans it records supersede imported rows by this version's rules.
+
+### What import reads and keeps
+
+These are the only fields import keeps, and where each comes from. Fields in no column are never stored.
+
+<!-- import-allowlist -->
+| Ledger column | Copilot session log | Codex rollout |
+|---|---|---|
+| `spans.ingest_source` | `import:copilot` | `import:codex` |
+| `spans.trace_id` | SHA-256 of the session ID and the usage ID (`data.usage.accounting.usageId`) of the prompt's first request, which `data.usage.initiator` `user` marks | SHA-256 of the session ID and `payload.root_turn_id`, or `payload.turn_id` |
+| `spans.span_id` | SHA-256 of the session ID and `data.usage.accounting.usageId`, or a compaction's `data.serviceRequestId` | SHA-256 of the session ID and `payload.response_id` |
+| `spans.operation_name` | `chat` | `chat` |
+| `spans.conversation_id` | The session ID, `data.sessionId` of `session.start` | `payload.session_id` of `session_meta` |
+| `spans.agent_name` | `data.agentName` of the `subagent.started` event that the record's `agentId`, or its `data.usage.parentToolCallId`, names | `payload.agent_role` of `session_meta` |
+| `spans.provider_name` | `github`; for BYOK, `data.usage.providerType` in lowercase | `payload.model_provider` of `session_meta` in lowercase, with `lmstudio` as `lm_studio` |
+| `spans.request_model` | `data.usage.model`; for a compaction, `data.compactionTokensUsed.model` | `payload.model` of the turn's `turn_context` |
+| `spans.response_model` | `data.usage.responseModel` | — |
+| `spans.start_time_unix_ms`, `spans.end_time_unix_ms` | The event's `timestamp` less `data.usage.duration` (`data.compactionTokensUsed.duration`), and the `timestamp` | `timestamp` |
+| `spans.input_tokens`, `spans.output_tokens`, `spans.cache_read_input_tokens`, `spans.cache_write_input_tokens` | `data.usage.inputTokens`, `outputTokens`, `cacheReadTokens`, and `cacheWriteTokens` (under `data.compactionTokensUsed` for a compaction) | `payload.usage.input_tokens`, `output_tokens`, `cached_input_tokens`, and `cache_write_input_tokens` (0 when absent) |
+| `spans.cache_read_state`, `spans.cache_write_state` | `data.usage.cacheDetailsReported`, or a count above 0; reported for a compaction | Reported; cache writes only when `cache_write_input_tokens` is present |
+| `spans.repo_root` | `data.context.gitRoot` of `session.start`, or of the latest `session.resume` | — |
+| `spans.repo_slug` | `data.context.repository`: an `owner/repo` slug, or the slug of a remote URL, credentials removed | The slug of `payload.git.repository_url`, credentials removed |
+| `spans.branch_name`, `spans.head_commit_sha` | `data.context.branch` and `data.context.headCommit` | `payload.git.branch` and `payload.git.commit_hash` |
+| `spans.canonical_usage_id` | SHA-256 of `data.usage.serviceRequestId`, or of a compaction's `data.serviceRequestId`; none for BYOK | — |
+| `spans.imported_tool_call_count` | `data.usage.numToolCalls` | — |
+| `spans.model_id`, `spans.rate_card_model_id`, `spans.tier_name`, `spans.billing_channel`, `spans.pricing_status`, `spans.rates_version`, `spans.cost_usd_pico`, `spans.saved_usd_pico`, `spans.api_equivalent_usd_pico`, `spans.api_equivalent_status`, `spans.api_rate_card_model_id`, `spans.api_rates_version`, `spans.api_rate_card_sha256` | Priced from the fields above, as for live spans | Priced from the fields above, as for live spans |
+| `spans.id`, `spans.recorded_at_unix_ms`, `spans.accounting_state`, `spans.superseded_by` | Kept by the ledger | Kept by the ledger |
+| `span_links.trace_id`, `span_links.conversation_id`, `span_links.owner_span_row_id` | The usage record whose response asked for the tool: the latest one of the tool's agent | — |
+| `span_links.span_id` | SHA-256 of the session ID and `data.toolCallId` | — |
+| `span_links.operation_name` | `execute_tool` | — |
+| `span_links.agent_name` | As `spans.agent_name`, from the tool's `agentId` or `data.parentToolCallId` | — |
+| `span_links.start_time_unix_ms`, `span_links.tool_name` | `timestamp` and `data.toolName` of `tool.execution_start` | — |
+| `span_links.tool_exit_code`, `span_links.status_code` | `data.shellExecution.exitCode` and `data.success` of `tool.execution_complete` | — |
+| `span_links.recorded_at_unix_ms` | Kept by the ledger | — |
+| `import_sessions.source`, `import_sessions.log_id` | `copilot`, and the session folder's name | `codex`, and the IDs in the rollout's file name, after `archived/` for an archived rollout |
+| `import_sessions.log_size_bytes`, `import_sessions.log_last_write_unix_ms` | The log file's size and last-write time | The rollout file's size and last-write time |
+| `import_sessions.complete`, `import_sessions.records_recorded`, `import_sessions.records_duplicate`, `import_sessions.records_overlap`, `import_sessions.records_ambiguous`, `import_sessions.imported_at_unix_ms` | The import's own results | The import's own results |
+| `import_record_aliases.source`, `import_record_aliases.record_key_sha256` | `copilot`, and SHA-256 of the record's usage ID, or of a compaction's service request ID | `codex`, and SHA-256 of `payload.response_id` |
+| `import_record_aliases.span_row_id`, `import_record_aliases.resolution`, `import_record_aliases.recorded_at_unix_ms` | Kept by the ledger | Kept by the ledger |
+<!-- /import-allowlist -->
+
+Imported rows leave `parent_span_id`, `server_address`, `server_port`, `pull_request_number`, and `agent_span_id` of `spans` empty, and imported tool calls leave `parent_span_id`, `git_repository_slug`, `git_branch`, and `git_commit_sha` of `span_links` empty.
+
+- **Read, never stored:** each line's `type`. From Copilot logs: `data.producer`, `data.version`, and `data.copilotVersion` of `session.start`; the working directory, `data.context.cwd`, which only `--repo` uses; each event's `agentId`; `data.usage.isByok`, `data.usage.provider.kind`, `data.usage.initiator`, and `data.usage.parentToolCallId` of usage records; and `data.success`, `data.compactionTokensUsed.requestCount`, and `data.compactionTokensUsed.provider.kind` of compactions, which decide how a record is read. Usage IDs, service request IDs, and tool call IDs are stored only as the SHA-256 hashes above. From Codex rollouts: `payload.id` (the thread ID), `payload.cli_version`, and `payload.cwd` of `session_meta`, and `payload.thread_id`, `payload.turn_id`, and `payload.root_turn_id` of `token_usage_record`.
+- **Never read:** every other field and event, including user and assistant messages, reasoning, tool arguments and results, error messages, compaction summaries (`summaryContent`) and checkpoint paths, instructions, and attachments. Import skips a line as soon as its `type` shows it's none of the events above, and it counts a line that isn't valid JSON without echoing it. Logs are read in place, never copied.
 
 ## Reports
 
@@ -202,12 +321,14 @@ See [configuration.md](configuration.md) for pricing, the overlay format, and wh
 
 ## Privacy
 
-CopilotLedger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped.
+CopilotLedger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped. `gh ledger import` keeps only the fields in [What import reads and keeps](#what-import-reads-and-keeps), and never reads prompts, responses, tool arguments or results, or compaction summaries.
 
 ## Troubleshooting
 
 - **Nothing is recorded.** Run `gh ledger status`, address its warnings, and restart Copilot.
-- **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example because the disk is full or the database is damaged, and Copilot is told to retry. The warning repeats at most once a minute; fix the cause shown after it.
+- **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example because the disk is full or the database is damaged, and Copilot is told to retry. The warning repeats at most once a minute; fix the cause shown after it. Only database and file errors show their message; any other error shows only its type, because its message could quote the request.
+- **`gh ledger import` exits with code 2.** Some coverage is incomplete, and the warnings say why; everything else was imported. A session from before Copilot 1.0.103 is never imported, so leave it out with `--since`. A malformed line or an unsupported usage record is skipped on every run, and the rest of its log is imported.
+- **`gh ledger import` defers requests (`Ambiguous-overlap`).** Their session has live spans that can't be matched to them, such as spans an earlier gh-ledger recorded, so import leaves them out rather than risk charging a request twice. The live spans still count.
 - **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
 - **`gh extension upgrade` or `remove` fails on Windows.** A program is running the extension's binary: the daemon, or the MCP server of a Copilot session. Run `gh ledger daemon stop`, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code, then try again.
 - **Apps started from the desktop record nothing.** On macOS and Linux, apps started outside a terminal may not read your shell profile, so they don't see `COPILOT_OTEL_ENABLED`. Start them from a terminal.
