@@ -30,6 +30,18 @@ internal static class ReportCommands
         new("Local saved", true),
     ];
 
+    private static readonly TableColumn[] CacheColumns =
+    [
+        new("Spans", true),
+        new("Cache reported", true),
+        new("Input", true),
+        new("Cache read", true),
+        new("Cache write", true),
+        new("Uncached", true),
+        new("Output", true),
+        new("Hit %", true),
+    ];
+
     public static IEnumerable<Command> Create(CliContext context)
     {
         yield return CreateStatus(context);
@@ -40,12 +52,75 @@ internal static class ReportCommands
 
     private static Command CreateStatus(CliContext context)
     {
-        Command command = new("status", "Show daemon, configuration, and recent spend.");
+        Command command = new("status", "Show daemon, configuration, and recent spend, or prompt-cache efficiency.");
         Option<bool> json = JsonOption();
+        Option<bool> cache = new("--cache")
+        {
+            Description = "Report prompt-cache efficiency instead.",
+        };
+        Option<string> by = new("--by")
+        {
+            Description = "Group --cache rows by model, branch, pr, or agent.",
+            DefaultValueFactory = _ => "model",
+        };
+        by.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<string>() is not ("model" or "branch" or "pr" or "agent"))
+            {
+                result.AddError("--by must be model, branch, pr, or agent.");
+            }
+        });
+        Option<string?> repository = RepositoryOption();
+        Option<string?> branch = new("--branch")
+        {
+            Description = "Limit --cache to this branch, or (none).",
+        };
+        Option<int?> pullRequest = new("--pr")
+        {
+            Description = "Limit --cache to this pull request number.",
+        };
+        pullRequest.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<int?>() is < 1)
+            {
+                result.AddError("--pr must be a positive integer.");
+            }
+        });
+        Option<string> since = SinceOption(context);
         command.Add(json);
+        command.Add(cache);
+        command.Add(by);
+        command.Add(repository);
+        command.Add(branch);
+        command.Add(pullRequest);
+        command.Add(since);
+        command.Validators.Add(result =>
+        {
+            string[] given = new Option[] { by, repository, branch, pullRequest, since }
+                .Where(option => result.GetResult(option) is { Implicit: false })
+                .Select(option => option.Name)
+                .ToArray();
+            if (!result.GetValue(cache) && given.Length > 0)
+            {
+                result.AddError($"{given[0]} requires --cache.");
+            }
+        });
         command.SetAction(
             (ParseResult result, CancellationToken cancellationToken) =>
-                StatusAsync(context, result.GetValue(json), cancellationToken));
+                !result.GetValue(cache)
+                    ? StatusAsync(context, result.GetValue(json), cancellationToken)
+                    : CacheAsync(
+                        context,
+                        result.GetValue(by)!,
+                        new LedgerFilter
+                        {
+                            Repository = result.GetValue(repository),
+                            Branch = result.GetValue(branch),
+                            PullRequestNumber = result.GetValue(pullRequest),
+                        },
+                        ParsePeriod(context, result.GetValue(since)),
+                        result.GetValue(json),
+                        cancellationToken));
         return command;
     }
 
@@ -423,6 +498,82 @@ internal static class ReportCommands
         return 0;
     }
 
+    private static async Task<int> CacheAsync(
+        CliContext context,
+        string by,
+        LedgerFilter filter,
+        Period period,
+        bool json,
+        CancellationToken cancellationToken)
+    {
+        LedgerGrouping grouping = by switch
+        {
+            "branch" => LedgerGrouping.Branch,
+            "pr" => LedgerGrouping.PullRequest,
+            "agent" => LedgerGrouping.Agent,
+            _ => LedgerGrouping.Model,
+        };
+        SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
+        await store.InitializeAsync(cancellationToken);
+        IReadOnlyList<CacheEfficiencyRow> rows = await store.GetCacheEfficiencyAsync(
+            grouping,
+            filter with { From = period.From },
+            cancellationToken);
+        if (json)
+        {
+            WriteCacheJson(context, period, by, filter, rows);
+            return 0;
+        }
+
+        string scope = Scope(filter);
+        if (rows.Count == 0)
+        {
+            context.Out.WriteLine($"No spans recorded in {scope} ({period.Label}).");
+            return 0;
+        }
+
+        context.Out.WriteLine(
+            $"Cache efficiency by {(by == "pr" ? "pull request" : by)} in {scope} ({period.Label})");
+        context.Out.WriteLine();
+        bool repositoryColumn = filter.Repository is null
+            && grouping is LedgerGrouping.Branch or LedgerGrouping.PullRequest;
+        TableColumn[] leading = grouping switch
+        {
+            LedgerGrouping.Model => [new("Model", false)],
+            LedgerGrouping.Agent => [new("Agent", false)],
+            LedgerGrouping.Branch => repositoryColumn
+                ? [new("Repository", false), new("Branch", false)]
+                : [new("Branch", false)],
+            _ => repositoryColumn
+                ? [new("Repository", false), new("Pull request", false)]
+                : [new("Pull request", false)],
+        };
+        IReadOnlyList<IReadOnlyList<string>> tableRows = rows.Select(row =>
+        {
+            string key = grouping switch
+            {
+                LedgerGrouping.Model => row.Model!,
+                LedgerGrouping.Agent => row.Agent!,
+                LedgerGrouping.Branch => row.Branch!,
+                _ => row.PullRequestNumber is int number
+                    ? "#" + number.ToString(CultureInfo.InvariantCulture)
+                    : $"(no PR) {row.Branch}",
+            };
+            string[] identifiers = repositoryColumn ? [row.Repository!, key] : [key];
+            return (IReadOnlyList<string>)[.. identifiers, .. CacheCells(row)];
+        }).ToArray();
+        TableWriter.Write(context.Out, [.. leading, .. CacheColumns], tableRows);
+        long unreported = rows.Sum(row => row.CacheUnreportedSpanCount);
+        if (unreported > 0)
+        {
+            context.Out.WriteLine();
+            context.Out.WriteLine(
+                $"{LedgerFormat.Count(unreported)} of {Spans(rows.Sum(row => row.SpanCount))} reported no cache counters. Hit % and the cache columns leave them out; * marks a partial total.");
+        }
+
+        return 0;
+    }
+
     private static void WriteStatusJson(
         CliContext context,
         bool running,
@@ -616,6 +767,66 @@ internal static class ReportCommands
         context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
     }
 
+    private static void WriteCacheJson(
+        CliContext context,
+        Period period,
+        string by,
+        LedgerFilter filter,
+        IReadOnlyList<CacheEfficiencyRow> rows)
+    {
+        using MemoryStream stream = new();
+        using Utf8JsonWriter writer = new(stream, JsonOptions);
+        writer.WriteStartObject();
+        writer.WriteString("period", period.Label);
+        LedgerFormat.WriteTime(writer, "from", period.From);
+        writer.WriteString("by", by);
+        LedgerFormat.WriteNullable(writer, "repository", filter.Repository);
+        LedgerFormat.WriteNullable(writer, "branch", filter.Branch);
+        LedgerFormat.WriteNullable(writer, "pullRequest", filter.PullRequestNumber);
+        writer.WriteStartArray("rows");
+        foreach (CacheEfficiencyRow row in rows)
+        {
+            writer.WriteStartObject();
+            switch (by)
+            {
+                case "model":
+                    writer.WriteString("model", row.Model);
+                    break;
+                case "agent":
+                    writer.WriteString("agent", row.Agent);
+                    break;
+                case "branch":
+                    writer.WriteString("repository", row.Repository);
+                    writer.WriteString("branch", row.Branch);
+                    break;
+                default:
+                    writer.WriteString("repository", row.Repository);
+                    LedgerFormat.WriteNullable(writer, "pullRequest", row.PullRequestNumber);
+                    LedgerFormat.WriteNullable(writer, "branch", row.Branch);
+                    break;
+            }
+
+            writer.WriteNumber("spans", row.SpanCount);
+            writer.WriteNumber("cacheReportedSpans", row.CacheReportedSpanCount);
+            writer.WriteNumber("cacheUnreportedSpans", row.CacheUnreportedSpanCount);
+            writer.WriteNumber("inputTokens", row.InputTokens);
+            writer.WriteNumber("outputTokens", row.OutputTokens);
+            writer.WriteNumber("maxInputTokens", row.MaxInputTokens);
+            LedgerFormat.WriteDecimal(writer, "averageInputTokensPerTurn", row.AverageInputTokensPerTurn);
+            writer.WriteNumber("reportedInputTokens", row.ReportedInputTokens);
+            writer.WriteNumber("reportedCacheReadInputTokens", row.ReportedCacheReadInputTokens);
+            writer.WriteNumber("reportedCacheWriteInputTokens", row.ReportedCacheWriteInputTokens);
+            LedgerFormat.WriteNullable(writer, "uncachedInputTokens", row.UncachedInputTokens);
+            writer.WriteNumber("estimatedUncachedInputTokens", row.EstimatedUncachedInputTokens);
+            LedgerFormat.WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        context.Out.WriteLine(LedgerFormat.FinishJson(writer, stream));
+    }
+
     private static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
         new()
         {
@@ -644,6 +855,31 @@ internal static class ReportCommands
         LedgerFormat.Usd(row.FoundryByokUsd),
         LedgerFormat.Usd(row.LocalSavedUsd),
     ];
+
+    private static string[] CacheCells(CacheEfficiencyRow row) =>
+    [
+        LedgerFormat.Count(row.SpanCount),
+        LedgerFormat.Count(row.CacheReportedSpanCount),
+        LedgerFormat.Count(row.InputTokens),
+        Observed(row, row.ReportedCacheReadInputTokens),
+        Observed(row, row.ReportedCacheWriteInputTokens),
+        Observed(row, row.ReportedUncachedInputTokens),
+        LedgerFormat.Count(row.OutputTokens),
+        LedgerFormat.Percent(row.CacheHitRatio),
+    ];
+
+    // A total over the spans that reported cache usage: n/a when none did, and marked * when only some did.
+    private static string Observed(CacheEfficiencyRow row, long value) =>
+        row.CacheReportedSpanCount == 0
+            ? "n/a"
+            : LedgerFormat.Count(value) + (row.CacheUnreportedSpanCount > 0 ? "*" : string.Empty);
+
+    private static string Scope(LedgerFilter filter) =>
+        (filter.Repository ?? "all repositories")
+        + (filter.Branch is null ? string.Empty : $", branch {filter.Branch}")
+        + (filter.PullRequestNumber is int number
+            ? ", pull request #" + number.ToString(CultureInfo.InvariantCulture)
+            : string.Empty);
 
     private static string Joined(IReadOnlyList<string> values) =>
         values.Count == 0 ? "-" : string.Join(", ", values);

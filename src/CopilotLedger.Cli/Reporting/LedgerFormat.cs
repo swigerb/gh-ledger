@@ -69,6 +69,34 @@ internal static class LedgerFormat
             value.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
     }
 
+    public static void WriteNullable(
+        Utf8JsonWriter writer,
+        string name,
+        string? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNull(name);
+            return;
+        }
+
+        writer.WriteString(name, value);
+    }
+
+    public static void WriteNullable(
+        Utf8JsonWriter writer,
+        string name,
+        long? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNull(name);
+            return;
+        }
+
+        writer.WriteNumber(name, value.Value);
+    }
+
     public static void WriteTotals(
         Utf8JsonWriter writer,
         LedgerRollupRow row)
