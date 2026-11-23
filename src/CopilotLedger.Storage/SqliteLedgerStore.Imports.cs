@@ -176,7 +176,7 @@ public sealed partial class SqliteLedgerStore
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static void ValidateImportedEntry(ImportedLedgerEntry entry, string parameterName)
+    internal static void ValidateImportedEntry(ImportedLedgerEntry entry, string parameterName)
     {
         ArgumentNullException.ThrowIfNull(entry, parameterName);
         if (entry.Source is not (ImportSourceKind.Copilot or ImportSourceKind.Codex))
