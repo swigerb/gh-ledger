@@ -36,6 +36,7 @@ public static class ReceiptMarkdown
             writer.WriteString("commit", receipt.Commit);
             LedgerFormat.WriteTime(writer, "generatedAt", receipt.GeneratedAt);
             writer.WriteString("generator", $"gh-ledger {GhLedgerCli.Version}");
+            receipt.Pricing?.Write(writer, fileNameOnly: true);
             writer.WritePropertyName("totals");
             writer.WriteStartObject();
             LedgerFormat.WriteTotals(writer, receipt.Totals);
@@ -238,8 +239,8 @@ public static class ReceiptMarkdown
     };
 
     // The receipt's API-equivalent line: none without spans, and Unpriced when no turn has an API-equivalent price. Otherwise
-    // the amount at API list prices, then the turns it leaves out and the turns that make it an estimate, in words rather than
-    // the report marks, because * and ~ are Markdown syntax.
+    // the amount at API list prices, or at the --pricing file's prices, then the turns it leaves out and the turns that make it
+    // an estimate, in words rather than the report marks, because * and ~ are Markdown syntax.
     private static string ApiEquivalentSummary(PullRequestReceipt receipt)
     {
         LedgerRollupRow totals = receipt.Totals;
@@ -254,7 +255,10 @@ public static class ReceiptMarkdown
         }
 
         StringBuilder line = new();
-        line.Append(LedgerFormat.Usd(usd)).Append(" at API list prices");
+        line.Append(LedgerFormat.Usd(usd)).Append(
+            receipt.Pricing is null
+                ? " at API list prices"
+                : $" at what-if prices from {Code(Path.GetFileName(receipt.Pricing.Path))}, ratesVersion {Code(receipt.Pricing.Calculator.RatesVersion)}");
         if (totals.ApiEquivalentUnpricedSpanCount > 0)
         {
             line.Append(" • ").Append(Plural(totals.ApiEquivalentUnpricedSpanCount, "turn", "turns")).Append(" unpriced");

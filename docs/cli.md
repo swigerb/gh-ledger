@@ -70,10 +70,10 @@ The port defaults to 4318. Only one daemon runs at a time. Copilot's telemetry i
 
 | Command | Reports |
 |---|---|
-| `gh ledger status [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals, billed amounts compared with API list prices, and cache hit ratios for today and the last 7 and 30 days |
-| `gh ledger branch [--repo <key> \| --all-repos] [--since <period>] [--json]` | Spend by branch in the current repository, or in another or every repository; outside a Git repository, every repository |
-| `gh ledger agents [--repo <key>] [--since <period>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
-| `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
+| `gh ledger status [--pricing <path>] [--json]` | The daemon, ledger, rates, Copilot's export setting, warnings, and totals, billed amounts compared with API list prices, and cache hit ratios for today and the last 7 and 30 days |
+| `gh ledger branch [--repo <key> \| --all-repos] [--since <period>] [--pricing <path>] [--json]` | Spend by branch in the current repository, or in another or every repository; outside a Git repository, every repository |
+| `gh ledger agents [--repo <key>] [--since <period>] [--pricing <path>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
+| `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--pricing <path>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
 | `gh ledger status --cache ...` | Prompt-cache efficiency; see [Prompt-cache efficiency](#prompt-cache-efficiency) |
 
 - A repository key is an `owner/repo` slug, a local repository root for a repository whose `origin` has no `owner/repo` path, or `(none)` for spend outside any repository.
@@ -97,6 +97,8 @@ In JSON, amounts are exact. The names follow the other fields: GitHub AI credits
 
 - `status --json` periods, rows of `branch --json` and `agents --json`, and rows of `top-prompts --json` add, after `localSavedUsd`: `apiEquivalentUsd` (`null` when no request has an API-equivalent price), `apiEquivalentUnpricedSpans` (the requests without one), and `apiEquivalentEstimatedSpans` (priced requests that reported no cache counters).
 - `status --json` periods also add `lenses`, before `cache`. `lenses.copilot` covers the GitHub-billed requests: `spans`, `unpricedSpans`, `aiCredits`, `aiCreditsUsd`, the three API-equivalent fields, and `billedToApiRatio`, the exact `GitHub/API` ratio or `null`. `lenses.local` covers the local requests: `spans`, `localSavedUsd`, and the three API-equivalent fields.
+
+`--pricing <path>` prices the API-equivalent amounts with a complete rates file instead of the results recorded with each request, for example a price list your company negotiated, and changes nothing else; see [Compare with other prices](configuration.md#compare-with-other-prices---pricing). The report's second line, or the line after `Rates:` in `status`, names the file, and the JSON adds `pricingSource`: `kind` (`whatIf`), `path`, `ratesVersion`, and `apiRateCardSha256`, after `repository`, or after `ratesError` in `status`. `--pricing` can't be used with `--cache`. A file that can't be used stops the command with `Invalid pricing file:` and the problem.
 
 ## Prompt-cache efficiency
 
@@ -157,6 +159,7 @@ The `API-equivalent (retail)` line and column compare the same turns with API li
 
 - `--stdout` writes the Markdown to standard output instead of the file.
 - `--json` writes the JSON data to standard output instead of the file.
+- `--pricing <path>` prices the API-equivalent line and column with another rates file, as the reports do. The receipt names the file and its `ratesVersion` but not its folder, and the JSON adds `pricingSource` after `generator`.
 
 `export-pr` needs a branch with at least one commit and a GitHub remote named `origin`, and it refuses a receipt over 65,536 bytes, the most the action posts.
 
@@ -189,7 +192,7 @@ The first four are read-only. `set_branch_budget` changes only the budget, so Co
 ## Rates
 
 - `gh ledger rates init [--force]` creates a starter rates overlay, `rates.json` in the data directory.
-- `gh ledger rates validate [--file <path>]` checks the overlay, or another file, with the same rules the daemon uses.
+- `gh ledger rates validate [--file <path> | --pricing <path>]` checks the overlay, or another file, with the same rules the daemon uses. With `--pricing`, it checks a complete rates file the way the reports' `--pricing` does.
 - `gh ledger rates update` downloads `rates.v2.json` from the latest gh-ledger release, or its `rates.json` if it has none, and keeps it when it's newer than the rates in use, has API list prices (`schemaVersion` 2), and your overlay still applies. It uses your system proxy. Restart the daemon afterward; it reads rates when it starts.
 - `gh ledger rates backfill-api-equivalent [--dry-run]` gives the requests recorded before gh-ledger had API list prices their API-equivalent prices, with the rates in use, and prints how many were priced. It changes nothing else, and `--dry-run` writes nothing. See [API-equivalent prices](configuration.md#api-equivalent-prices).
 

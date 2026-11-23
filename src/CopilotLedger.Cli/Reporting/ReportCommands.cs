@@ -144,8 +144,16 @@ internal static class ReportCommands
         command.Add(conversation);
         command.Add(bloat);
         command.Add(limit);
+        Option<string?> pricing = WhatIfPricing.CreateOption();
+        command.Add(pricing);
         command.Validators.Add(result =>
         {
+            if (result.GetValue(cache) && result.GetResult(pricing) is { Implicit: false })
+            {
+                result.AddError("--pricing can't be used with --cache.");
+                return;
+            }
+
             string[] given = new Option[] { by, repository, branch, pullRequest, since, turns, trace, conversation, bloat, limit }
                 .Where(option => result.GetResult(option) is { Implicit: false })
                 .Select(option => option.Name)
@@ -197,7 +205,7 @@ internal static class ReportCommands
         command.SetAction(
             (ParseResult result, CancellationToken cancellationToken) =>
                 !result.GetValue(cache)
-                    ? StatusAsync(context, result.GetValue(json), cancellationToken)
+                    ? StatusAsync(context, result.GetValue(json), result.GetValue(pricing), cancellationToken)
                     : result.GetValue(turns)
                         ? TurnsAsync(
                             context,
@@ -239,10 +247,12 @@ internal static class ReportCommands
         };
         Option<string> since = SinceOption(context);
         Option<bool> json = JsonOption();
+        Option<string?> pricing = WhatIfPricing.CreateOption();
         command.Add(repository);
         command.Add(allRepositories);
         command.Add(since);
         command.Add(json);
+        command.Add(pricing);
         command.Validators.Add(result =>
         {
             if (result.GetValue(repository) is not null && result.GetValue(allRepositories))
@@ -258,6 +268,7 @@ internal static class ReportCommands
                     result.GetValue(allRepositories),
                     ParsePeriod(context, result.GetValue(since)),
                     result.GetValue(json),
+                    result.GetValue(pricing),
                     cancellationToken));
         return command;
     }
@@ -268,9 +279,11 @@ internal static class ReportCommands
         Option<string?> repository = RepositoryOption();
         Option<string> since = SinceOption(context);
         Option<bool> json = JsonOption();
+        Option<string?> pricing = WhatIfPricing.CreateOption();
         command.Add(repository);
         command.Add(since);
         command.Add(json);
+        command.Add(pricing);
         command.SetAction(
             (ParseResult result, CancellationToken cancellationToken) =>
                 RollupAsync(
@@ -279,6 +292,7 @@ internal static class ReportCommands
                     result.GetValue(repository),
                     ParsePeriod(context, result.GetValue(since)),
                     result.GetValue(json),
+                    result.GetValue(pricing),
                     cancellationToken));
         return command;
     }
@@ -302,10 +316,12 @@ internal static class ReportCommands
             }
         });
         Option<bool> json = JsonOption();
+        Option<string?> pricing = WhatIfPricing.CreateOption();
         command.Add(repository);
         command.Add(since);
         command.Add(limit);
         command.Add(json);
+        command.Add(pricing);
         command.SetAction(
             (ParseResult result, CancellationToken cancellationToken) =>
                 TopPromptsAsync(
@@ -314,6 +330,7 @@ internal static class ReportCommands
                     ParsePeriod(context, result.GetValue(since)),
                     result.GetValue(limit),
                     result.GetValue(json),
+                    result.GetValue(pricing),
                     cancellationToken));
         return command;
     }
@@ -321,8 +338,14 @@ internal static class ReportCommands
     private static async Task<int> StatusAsync(
         CliContext context,
         bool json,
+        string? pricingFile,
         CancellationToken cancellationToken)
     {
+        if (!TryLoadPricing(context, pricingFile, out WhatIfPricing? pricing))
+        {
+            return 1;
+        }
+
         bool running = DaemonFiles.IsHeld(context);
         DaemonState? state = running ? DaemonFiles.TryReadState(context) : null;
         RatesBase rates = RateCardFiles.LoadBase(context);
@@ -378,6 +401,7 @@ internal static class ReportCommands
             IReadOnlyList<LedgerRollupRow> rows = await store.GetRollupAsync(
                 LedgerGrouping.ChannelModel,
                 new LedgerFilter { From = period.From },
+                pricing?.Calculator,
                 cancellationToken);
             totals.Add((label, period, new StatusTotals(
                 Sum(rows),
@@ -397,7 +421,8 @@ internal static class ReportCommands
                 warnings,
                 totals,
                 extension,
-                rates.DownloadedJson is not null);
+                rates.DownloadedJson is not null,
+                pricing);
             return 0;
         }
 
@@ -408,6 +433,7 @@ internal static class ReportCommands
         context.Out.WriteLine($"Ledger:  {context.DatabasePath}");
         context.Out.WriteLine(
             $"Rates:   {(ratesError is not null ? $"invalid overlay: {ratesError}" : rates.DownloadedJson is null ? ratesVersion : $"{ratesVersion} (downloaded)")}");
+        WritePricingLabel(context, pricing);
         context.Out.WriteLine(
             $"Copilot: {(enabled
                 ? CopilotEnabledLine(lookup)
@@ -476,6 +502,7 @@ internal static class ReportCommands
         bool allRepositories,
         Period period,
         bool json,
+        string? pricingFile,
         CancellationToken cancellationToken)
     {
         string? repository = requestedRepository;
@@ -493,6 +520,7 @@ internal static class ReportCommands
             allRepositories: allRepositories || repository is null,
             period,
             json,
+            pricingFile,
             cancellationToken);
     }
 
@@ -502,6 +530,7 @@ internal static class ReportCommands
         string? repository,
         Period period,
         bool json,
+        string? pricingFile,
         CancellationToken cancellationToken) =>
         await RollupRowsAsync(
             context,
@@ -510,6 +539,7 @@ internal static class ReportCommands
             allRepositories: false,
             period,
             json,
+            pricingFile,
             cancellationToken);
 
     private static async Task<int> RollupRowsAsync(
@@ -519,8 +549,14 @@ internal static class ReportCommands
         bool allRepositories,
         Period period,
         bool json,
+        string? pricingFile,
         CancellationToken cancellationToken)
     {
+        if (!TryLoadPricing(context, pricingFile, out WhatIfPricing? pricing))
+        {
+            return 1;
+        }
+
         SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
         await store.InitializeAsync(cancellationToken);
         IReadOnlyList<LedgerRollupRow> rows = await store.GetRollupAsync(
@@ -530,12 +566,13 @@ internal static class ReportCommands
                 From = period.From,
                 Repository = repository,
             },
+            pricing?.Calculator,
             cancellationToken);
         string scope = repository ?? "all repositories";
 
         if (json)
         {
-            WriteRollupJson(context, period, repository, grouping, rows);
+            WriteRollupJson(context, period, repository, grouping, rows, pricing);
             return 0;
         }
 
@@ -552,6 +589,7 @@ internal static class ReportCommands
         }
 
         context.Out.WriteLine(title);
+        WritePricingLabel(context, pricing);
         context.Out.WriteLine();
         TableColumn[] leading = grouping == LedgerGrouping.Branch && allRepositories
             ? [new("Repository", false), new("Branch", false)]
@@ -584,8 +622,14 @@ internal static class ReportCommands
         Period period,
         int limit,
         bool json,
+        string? pricingFile,
         CancellationToken cancellationToken)
     {
+        if (!TryLoadPricing(context, pricingFile, out WhatIfPricing? pricing))
+        {
+            return 1;
+        }
+
         SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
         await store.InitializeAsync(cancellationToken);
         IReadOnlyList<PromptChainRow> rows = await store.GetTopPromptChainsAsync(
@@ -595,11 +639,12 @@ internal static class ReportCommands
                 Repository = repository,
             },
             limit,
+            pricing?.Calculator,
             cancellationToken);
         string scope = repository ?? "all repositories";
         if (json)
         {
-            WriteTopPromptsJson(context, period, repository, rows);
+            WriteTopPromptsJson(context, period, repository, rows, pricing);
             return 0;
         }
 
@@ -612,6 +657,7 @@ internal static class ReportCommands
         string prompt = rows.Count == 1 ? "prompt" : "prompts";
         context.Out.WriteLine(
             $"Top {rows.Count} {prompt} by cost in {scope} ({period.Label})");
+        WritePricingLabel(context, pricing);
         context.Out.WriteLine();
         TableColumn[] columns =
         [
@@ -958,7 +1004,8 @@ internal static class ReportCommands
         IReadOnlyList<string> warnings,
         IReadOnlyList<(string Label, Period Period, StatusTotals Totals)> totals,
         bool extension,
-        bool downloadedRates)
+        bool downloadedRates,
+        WhatIfPricing? pricing)
     {
         using MemoryStream stream = new();
         using Utf8JsonWriter writer = new(stream, JsonOptions);
@@ -1002,6 +1049,7 @@ internal static class ReportCommands
             writer.WriteString("ratesError", ratesError);
         }
 
+        pricing?.Write(writer);
         writer.WriteBoolean("copilotOtelEnabled", enabled);
         writer.WriteStartArray("warnings");
         foreach (string warning in warnings)
@@ -1066,7 +1114,8 @@ internal static class ReportCommands
         Period period,
         string? repository,
         LedgerGrouping grouping,
-        IReadOnlyList<LedgerRollupRow> rows)
+        IReadOnlyList<LedgerRollupRow> rows,
+        WhatIfPricing? pricing)
     {
         using MemoryStream stream = new();
         using Utf8JsonWriter writer = new(stream, JsonOptions);
@@ -1082,6 +1131,7 @@ internal static class ReportCommands
             writer.WriteString("repository", repository);
         }
 
+        pricing?.Write(writer);
         writer.WriteStartArray("rows");
         foreach (LedgerRollupRow row in rows)
         {
@@ -1111,7 +1161,8 @@ internal static class ReportCommands
         CliContext context,
         Period period,
         string? repository,
-        IReadOnlyList<PromptChainRow> rows)
+        IReadOnlyList<PromptChainRow> rows,
+        WhatIfPricing? pricing)
     {
         using MemoryStream stream = new();
         using Utf8JsonWriter writer = new(stream, JsonOptions);
@@ -1127,6 +1178,7 @@ internal static class ReportCommands
             writer.WriteString("repository", repository);
         }
 
+        pricing?.Write(writer);
         writer.WriteStartArray("rows");
         for (int index = 0; index < rows.Count; index++)
         {
@@ -1540,6 +1592,21 @@ internal static class ReportCommands
     private static Period RequirePeriod(CliContext context, string value) =>
         ParsePeriod(context, value);
 
+    // The --pricing file: false after writing its error when it's invalid; pricing is null without one.
+    private static bool TryLoadPricing(CliContext context, string? file, out WhatIfPricing? pricing)
+    {
+        pricing = file is null ? null : WhatIfPricing.Load(context, file);
+        return file is null || pricing is not null;
+    }
+
+    // The line under a report's title that names the --pricing file.
+    private static void WritePricingLabel(CliContext context, WhatIfPricing? pricing)
+    {
+        if (pricing is not null)
+        {
+            context.Out.WriteLine($"Pricing: {pricing.Label()}, for API-equivalent amounts only");
+        }
+    }
     // GitHub-billed USD (AI credits at $0.01 each) per USD of the same requests at API list prices. null unless both views
     // priced every one of them and the API-equivalent amount isn't 0.
     private static decimal? BilledToApiRatio(LedgerRollupRow copilot) =>

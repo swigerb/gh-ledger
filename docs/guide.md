@@ -129,6 +129,7 @@ fix/login-timeout      1         0      120.00       $1.20     $0.00          $1
 - `AI credits` and `GitHub USD` are what GitHub bills; 1 AI credit is $0.01. `BYOK USD` is what Microsoft Foundry bills you directly, and `Local saved` is what local models saved you. `Unpriced` counts requests that have no price.
 - `API equiv USD` is what the same requests would cost at each model's API list price, for comparison only. It shows `Unpriced` when no request had a list price, `*` when some had none and are left out, such as MAI models and local models, and `~` when it's an estimate because some requests didn't report their cache use. See [API-equivalent prices](configuration.md#api-equivalent-prices).
 - In `status`, the second table compares what GitHub billed with the same requests at API list prices, and local savings with the local requests at API list prices. `GitHub/API` is their ratio, shown only when every GitHub request has both prices.
+- To compare with other prices, such as a price list your company negotiated, add `--pricing <file>` to `status`, `branch`, `agents`, `top-prompts`, or `export-pr`. Only the API-equivalent amounts change; see [Compare with other prices](configuration.md#compare-with-other-prices---pricing).
 - `branch` covers the current repository. Add `--all-repos` for every repository, `--since` for another period, such as `today`, `7d`, `all`, or a date, and `--json` for exact amounts.
 
 ## Find the most expensive prompts

@@ -280,6 +280,18 @@ The `apiEquivalent` section holds API list prices: what a model costs when you c
 - `localBaselineModel` is optional. It names the API-equivalent model whose list prices value local requests, and it must be one of them. Without it, local requests use the list prices of `localOffload.baselineModel`, if it has any.
 - `description` is optional text.
 
+An overlay changes the API-equivalent prices of requests recorded from then on. To see what requests already recorded would cost at other prices, use `--pricing` instead.
+
+### Compare with other prices: `--pricing`
+
+`gh ledger status`, `branch`, `agents`, `top-prompts`, and `export-pr` take `--pricing <path>`, a rates file whose API list prices replace the recorded API-equivalent amounts in that report:
+
+- The file is a complete rates document with `"schemaVersion": 2`, like the built-in rates, not an overlay. It needs every section, and neither your overlay nor downloaded rates apply to it. A release's `rates.v2.json` is a good start.
+- Only the API-equivalent amounts change. AI credits, GitHub USD, BYOK USD, local savings, budgets, and the circuit breaker keep their recorded values, and nothing is written to the ledger.
+- Each request is priced as CopilotLedger would price it with that file when recording it: as of the request's start time, and a local request as the file's local baseline. Requests recorded before gh-ledger had API list prices are priced too.
+- Reports name the file in a `Pricing:` line, and their JSON adds `pricingSource` with its `path`, `ratesVersion`, and `apiRateCardSha256`. A receipt names the file without its folder.
+- `gh ledger rates validate --pricing <path>` checks a file with the same rules and messages.
+
 ## Field reference
 
 Overlay sections:

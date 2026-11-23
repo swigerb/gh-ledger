@@ -37,15 +37,30 @@ internal static class RatesCommands
                 InitializeAsync(context, result.GetValue(force), cancellationToken));
         rates.Add(init);
 
-        Command validate = new("validate", "Validate a rates overlay.");
+        Command validate = new("validate", "Validate a rates overlay, or a --pricing file.");
         Option<string?> file = new("--file")
         {
             Description = "Path to the rates overlay.",
         };
+        Option<string?> pricing = new("--pricing")
+        {
+            Description = "Path to a complete rate card to check as the reports' --pricing checks it.",
+        };
         validate.Add(file);
+        validate.Add(pricing);
+        validate.Validators.Add(result =>
+        {
+            if (result.GetValue(file) is not null && result.GetValue(pricing) is not null)
+            {
+                result.AddError("Use either --file or --pricing, not both.");
+            }
+        });
         validate.SetAction(
             (ParseResult result, CancellationToken _) =>
-                Task.FromResult(Validate(context, result.GetValue(file))));
+                Task.FromResult(
+                    result.GetValue(pricing) is string pricingFile
+                        ? ValidatePricing(context, pricingFile)
+                        : Validate(context, result.GetValue(file))));
         rates.Add(validate);
 
         Command update = new("update", "Download the latest published rates.");
@@ -129,6 +144,20 @@ internal static class RatesCommands
             context.Error.WriteLine($"Invalid rates overlay: {ex.Message}");
             return 1;
         }
+    }
+
+    // Checks a --pricing file with the rules and the messages of the reports' --pricing.
+    private static int ValidatePricing(CliContext context, string file)
+    {
+        WhatIfPricing? pricing = WhatIfPricing.Load(context, file);
+        if (pricing is null)
+        {
+            return 1;
+        }
+
+        context.Out.WriteLine(
+            $"{pricing.Path} is a valid pricing file. Rates version: {pricing.Calculator.RatesVersion}.");
+        return 0;
     }
 
     // Prices the legacy spans with the rates the daemon would load: the base rates and the overlay.

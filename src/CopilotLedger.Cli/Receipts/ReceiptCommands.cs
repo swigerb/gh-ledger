@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text;
+using CopilotLedger.Cli.Rates;
 using CopilotLedger.Core.Git;
 using CopilotLedger.Core.Pricing;
 using CopilotLedger.Storage;
@@ -41,8 +42,10 @@ internal static class ReceiptCommands
         {
             Description = "Write the receipt's JSON data to standard output instead of the receipt file.",
         };
+        Option<string?> pricing = WhatIfPricing.CreateOption();
         command.Add(stdout);
         command.Add(json);
+        command.Add(pricing);
         command.Validators.Add(result =>
         {
             if (result.GetValue(stdout) && result.GetValue(json))
@@ -56,6 +59,7 @@ internal static class ReceiptCommands
                     context,
                     result.GetValue(stdout),
                     result.GetValue(json),
+                    result.GetValue(pricing),
                     cancellationToken));
         return command;
     }
@@ -64,8 +68,19 @@ internal static class ReceiptCommands
         CliContext context,
         bool stdout,
         bool json,
+        string? pricingFile,
         CancellationToken cancellationToken)
     {
+        WhatIfPricing? pricing = null;
+        if (pricingFile is not null)
+        {
+            pricing = WhatIfPricing.Load(context, pricingFile);
+            if (pricing is null)
+            {
+                return 1;
+            }
+        }
+
         GitWorkspaceContext? git =
             new FileSystemGitContextResolver().Resolve(context.WorkingDirectory);
         if (git is null)
@@ -104,6 +119,7 @@ internal static class ReceiptCommands
         IReadOnlyList<LedgerRollupRow> branchRows = await store.GetRollupAsync(
             LedgerGrouping.Branch,
             filter,
+            pricing?.Calculator,
             cancellationToken);
         IReadOnlyList<PromptChainRow> costliest = await store.GetTopPromptChainsAsync(
             filter,
@@ -119,6 +135,7 @@ internal static class ReceiptCommands
             Models = await store.GetRollupAsync(
                 LedgerGrouping.ChannelModel,
                 filter,
+                pricing?.Calculator,
                 cancellationToken),
             Prompts = await store.GetPromptCountAsync(filter, cancellationToken),
             MaxPromptCredits = costliest.Count == 0
@@ -128,6 +145,7 @@ internal static class ReceiptCommands
                 git.RepositorySlug,
                 git.BranchName,
                 cancellationToken),
+            Pricing = pricing,
         };
 
         if (json)
