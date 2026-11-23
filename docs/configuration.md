@@ -55,6 +55,15 @@ A request's input tokens include the tokens the model read from its prompt cache
 
 Cache-efficiency reports, such as `gh ledger status --cache`, don't treat such a request as a cache miss: its cache use is unknown, so hit ratios and observed cache totals leave it out, and a group of such requests shows `n/a` rather than `0.0%`. A cache miss that writes nothing to the cache also reports neither count, so it's left out too, and a hit ratio can be higher than the real one. See [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
 
+### API-equivalent prices
+
+Besides what each request is billed, CopilotLedger records what the same request would cost at its model's API list prices, from the `apiEquivalent` section of the rates (see [API list prices](#api-list-prices)). This API-equivalent cost is a comparison. It's never added to billed spend, and budgets and the circuit breaker ignore it.
+
+- A request is priced as the model it's recorded with: a GitHub or Foundry BYOK model's id once its aliases are resolved, or else the model name the request reported. A local request is priced as the local baseline instead. Nothing else depends on the billing channel, so a request to an unrecognized endpoint still gets an API-equivalent cost when its model has a list price.
+- A request whose model has no API list price, or no price for the request's date, is unpriced in this view. It has no API-equivalent cost, never $0.00.
+- A request with inconsistent token counts (`invalid_usage`) gets no API-equivalent cost either.
+- Cache reads and writes are priced at the list prices for them, as billing is. A request that reported no cache counters is priced as if all of its input were uncached, so its API-equivalent cost is an estimate, and reports mark it as one.
+
 ## Why Foundry BYOK is unpriced by default
 
 With bring-your-own-key (BYOK), Microsoft Foundry bills you directly, not GitHub. Azure prices depend on region, deployment type, and your agreement, so CopilotLedger can't know yours.

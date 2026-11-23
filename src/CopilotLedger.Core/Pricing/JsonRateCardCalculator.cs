@@ -25,6 +25,8 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
     private readonly IReadOnlyList<string> _localHosts;
     private readonly IReadOnlyList<string> _localProviders;
     private readonly ModelRateCard _baselineCard;
+    private readonly IReadOnlyList<ModelRateCard> _retailModels;
+    private readonly ModelRateCard? _retailLocalBaseline;
 
     private JsonRateCardCalculator(
         string ratesVersion,
@@ -51,6 +53,8 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         _localHosts = localHosts;
         _localProviders = localProviders;
         _baselineCard = baselineCard;
+        _retailModels = retailModels;
+        _retailLocalBaseline = retailLocalBaseline;
         SchemaVersion = schemaVersion;
         ApiRateCardSha256 = ApiRateCardHash(retailModels, retailLocalBaseline);
     }
@@ -125,7 +129,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
 
         if (!GenAiOperationNames.IsInference(span.OperationName))
         {
-            return Result(BillingChannel.Unpriced, PricingStatus.NotBillableOperation, model);
+            return Result(span, BillingChannel.Unpriced, PricingStatus.NotBillableOperation, model);
         }
 
         if (span.InputTokens < 0 ||
@@ -135,7 +139,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             span.CacheReadInputTokens > span.InputTokens ||
             span.CacheWriteInputTokens > span.InputTokens - span.CacheReadInputTokens)
         {
-            return Result(BillingChannel.Unpriced, PricingStatus.InvalidUsage, model);
+            return Result(span, BillingChannel.Unpriced, PricingStatus.InvalidUsage, model);
         }
 
         long uncached = span.InputTokens - span.CacheReadInputTokens - span.CacheWriteInputTokens;
@@ -153,6 +157,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (selection is null)
             {
                 return Result(
+                    span,
                     BillingChannel.Local,
                     PricingStatus.NoRateForDate,
                     localModelId,
@@ -161,6 +166,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
 
             TokenCostBreakdown breakdown = Price(span, selection.Tier, uncached);
             return Result(
+                span,
                 BillingChannel.Local,
                 PricingStatus.LocalOffload,
                 localModelId,
@@ -176,6 +182,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (model is null)
             {
                 return Result(
+                    span,
                     BillingChannel.FoundryByok,
                     PricingStatus.UnknownModel,
                     null,
@@ -186,6 +193,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (card is null)
             {
                 return Result(
+                    span,
                     BillingChannel.FoundryByok,
                     PricingStatus.ByokUnpriced,
                     model,
@@ -196,6 +204,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (selection is null)
             {
                 return Result(
+                    span,
                     BillingChannel.FoundryByok,
                     PricingStatus.NoRateForDate,
                     card.ModelId,
@@ -204,6 +213,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
 
             TokenCostBreakdown breakdown = Price(span, selection.Tier, uncached);
             return Result(
+                span,
                 BillingChannel.FoundryByok,
                 PricingStatus.Priced,
                 card.ModelId,
@@ -219,6 +229,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (model is null)
             {
                 return Result(
+                    span,
                     BillingChannel.GitHubAiCredits,
                     PricingStatus.UnknownModel,
                     null,
@@ -229,6 +240,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (card is null)
             {
                 return Result(
+                    span,
                     BillingChannel.GitHubAiCredits,
                     PricingStatus.UnknownModel,
                     model,
@@ -239,6 +251,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             if (selection is null)
             {
                 return Result(
+                    span,
                     BillingChannel.GitHubAiCredits,
                     PricingStatus.NoRateForDate,
                     card.ModelId,
@@ -247,6 +260,7 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
 
             TokenCostBreakdown breakdown = Price(span, selection.Tier, uncached);
             return Result(
+                span,
                 BillingChannel.GitHubAiCredits,
                 PricingStatus.Priced,
                 card.ModelId,
@@ -259,10 +273,50 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         }
 
         return Result(
+            span,
             BillingChannel.Unpriced,
             PricingStatus.UnrecognizedEndpoint,
             model,
             uncachedInputTokens: uncached);
+    }
+
+    // Prices one request at this card's API list prices (apiEquivalent), whatever its billing channel priced: a local
+    // request as the local retail baseline, and any other request as its ModelId. Pure and thread-safe. Throws only
+    // ArgumentNullException; an unknown model or date is Unpriced, and a non-inference operation or inconsistent token
+    // counts are NotApplicable.
+    public ApiEquivalentCost CalculateApiEquivalent(ApiEquivalentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!GenAiOperationNames.IsInference(request.OperationName) ||
+            request.InputTokens < 0 ||
+            request.OutputTokens < 0 ||
+            request.CacheReadInputTokens < 0 ||
+            request.CacheWriteInputTokens < 0 ||
+            request.CacheReadInputTokens > request.InputTokens ||
+            request.CacheWriteInputTokens > request.InputTokens - request.CacheReadInputTokens)
+        {
+            return Retail(ApiEquivalentStatus.NotApplicable);
+        }
+
+        string? model = NormalizeModel(request.ModelId);
+        ModelRateCard? card = request.Channel == BillingChannel.Local
+            ? _retailLocalBaseline
+            : model is null ? null : FindModel(_retailModels, model);
+        PricedSelection? selection = card is null
+            ? null
+            : Select(card, request.StartTime, request.InputTokens);
+        if (selection is null)
+        {
+            return Retail(ApiEquivalentStatus.Unpriced);
+        }
+
+        long uncached = request.InputTokens - request.CacheReadInputTokens - request.CacheWriteInputTokens;
+        return Retail(
+            ApiEquivalentStatus.Priced,
+            card!.ModelId,
+            selection.Tier.Name,
+            Price(request, selection.Tier, uncached));
     }
 
     private static JsonRateCardCalculator Create(string baseJson, string? overlayJson, string? overlayName)
@@ -1008,7 +1062,16 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             AiCreditMath.CostUsd(span.CacheWriteInputTokens, tier.CacheWritePer1M ?? tier.InputPer1M),
             AiCreditMath.CostUsd(span.OutputTokens, tier.OutputPer1M));
 
+    private static TokenCostBreakdown Price(ApiEquivalentRequest request, RateTier tier, long uncached) =>
+        new(
+            AiCreditMath.CostUsd(uncached, tier.InputPer1M),
+            AiCreditMath.CostUsd(request.CacheReadInputTokens, tier.CachedInputPer1M ?? tier.InputPer1M),
+            AiCreditMath.CostUsd(request.CacheWriteInputTokens, tier.CacheWritePer1M ?? tier.InputPer1M),
+            AiCreditMath.CostUsd(request.OutputTokens, tier.OutputPer1M));
+
+    // The credit lens's result for span, with the same request priced in the API-equivalent lens.
     private CreditCalculationResult Result(
+        NormalizedGenAiSpan span,
         BillingChannel channel,
         PricingStatus status,
         string? modelId,
@@ -1032,6 +1095,32 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             UsdCost = usdCost,
             AiCredits = aiCredits,
             EstimatedCloudSavedUsd = estimatedCloudSavedUsd,
+            ApiEquivalent = CalculateApiEquivalent(new ApiEquivalentRequest
+            {
+                OperationName = span.OperationName,
+                Channel = channel,
+                ModelId = modelId,
+                StartTime = span.StartTime,
+                InputTokens = span.InputTokens,
+                OutputTokens = span.OutputTokens,
+                CacheReadInputTokens = span.CacheReadInputTokens,
+                CacheWriteInputTokens = span.CacheWriteInputTokens,
+            }),
+        };
+
+    private ApiEquivalentCost Retail(
+        ApiEquivalentStatus status,
+        string? rateCardModelId = null,
+        string? tierName = null,
+        TokenCostBreakdown? breakdown = null) =>
+        new()
+        {
+            Status = status,
+            RatesVersion = RatesVersion,
+            RateCardSha256 = ApiRateCardSha256,
+            RateCardModelId = rateCardModelId,
+            TierName = tierName,
+            Breakdown = breakdown,
         };
 
     // SHA-256 of the canonical API-equivalent card: compact UTF-8 JSON {"localBaselineModel":…,"models":[…]}. The local
