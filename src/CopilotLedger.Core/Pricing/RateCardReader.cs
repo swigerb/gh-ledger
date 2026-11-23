@@ -41,12 +41,12 @@ internal static class RateCardReader
                 throw Error(string.Empty, "must contain a JSON object");
             }
 
-            ValidateSchemaVersion(root);
-            return ReadRoot(root, isBase);
+            int schemaVersion = ValidateSchemaVersion(root);
+            return ReadRoot(root, isBase, schemaVersion);
         }
     }
 
-    private static RateCardDocument ReadRoot(JsonElement root, bool isBase)
+    private static RateCardDocument ReadRoot(JsonElement root, bool isBase, int schemaVersion)
     {
         string? ratesVersion = null;
         RateCardSource? source = null;
@@ -54,6 +54,7 @@ internal static class RateCardReader
         PricedRateSection? githubAiCredits = null;
         FoundryRateSection? foundryByok = null;
         LocalRateSection? localOffload = null;
+        ApiEquivalentSection? apiEquivalent = null;
         HashSet<string> seen = new(StringComparer.Ordinal);
         string[] schema =
         [
@@ -64,6 +65,7 @@ internal static class RateCardReader
             "githubAiCredits",
             "foundryByok",
             "localOffload",
+            "apiEquivalent",
         ];
 
         foreach (JsonProperty property in root.EnumerateObject())
@@ -106,6 +108,16 @@ internal static class RateCardReader
                         ? null
                         : ReadLocalSection(property.Value, path, isBase);
                     break;
+                case "apiEquivalent":
+                    if (schemaVersion < 2)
+                    {
+                        throw Error(path, "is allowed only when schemaVersion is 2");
+                    }
+
+                    apiEquivalent = property.Value.ValueKind == JsonValueKind.Null
+                        ? null
+                        : ReadApiEquivalentSection(property.Value, path, isBase);
+                    break;
             }
         }
 
@@ -116,17 +128,19 @@ internal static class RateCardReader
             Require(githubAiCredits is not null, "githubAiCredits", "is required");
             Require(foundryByok is not null, "foundryByok", "is required");
             Require(localOffload is not null, "localOffload", "is required");
+            Require(schemaVersion < 2 || apiEquivalent is not null, "apiEquivalent", "is required");
         }
 
         return new RateCardDocument
         {
-            SchemaVersion = 1,
+            SchemaVersion = schemaVersion,
             RatesVersion = ratesVersion,
             Source = source,
             Notes = notes,
             GithubAiCredits = githubAiCredits,
             FoundryByok = foundryByok,
             LocalOffload = localOffload,
+            ApiEquivalent = apiEquivalent,
         };
     }
 
@@ -292,7 +306,48 @@ internal static class RateCardReader
         };
     }
 
-    private static IReadOnlyList<PricedModelDocument> ReadPricedModels(JsonElement value, string path)
+    private static ApiEquivalentSection ReadApiEquivalentSection(JsonElement value, string path, bool isBase)
+    {
+        RequireObject(value, path);
+        string? description = null;
+        string? localBaselineModel = null;
+        IReadOnlyList<PricedModelDocument>? models = null;
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        string[] schema = ["description", "localBaselineModel", "models"];
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            (string name, string propertyPath) = ReadProperty(property, path, schema, seen);
+            switch (name)
+            {
+                case "description":
+                    description = ReadOptionalString(property.Value, propertyPath);
+                    break;
+                case "localBaselineModel":
+                    localBaselineModel = ReadOptionalString(property.Value, propertyPath);
+                    break;
+                case "models":
+                    models = property.Value.ValueKind == JsonValueKind.Null
+                        ? null
+                        : ReadPricedModels(property.Value, propertyPath, retail: true);
+                    break;
+            }
+        }
+
+        if (isBase)
+        {
+            Require(models is not null, Join(path, "models"), "is required");
+        }
+
+        return new ApiEquivalentSection
+        {
+            Description = description,
+            LocalBaselineModel = localBaselineModel,
+            Models = models,
+        };
+    }
+
+    // retail: an apiEquivalent model, which may also have vendor and sourceUrl.
+    private static IReadOnlyList<PricedModelDocument> ReadPricedModels(JsonElement value, string path, bool retail = false)
     {
         RequireArray(value, path);
         List<PricedModelDocument> models = [];
@@ -300,20 +355,24 @@ internal static class RateCardReader
         foreach (JsonElement item in value.EnumerateArray())
         {
             string itemPath = $"{path}[{index++}]";
-            models.Add(ReadPricedModel(item, itemPath));
+            models.Add(ReadPricedModel(item, itemPath, retail));
         }
 
         return models;
     }
 
-    private static PricedModelDocument ReadPricedModel(JsonElement value, string path)
+    private static PricedModelDocument ReadPricedModel(JsonElement value, string path, bool retail)
     {
         RequireObject(value, path);
         string? id = null;
+        string? vendor = null;
+        string? sourceUrl = null;
         IReadOnlyList<string> aliases = [];
         IReadOnlyList<RateWindowDocument>? windows = null;
         HashSet<string> seen = new(StringComparer.Ordinal);
-        string[] schema = ["id", "aliases", "windows"];
+        string[] schema = retail
+            ? ["id", "vendor", "sourceUrl", "aliases", "windows"]
+            : ["id", "aliases", "windows"];
         foreach (JsonProperty property in value.EnumerateObject())
         {
             (string name, string propertyPath) = ReadProperty(property, path, schema, seen);
@@ -321,6 +380,12 @@ internal static class RateCardReader
             {
                 case "id":
                     id = ReadString(property.Value, propertyPath);
+                    break;
+                case "vendor":
+                    vendor = ReadOptionalString(property.Value, propertyPath);
+                    break;
+                case "sourceUrl":
+                    sourceUrl = ReadOptionalString(property.Value, propertyPath);
                     break;
                 case "aliases":
                     aliases = ReadStringArray(property.Value, propertyPath);
@@ -333,7 +398,14 @@ internal static class RateCardReader
 
         Require(id is not null, Join(path, "id"), "is required");
         Require(windows is not null, Join(path, "windows"), "is required");
-        return new PricedModelDocument { Id = id!, Aliases = aliases, Windows = windows! };
+        return new PricedModelDocument
+        {
+            Id = id!,
+            Vendor = vendor,
+            SourceUrl = sourceUrl,
+            Aliases = aliases,
+            Windows = windows!,
+        };
     }
 
     private static IReadOnlyList<RateWindowDocument> ReadWindows(JsonElement value, string path)
@@ -544,7 +616,8 @@ internal static class RateCardReader
         return (name, path);
     }
 
-    private static void ValidateSchemaVersion(JsonElement root)
+    // The document's schema version, 1 or 2. Throws InvalidDataException for anything else.
+    private static int ValidateSchemaVersion(JsonElement root)
     {
         JsonElement value;
         try
@@ -566,10 +639,12 @@ internal static class RateCardReader
             throw Error("schemaVersion", "must be an integer");
         }
 
-        if (schemaVersion != 1)
+        if (schemaVersion is not (1 or 2))
         {
-            throw Error("schemaVersion", "must be 1");
+            throw Error("schemaVersion", "must be 1 or 2");
         }
+
+        return schemaVersion;
     }
 
     private static string? ReadOptionalString(JsonElement value, string path) =>

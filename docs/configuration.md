@@ -77,10 +77,10 @@ To change pricing, create `~/.copilot-ledger/rates.json`. CopilotLedger merges i
 
 Run `gh ledger rates init` to create a starter file, and `gh ledger rates validate` to check it against the same rules the daemon uses. The daemon reads the file when it starts, so restart it after a change: `gh ledger daemon stop`, then `gh ledger daemon start`.
 
-- Every section is optional except `"schemaVersion": 1`.
+- Every section is optional except `schemaVersion`, which is `1`, or `2` when the file has an `apiEquivalent` section (see [API list prices](#api-list-prices)).
 - A model with a new `id` is added. A model with the same `id` as a built-in one replaces it.
 - Host and provider lists are added to the built-in lists.
-- `localOffload.baselineModel` replaces the built-in value.
+- `localOffload.baselineModel` and `apiEquivalent.localBaselineModel` replace the built-in values.
 - `ratesVersion` is an optional label. Each request in the ledger records which rates priced it, for example `2026-11-20+contoso-2026-11`, or `2026-11-20+user` if you leave the label out.
 - JSON doesn't allow comments, so put your own notes in the optional `notes` array.
 
@@ -88,7 +88,7 @@ If the file is invalid, CopilotLedger refuses to load it and reports the first p
 
 - Most errors give a path into your file, such as `foundryByok.models[0].windows[0].tiers[0].outputPer1M`. Indexes count from 0, and they count only the entries in your file.
 - If the file isn't valid JSON, the error gives the line and column where reading stopped, counting from 1.
-- Two checks compare your file with the built-in rates: a model `id` or alias that a built-in model already uses, and a `localOffload.baselineModel` that isn't a GitHub model. These errors say `in the merged rates`.
+- Three checks compare your file with the built-in rates: a model `id` or alias that a built-in model of the same section already uses, a `localOffload.baselineModel` that isn't a GitHub model, and an `apiEquivalent.localBaselineModel` that isn't an API-equivalent model. These errors say `in the merged rates`.
 - Property names are case-sensitive, and each property can appear only once in its object.
 
 For example, this file leaves out a tier's `outputPer1M`:
@@ -234,13 +234,41 @@ For tiered or time-limited prices:
 - `maxInputTokens` is an inclusive input-token limit. Set it on every tier except the last.
 - `effectiveFrom` (inclusive) and `effectiveUntil` (exclusive) bound a price window. Use UTC timestamps such as `2027-05-17T00:00:00Z`.
 
+### API list prices
+
+The `apiEquivalent` section holds API list prices: what a model costs when you call its vendor's API yourself, in USD per 1,000,000 tokens. They're for comparison only. They never change AI credits, Foundry BYOK spend, local savings, or budgets. The section needs `"schemaVersion": 2`. For example, to compare with a price list your company negotiated:
+
+```json
+{
+  "schemaVersion": 2,
+  "ratesVersion": "contoso-2026-12",
+  "apiEquivalent": {
+    "models": [
+      {
+        "id": "claude-sonnet-5.5",
+        "vendor": "anthropic",
+        "sourceUrl": "https://contoso.example/agreements/anthropic-2026",
+        "windows": [
+          { "tiers": [ { "name": "default", "inputPer1M": 1.60, "cachedInputPer1M": 0.08, "cacheWritePer1M": 2.00, "outputPer1M": 8.00 } ] }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- API-equivalent models have the same fields and rules as the other priced models, plus `vendor` and `sourceUrl`, which are optional notes for people. Their ids and aliases must be unique within `apiEquivalent`, but a GitHub or Foundry BYOK model can have the same id.
+- A model with the same `id` as a built-in API-equivalent model replaces it, and a model with a new `id` is added.
+- `localBaselineModel` is optional. It names the API-equivalent model whose list prices value local requests, and it must be one of them. Without it, local requests use the list prices of `localOffload.baselineModel`, if it has any.
+- `description` is optional text.
+
 ## Field reference
 
 Overlay sections:
 
 | Field | Required | Notes |
 |---|---|---|
-| `schemaVersion` | Yes | Must be `1` |
+| `schemaVersion` | Yes | `1`, or `2` when the file has `apiEquivalent` |
 | `ratesVersion` | No | Label recorded with each priced request |
 | `notes` | No | Strings for your own notes |
 | `githubAiCredits.hostSuffixes`, `foundryByok.hostSuffixes` | No | Added to the built-in lists |
@@ -249,12 +277,16 @@ Overlay sections:
 | `localOffload.models` | No | Local model entries: `{ "id": "...", "aliases": ["..."] }` |
 | `localOffload.baselineModel` | No | A GitHub model id or alias used to estimate savings |
 | `localOffload.additionalHosts` | No | Hosts treated as local |
+| `apiEquivalent.models` | No | API list prices, as priced models (see the next table) |
+| `apiEquivalent.localBaselineModel` | No | An API-equivalent model id or alias that values local requests |
+| `apiEquivalent.description` | No | Text for your own notes |
 
 Priced model entries:
 
 | Field | Required | Default |
 |---|---|---|
 | `id` | Yes | — |
+| `vendor`, `sourceUrl` | No; only in `apiEquivalent.models` | None |
 | `aliases` | No | `[]` |
 | `windows` | Yes, at least one | — |
 | `windows[].effectiveFrom`, `windows[].effectiveUntil` | No | Unbounded |

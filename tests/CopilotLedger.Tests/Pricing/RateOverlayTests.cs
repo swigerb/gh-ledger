@@ -28,7 +28,7 @@ public sealed class RateOverlayTests
     public static TheoryData<string, string> InvalidOverlays => new()
     {
         // Sprint 1's invalid overlays, now with exact messages.
-        { """{ "schemaVersion": 2 }""", "<file>: schemaVersion: must be 1" },
+        { """{ "schemaVersion": 3 }""", "<file>: schemaVersion: must be 1 or 2" },
         { """{ "schemaVersion": 1, "foundryBYOK": { } }""", "<file>: foundryBYOK: is not a known property; did you mean foundryByok?" },
         { """{ "schemaVersion": 1, "localOffload": { "baselineModel": "gpt-missing" } }""", "<file>: localOffload.baselineModel: does not resolve to a githubAiCredits model in the merged rates: gpt-missing" },
         { """{ "schemaVersion": 1, "foundryByok": { "models": [ { "id": "gpt-6.1-sol", "windows": [ { "tiers": [ { "name": "default", "inputPer1M": 1.75 } ] } ] } ] } }""", "<file>: foundryByok.models[0].windows[0].tiers[0].outputPer1M: is required" },
@@ -46,7 +46,7 @@ public sealed class RateOverlayTests
         // schemaVersion is checked first.
         { """{ "schemaVersion": null }""", "<file>: schemaVersion: is required" },
         { """{ "schemaVersion": "1" }""", "<file>: schemaVersion: must be an integer" },
-        { """{ "foundryBYOK": { }, "schemaVersion": 2 }""", "<file>: schemaVersion: must be 1" },
+        { """{ "foundryBYOK": { }, "schemaVersion": 3 }""", "<file>: schemaVersion: must be 1 or 2" },
 
         // Unknown and repeated properties.
         { """{ "schemaVersion": 1, "currency": "USD" }""", "<file>: currency: is not a known property" },

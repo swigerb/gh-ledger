@@ -15,6 +15,6 @@ public sealed record RateWindow(
 
 public sealed record ModelRateCard(
     string ModelId,                    // canonical normalized id
-    BillingChannel Channel,            // GitHubAiCredits or FoundryByok
+    BillingChannel Channel,            // GitHubAiCredits or FoundryByok; Unpriced for an apiEquivalent (retail) model
     IReadOnlyList<string> Aliases,     // normalized
     IReadOnlyList<RateWindow> Windows);

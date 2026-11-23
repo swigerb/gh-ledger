@@ -69,7 +69,7 @@ public sealed class RatesCommandTests
 
     public static TheoryData<string, string> InvalidFiles => new()
     {
-        { """{ "schemaVersion": 2 }""", "schemaVersion: must be 1" },
+        { """{ "schemaVersion": 3 }""", "schemaVersion: must be 1 or 2" },
         { "{ \"schemaVersion\": 1,\n  \"foundryByok\": { \"models\": [ }\n}\n", "line 2, column 32: invalid JSON" },
         { """{ "schemaVersion": 1, "foundryBYOK": { } }""", "foundryBYOK: is not a known property; did you mean foundryByok?" },
     };
@@ -98,7 +98,7 @@ public sealed class RatesCommandTests
         using var temp = new TempDirectory();
         await using var harness = new CliHarness(temp.Path);
         string path = Path.Combine(temp.Path, "bad.json");
-        await File.WriteAllTextAsync(path, """{ "schemaVersion": 2 }""");
+        await File.WriteAllTextAsync(path, """{ "schemaVersion": 3 }""");
 
         CliRun relative = await harness.RunInAsync(
             temp.Path,
@@ -109,7 +109,7 @@ public sealed class RatesCommandTests
         Assert.Equal(1, relative.ExitCode);
         Assert.Empty(relative.Out);
         Assert.Equal(
-            $"Invalid rates overlay: {path}: schemaVersion: must be 1\n",
+            $"Invalid rates overlay: {path}: schemaVersion: must be 1 or 2\n",
             relative.Error);
     }
 

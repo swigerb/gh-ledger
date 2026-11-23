@@ -7,7 +7,8 @@ public sealed class RateCardLoadingTests
 {
     public static TheoryData<string, string, string> InvalidDocuments => new()
     {
-        { "\"schemaVersion\": 1,", "\"schemaVersion\": 2,", "schemaVersion: must be 1" },
+        { "\"schemaVersion\": 1,", "\"schemaVersion\": 3,", "schemaVersion: must be 1 or 2" },
+        { "\"schemaVersion\": 1,", "\"schemaVersion\": 2,", "apiEquivalent: is required" },
         { "\"inputPer1M\": 2.00,", "\"inputPer1M\": 2.0000001,", "githubAiCredits.models[0].windows[0].tiers[0].inputPer1M: must have no more than 6 decimal places" },
         { "\"baselineModel\": \"claude-sonnet-5.5\"", "\"baselineModel\": \"gpt-missing\"", "localOffload.baselineModel: does not resolve to a githubAiCredits model: gpt-missing" },
         { "\"schemaVersion\": 1,", "\"schemaVersion\": 1, \"currency\": \"USD\",", "currency: is not a known property" },
@@ -84,9 +85,9 @@ public sealed class RateCardLoadingTests
         InvalidDataException exception = Assert.Throws<InvalidDataException>(
             () => JsonRateCardCalculator.Parse(
                 RateFixtures.ByokTestRatesJson,
-                """{ "schemaVersion": 2 }"""));
+                """{ "schemaVersion": 3 }"""));
 
-        Assert.Equal("overlay: schemaVersion: must be 1", exception.Message);
+        Assert.Equal("overlay: schemaVersion: must be 1 or 2", exception.Message);
     }
 
     [Fact]
