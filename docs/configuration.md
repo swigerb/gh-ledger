@@ -79,11 +79,11 @@ Until you add prices, BYOK requests are still counted and attributed to reposito
 
 ## Newer rates between releases: `gh ledger rates update`
 
-Each gh-ledger release attaches the `rates.json` it was built with. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.json`, through your system proxy, and checks it with the same rules as the built-in rates.
+Each gh-ledger release attaches the rates it was built with as `rates.v2.json`. It also attaches them as `rates.json`, with `schemaVersion` 1 and without API list prices, for gh-ledger 0.4.1 and earlier, which read only `schemaVersion` 1. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.v2.json`, through your system proxy, and checks it with the same rules as the built-in rates. If the latest release has no `rates.v2.json`, it downloads that release's `rates.json` instead.
 
-Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
+Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. A newer download with `schemaVersion` 1 isn't saved either, because it has no API list prices, and `rates update` reports an error. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
 
-CopilotLedger's base rates are `rates.downloaded.json` when that file is valid and newer than the built-in rates, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read is ignored with a warning in `gh ledger status`, `gh ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh ledger status` shows `(downloaded)` after the rates version when the download is in use.
+CopilotLedger's base rates are `rates.downloaded.json` when that file is valid, newer than the built-in rates, and has `schemaVersion` 2, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read, and a newer one with `schemaVersion` 1, such as one that an older gh-ledger saved, are ignored with a warning in `gh ledger status`, `gh ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh ledger status` shows `(downloaded)` after the rates version when the download is in use.
 
 The daemon reads rates when it starts, so restart it after an update. Spans already recorded keep the prices they were recorded with.
 

@@ -6,7 +6,9 @@ namespace CopilotLedger.Tests.TestSupport;
 
 public static class PublishedRates
 {
-    public const string Url = "https://github.com/swigerb/gh-ledger/releases/latest/download/rates.json";
+    public const string Url = "https://github.com/swigerb/gh-ledger/releases/latest/download/rates.v2.json";
+
+    public const string LegacyUrl = "https://github.com/swigerb/gh-ledger/releases/latest/download/rates.json";
 
     // The embedded rates.json text, exactly as built into CopilotLedger.Core.
     public static string Embedded()
@@ -36,6 +38,16 @@ public static class PublishedRates
     }
 
     public static byte[] Utf8(string text) => new UTF8Encoding(false).GetBytes(text);
+
+    // WithVersion(ratesVersion) as the Release workflow turns it into the rates.json of older gh-ledger versions:
+    // jq '.schemaVersion = 1 | del(.apiEquivalent)'.
+    public static string SchemaVersion1(string ratesVersion)
+    {
+        JsonObject document = JsonNode.Parse(WithVersion(ratesVersion))!.AsObject();
+        document["schemaVersion"] = 1;
+        document.Remove("apiEquivalent");
+        return document.ToJsonString();
+    }
 
     // WithVersion(ratesVersion) plus a GitHub model gpt-new, alias gpt-preview, at $1 input, $0.10 cached input, and
     // $4 output per 1M tokens.

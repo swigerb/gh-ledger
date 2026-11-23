@@ -2,8 +2,10 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CopilotLedger.Cli;
 using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
 using CopilotLedger.Tests.TestSupport;
 
 namespace CopilotLedger.Tests.Cli;
@@ -71,7 +73,7 @@ public sealed class RatesUpdateTests
     public static TheoryData<string, string> Failures => new()
     {
         { "offline", $"Could not download rates from {PublishedRates.Url}: No such host is known. (github.com:443)\n" },
-        { "404", $"Could not download rates from {PublishedRates.Url}: HTTP 404.\n" },
+        { "404", $"Could not download rates from {PublishedRates.LegacyUrl}: HTTP 404.\n" },
         { "timeout", $"Could not download rates from {PublishedRates.Url}: no response within 30 seconds.\n" },
         { "not-utf8", "The downloaded rates are invalid: the file isn't UTF-8.\n" },
         { "not-json", "The downloaded rates are invalid: line 1, column 2: invalid JSON\n" },
@@ -277,5 +279,138 @@ public sealed class RatesUpdateTests
             CultureInfo.InvariantCulture,
             DateTimeStyles.None,
             out _));
+    }
+
+    public static TheoryData<string, int, string, string> LegacyReleases => new()
+    {
+        { "2026-11-20", 0, "The published rates (2026-11-20) are older than the rates in use (2026-11-25); nothing changed.\n", "" },
+        { "2026-12-01", 1, "", "The published rates (2026-12-01) are schemaVersion 1, without API-equivalent prices; this gh-ledger needs schemaVersion 2. Nothing changed.\n" },
+    };
+
+    // A release before rates.v2.json attaches only schemaVersion 1 rates.json, which may not replace the rates in use.
+    [Theory]
+    [MemberData(nameof(LegacyReleases))]
+    public async Task RU11_AReleaseWithoutVersion2RatesFallsBackToItsRatesJson(
+        string version,
+        int exitCode,
+        string output,
+        string error)
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = new(temp.Path);
+        string downloaded = Path.Combine(temp.Path, "data", "rates.downloaded.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(downloaded)!);
+        await File.WriteAllTextAsync(downloaded, PublishedRates.WithVersion("2026-11-25"));
+        byte[] before = await FileRetry.ReadAllBytesAsync(downloaded);
+        FakeHttpHandler handler = new(request => request.RequestUri!.AbsoluteUri == PublishedRates.Url
+            ? new HttpResponseMessage(HttpStatusCode.NotFound)
+            : FakeHttpHandler.Bytes(PublishedRates.Utf8(PublishedRates.SchemaVersion1(version))));
+
+        CliRun run = await harness.RunWithHttpAsync(handler, "rates", "update");
+
+        Assert.Equal(exitCode, run.ExitCode);
+        Assert.Equal(output, run.Out);
+        Assert.Equal(error, run.Error);
+        Assert.Equal(
+            [
+                new HttpCall("GET", PublishedRates.Url, $"gh-ledger/{GhLedgerCli.Version}"),
+                new HttpCall("GET", PublishedRates.LegacyUrl, $"gh-ledger/{GhLedgerCli.Version}"),
+            ],
+            handler.Calls);
+        Assert.Equal(before, await FileRetry.ReadAllBytesAsync(downloaded));
+    }
+
+    // gh-ledger 0.4.1 rejects schemaVersion 2 the same way: "The downloaded rates are invalid: schemaVersion: must be 1".
+    [Fact]
+    public async Task RU12_RatesWithAnUnsupportedSchemaVersionFailClosed()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = new(temp.Path);
+        string downloaded = Path.Combine(temp.Path, "data", "rates.downloaded.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(downloaded)!);
+        await File.WriteAllTextAsync(downloaded, PublishedRates.WithVersion("2026-11-25"));
+        byte[] before = await FileRetry.ReadAllBytesAsync(downloaded);
+        string future = PublishedRates.WithVersion("2026-12-01").Replace(
+            "\"schemaVersion\": 2,",
+            "\"schemaVersion\": 3,",
+            StringComparison.Ordinal);
+
+        CliRun run = await harness.RunWithHttpAsync(
+            new FakeHttpHandler(_ => FakeHttpHandler.Bytes(PublishedRates.Utf8(future))),
+            "rates",
+            "update");
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal(string.Empty, run.Out);
+        Assert.Equal("The downloaded rates are invalid: schemaVersion: must be 1 or 2\n", run.Error);
+        Assert.Equal(before, await FileRetry.ReadAllBytesAsync(downloaded));
+    }
+
+    [Fact]
+    public async Task RU13_LaterSchemaVersion1DownloadsAreIgnoredWithAWarning()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = new(temp.Path);
+        string downloaded = Path.Combine(temp.Path, "data", "rates.downloaded.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(downloaded)!);
+        await File.WriteAllTextAsync(downloaded, PublishedRates.SchemaVersion1("2026-12-01"));
+        await FileRetry.ReadAllTextAsync(downloaded);
+        string warning =
+            $"Warning: ignored {downloaded}: its schemaVersion 1 rates have no API-equivalent prices; run gh-ledger rates update to replace them.\n";
+
+        CliRun validate = await harness.RunAsync("rates", "validate");
+        CliRun status = await harness.RunAsync("status", "--json");
+        CliRun update = await harness.RunWithHttpAsync(
+            new FakeHttpHandler(_ => FakeHttpHandler.Bytes(PublishedRates.Utf8(PublishedRates.WithVersion("2026-12-01")))),
+            "rates",
+            "update");
+
+        Assert.Equal(0, validate.ExitCode);
+        Assert.Equal(
+            warning + $"No rates overlay at {Path.Combine(temp.Path, "data", "rates.json")}; using the built-in rates (2026-11-23).\n",
+            validate.Out);
+        using JsonDocument document = JsonDocument.Parse(status.Out);
+        Assert.Equal("2026-11-23", document.RootElement.GetProperty("ratesVersion").GetString());
+        Assert.Equal("built-in", document.RootElement.GetProperty("ratesSource").GetString());
+        Assert.Equal(
+            [warning[9..^1]],
+            document.RootElement.GetProperty("warnings").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(0, update.ExitCode);
+        Assert.Equal(warning + "Updated rates from 2026-11-23 to 2026-12-01.\n", update.Out);
+        Assert.Equal(PublishedRates.WithVersion("2026-12-01"), await FileRetry.ReadAllTextAsync(downloaded));
+    }
+
+    // The Release workflow publishes these rates as rates.json for gh-ledger 0.4.x and earlier.
+    [Fact]
+    public void RU14_SchemaVersion1RatesKeepEveryCreditPrice()
+    {
+        string legacy = PublishedRates.SchemaVersion1("2026-11-23");
+        using JsonDocument document = JsonDocument.Parse(legacy);
+        JsonRateCardCalculator v1 = JsonRateCardCalculator.Parse(legacy);
+        JsonRateCardCalculator v2 = JsonRateCardCalculator.LoadEmbedded();
+        string[] models = JsonNode.Parse(legacy)!["githubAiCredits"]!["models"]!.AsArray()
+            .Select(model => model!["id"]!.GetValue<string>())
+            .ToArray();
+
+        Assert.Equal(
+            ["schemaVersion", "ratesVersion", "source", "notes", "githubAiCredits", "foundryByok", "localOffload"],
+            document.RootElement.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(1, v1.SchemaVersion);
+        Assert.Equal("2026-11-23", v1.RatesVersion);
+        Assert.Equal(34, models.Length);
+        foreach (string model in models)
+        {
+            NormalizedGenAiSpan span = TestSpans.Chat(
+                requestModel: model,
+                inputTokens: 300_000,
+                cacheReadInputTokens: 100_000,
+                cacheWriteInputTokens: 10_000,
+                outputTokens: 5_000);
+            CreditCalculationResult legacyResult = v1.Calculate(span);
+            CreditCalculationResult result = v2.Calculate(span);
+            Assert.Equal(result.UsdCost, legacyResult.UsdCost);
+            Assert.Equal(result.AiCredits, legacyResult.AiCredits);
+            Assert.Equal(ApiEquivalentStatus.Unpriced, legacyResult.ApiEquivalent.Status);
+        }
     }
 }

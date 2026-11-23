@@ -1,4 +1,5 @@
 using System.Globalization;
+using CopilotLedger.Cli.Install;
 using CopilotLedger.Core.Pricing;
 
 namespace CopilotLedger.Cli.Rates;
@@ -12,11 +13,14 @@ internal static class RateCardFiles
     public static string DownloadedPath(CliContext context) =>
         Path.Combine(context.DataDirectory, "rates.downloaded.json");
 
-    // The downloaded rates when rates.downloaded.json is valid and its ratesVersion date is later than the built-in one;
-    // otherwise the built-in rates. A downloaded file that isn't later is ignored without a warning.
+    // The downloaded rates when rates.downloaded.json is valid, its ratesVersion date is later than the built-in one, and its
+    // schemaVersion is at least the built-in one's; otherwise the built-in rates. A download that isn't later is ignored
+    // without a warning, and a later download with an older schemaVersion is ignored with one, so a schemaVersion 1 file
+    // never replaces built-in API-equivalent prices.
     public static RatesBase LoadBase(CliContext context)
     {
-        string builtIn = JsonRateCardCalculator.LoadEmbedded().RatesVersion;
+        JsonRateCardCalculator builtInRates = JsonRateCardCalculator.LoadEmbedded();
+        string builtIn = builtInRates.RatesVersion;
         string path = DownloadedPath(context);
         if (!File.Exists(path))
         {
@@ -24,11 +28,11 @@ internal static class RateCardFiles
         }
 
         string json;
-        string version;
+        JsonRateCardCalculator downloadedRates;
         try
         {
             json = File.ReadAllText(path);
-            version = JsonRateCardCalculator.Parse(json).RatesVersion;
+            downloadedRates = JsonRateCardCalculator.Parse(json);
         }
         catch (Exception ex) when (
             ex is InvalidDataException or IOException or UnauthorizedAccessException)
@@ -36,6 +40,7 @@ internal static class RateCardFiles
             return new RatesBase(null, builtIn, $"ignored {path}: {ex.Message}");
         }
 
+        string version = downloadedRates.RatesVersion;
         if (!TryParseVersion(version, out DateOnly downloaded))
         {
             return new RatesBase(
@@ -44,9 +49,17 @@ internal static class RateCardFiles
                 $"ignored {path}: ratesVersion {version} isn't a yyyy-MM-dd date.");
         }
 
-        return downloaded > ParseVersion(builtIn)
-            ? new RatesBase(json, version, null)
-            : new RatesBase(null, builtIn, null);
+        if (downloaded <= ParseVersion(builtIn))
+        {
+            return new RatesBase(null, builtIn, null);
+        }
+
+        return downloadedRates.SchemaVersion < builtInRates.SchemaVersion
+            ? new RatesBase(
+                null,
+                builtIn,
+                $"ignored {path}: its schemaVersion {downloadedRates.SchemaVersion} rates have no API-equivalent prices; run {GhExtension.CommandName(context.Platform)} rates update to replace them.")
+            : new RatesBase(json, version, null);
     }
 
     // The base rates with the overlay at overlayPath merged on top; null overlayPath means no overlay.
