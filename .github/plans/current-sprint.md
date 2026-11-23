@@ -41,7 +41,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 9: The Importer (CopilotLedger.Storage & tests). `LedgerImporter` discovers logs, skips active, old, and unchanged ones, prices each record with the current rates at its start time, records batches through the authority rules or evaluates them on a snapshot, checkpoints each log, and reports per-source counts, amounts, and diagnostics.
 - [x] Task 10: `gh ledger import` (CopilotLedger.Cli & tests). The command, with `--repo` or `--all`, `--source`, `--since`, `--dry-run`, `--include-active`, and `--json`; a per-source table and totals in AI credits and API-equivalent USD; at most 20 content-free warnings; exit code 0, 2 (incomplete coverage), or 1. `IngestFailureLog` keeps the messages of database and file errors only.
 - [x] Task 11: The Import Reference and Privacy Allowlist (docs & tests). `docs/cli.md` documents the command, the overlap rules, the report, and the allowlist of every ledger column import writes, which tests compare with the schema and with what import writes; canary fixtures prove that no content reaches the ledger or the output. `docs/configuration.md` documents how imported requests are priced.
-- [ ] Task 12: The Backfill Walkthrough (docs & tests). `docs/guide.md` gains "Backfill history after installing", with two samples that `GuideSamplesTests` runs, and the README gains a feature line and a privacy section.
+- [x] Task 12: The Backfill Walkthrough (docs & tests). `docs/guide.md` gains "Backfill history after installing", with two samples that `GuideSamplesTests` runs, and the README gains a feature line and a privacy section.
 
 ## Starting point
 

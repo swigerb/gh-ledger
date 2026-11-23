@@ -13,6 +13,7 @@ public enum GuideState
 {
     Fresh,          // nothing installed and no ledger yet
     FirstPrompt,    // installed at 16:20, the daemon running, one prompt at 16:25
+    Backfill,       // FirstPrompt, and Copilot's session logs of earlier sessions
     Month,          // installed, the daemon running since 08:02, a month of spend, one breaker trip, a budget, and an overlay
 }
 
@@ -63,7 +64,7 @@ public sealed class GuideWorld : IAsyncDisposable
         DateTimeOffset start = state switch
         {
             GuideState.Fresh => Now,
-            GuideState.FirstPrompt => Utc("2026-11-21T21:20:00Z"),
+            GuideState.FirstPrompt or GuideState.Backfill => Utc("2026-11-21T21:20:00Z"),
             _ => Utc("2026-11-21T13:02:00Z"),
         };
         GuideWorld world = new(root, new ManualTimeProvider(start, ManualTimeProvider.UtcMinus5));
@@ -181,11 +182,16 @@ public sealed class GuideWorld : IAsyncDisposable
     {
         SqliteLedgerStore store = new(Harness.Context.DatabasePath, _clock);
         await store.InitializeAsync();
-        if (state == GuideState.FirstPrompt)
+        if (state is GuideState.FirstPrompt or GuideState.Backfill)
         {
             JsonRateCardCalculator builtIn = JsonRateCardCalculator.LoadEmbedded();
             NormalizedGenAiSpan first = Chat("1f", "c1", "2026-11-21T21:25:00Z", "claude-opus-5.5", null, null, 30_000, 1_500, 20_000);
             await store.RecordAsync([new LedgerEntry(first, builtIn.Calculate(first), Context("feature/search"))]);
+            if (state == GuideState.Backfill)
+            {
+                WriteSessionLogs();
+            }
+
             return;
         }
 
@@ -244,6 +250,69 @@ public sealed class GuideWorld : IAsyncDisposable
         Commit,
         "https://github.com/contoso/webapp.git",
         Slug);
+
+    // Copilot 1.0.110's logs, as Copilot CLI writes them under COPILOT_HOME: two sessions in this repository on 2026-11-20,
+    // before CopilotLedger was installed, one with an explore subagent and one with a compaction; one in contoso/api; and the
+    // session of the prompt at 16:25, which is still open.
+    private void WriteSessionLogs()
+    {
+        string home = Harness.Context.CopilotHome;
+        string api = Path.Combine(Path.GetDirectoryName(Repository)!, "api");
+        new CopilotSessionLogs(
+                "3f9b2c71-6d4e-4a8b-9c1d-2e5f7a9b0c11",
+                start: Utc("2026-11-20T14:00:00Z"),
+                context: CopilotSessionLogs.Context(Repository, Repository, "feature/search", Slug, Commit))
+            .UserMessage()
+            .Usage("msg_01A", "0b6f3a2e-9c41-4d7a-8e25-6b1f0c9d3a71", "claude-opus-5.5", input: 40_000, output: 2_000, cacheRead: 30_000)
+            .SubagentStarted("agent-1", "explore", "toolu_01")
+            .Usage(
+                "msg_01B",
+                "1c7a4b3f-0d52-4e8b-9f36-7c2a1d0e4b82",
+                "claude-haiku-4.5",
+                input: 20_000,
+                output: 1_000,
+                cacheRead: 10_000,
+                initiator: "agent",
+                agentId: "agent-1")
+            .Usage(
+                "msg_01C",
+                "2d8b5c4a-1e63-4f9c-8a47-8d3b2e1f5c93",
+                "claude-opus-5.5",
+                input: 60_000,
+                output: 3_000,
+                cacheRead: 50_000,
+                initiator: "agent")
+            .Write(home);
+        new CopilotSessionLogs(
+                "8c2d4e6f-1a3b-4c5d-8e7f-9a0b1c2d3e4f",
+                start: Utc("2026-11-20T18:00:00Z"),
+                context: CopilotSessionLogs.Context(Repository, Repository, "feature/search", Slug, Commit))
+            .UserMessage()
+            .Usage("msg_02A", "3e9c6d5b-2f74-4a0d-9b58-9e4c3f2a6d04", "claude-opus-5.5", input: 50_000, output: 2_500, cacheRead: 40_000)
+            .Compaction(
+                "4fad7e6c-3a85-4b1e-8c69-af5d4a3b7e15",
+                "claude-haiku-4.5",
+                input: 80_000,
+                output: 500,
+                cacheRead: 20_000,
+                cacheWrite: 50_000,
+                duration: 900)
+            .Write(home);
+        new CopilotSessionLogs(
+                "c41e7a9b-2d3f-4b5c-8d6e-7f8a9b0c1d2e",
+                start: Utc("2026-11-19T15:00:00Z"),
+                context: CopilotSessionLogs.Context(api, api, "main", "contoso/api", Commit))
+            .UserMessage()
+            .Usage("msg_03A", "5abe8f7d-4b96-4c2f-9d7a-b06e5b4c8f26", "claude-opus-5.5", input: 30_000, output: 1_000)
+            .Write(home);
+        new CopilotSessionLogs(
+                "7d4e1c2a-5b3f-4e8d-9a6c-00000000001f",
+                start: Utc("2026-11-21T21:24:00Z"),
+                context: CopilotSessionLogs.Context(Repository, Repository, "feature/search", Slug, Commit))
+            .UserMessage()
+            .Usage("msg_04A", "6bcf908e-5ca7-4d3a-8e8b-c17f6c5d9037", "claude-opus-5.5", input: 30_000, output: 1_500, cacheRead: 20_000)
+            .Write(home, active: true);
+    }
 
     // trace and span are the last characters of 32- and 16-character IDs. GitHub-hosted models report cache counters, and
     // this example's Foundry BYOK and local endpoints (the spans with a serverAddress) don't. A request's parent is its

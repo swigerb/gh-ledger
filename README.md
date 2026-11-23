@@ -13,6 +13,7 @@ It runs on your machine as the `gh ledger` GitHub CLI extension, with no Docker 
 - An MCP server, so Copilot can check spend, budgets, and the circuit breaker
 - Foundry BYOK prices, local-model savings, and `rates update` for new prices between releases
 - API-equivalent USD: what the same requests would cost at each model's API list prices, or at prices you supply, beside what Copilot billed
+- `gh ledger import`: backfill the requests in your Copilot CLI and GitHub Copilot app session logs, and in Codex's, from before you installed CopilotLedger
 
 ## Requirements
 
@@ -35,7 +36,11 @@ gh ledger status
 gh ledger branch
 ```
 
-The [user guide](docs/guide.md) shows the everyday tasks with sample output: reports, budgets, the circuit breaker, pull request receipts, Foundry BYOK and local models, MCP, updates, and uninstalling.
+The [user guide](docs/guide.md) shows the everyday tasks with sample output: backfilling history, reports, budgets, the circuit breaker, pull request receipts, Foundry BYOK and local models, MCP, updates, and uninstalling.
+
+## Privacy
+
+The ledger stays on your machine, and CopilotLedger never stores prompt or response content. `gh ledger import` reads Copilot's and Codex's session logs in place and keeps only what pricing and attribution need: models, token counts, times, agent names, the branch, commit, and `owner/repo` slug that a session recorded, tool names and exit codes, and SHA-256 hashes of request IDs. It never reads prompts, responses, tool arguments or results, or compaction summaries, and it doesn't read Claude Code's logs. See [What import reads and keeps](docs/cli.md#what-import-reads-and-keeps).
 
 ## Documentation
 
