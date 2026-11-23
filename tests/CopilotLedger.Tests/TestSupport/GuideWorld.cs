@@ -184,7 +184,7 @@ public sealed class GuideWorld : IAsyncDisposable
         if (state == GuideState.FirstPrompt)
         {
             JsonRateCardCalculator builtIn = JsonRateCardCalculator.LoadEmbedded();
-            NormalizedGenAiSpan first = Chat("1f", "c1", "2026-11-21T21:25:00Z", "claude-opus-5.5", null, null, 30_000, 1_500);
+            NormalizedGenAiSpan first = Chat("1f", "c1", "2026-11-21T21:25:00Z", "claude-opus-5.5", null, null, 30_000, 1_500, 20_000);
             await store.RecordAsync([new LedgerEntry(first, builtIn.Calculate(first), Context("feature/search"))]);
             return;
         }
@@ -227,7 +227,8 @@ public sealed class GuideWorld : IAsyncDisposable
         "https://github.com/contoso/webapp.git",
         Slug);
 
-    // trace and span are the last characters of 32- and 16-character IDs.
+    // trace and span are the last characters of 32- and 16-character IDs. GitHub-hosted models report cache counters, and
+    // this example's Foundry BYOK and local endpoints (the spans with a serverAddress) don't.
     private static NormalizedGenAiSpan Chat(
         string trace,
         string span,
@@ -246,7 +247,9 @@ public sealed class GuideWorld : IAsyncDisposable
             conversationId: "7d4e1c2a-5b3f-4e8d-9a6c-" + trace.PadLeft(12, '0'),
             inputTokens: inputTokens,
             outputTokens: outputTokens,
-            cacheReadInputTokens: cacheReadInputTokens) with
+            cacheReadInputTokens: cacheReadInputTokens,
+            cacheReadState: serverAddress is null ? CacheCounterState.Reported : CacheCounterState.Absent,
+            cacheWriteState: serverAddress is null ? CacheCounterState.Reported : CacheCounterState.Absent) with
         {
             TraceId = "0f3c9a7e5d1b4f2a8c6e0d9b7a5c" + trace.PadLeft(4, '0'),
             SpanId = "5e8a1c3f7b9d" + trace.PadLeft(2, '0') + span,

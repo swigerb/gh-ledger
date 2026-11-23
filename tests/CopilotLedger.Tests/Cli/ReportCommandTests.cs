@@ -440,6 +440,58 @@ public sealed class ReportCommandTests
             document.RootElement.GetProperty("warnings").EnumerateArray().Select(item => item.GetString()));
     }
 
+    [Fact]
+    public async Task RP14_StatusJsonHasEachPeriodsCacheCoverage()
+    {
+        using TempDirectory temp = new();
+        using TempDirectory empty = new();
+        await using CliHarness harness = await SeededHarnessAsync(temp.Path);
+        await using CliHarness emptyHarness = new(empty.Path, new FakeCliPlatform(), Time);
+
+        CliRun run = await harness.RunAsync("status", "--json");
+        CliRun emptyRun = await emptyHarness.RunAsync("status", "--json");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Contains("\"cacheHitRatio\": 0.5454545454545454545454545455\n", run.Out);
+        using JsonDocument json = JsonDocument.Parse(run.Out);
+        JsonElement[] periods = json.RootElement.GetProperty("periods").EnumerateArray().ToArray();
+        AssertCache(periods[0], 2, 1, 2_200_000, 1_200_000, 0.5454545454545454545454545455m);
+        AssertCache(periods[1], 2, 2, 2_200_000, 1_200_000, 0.5454545454545454545454545455m);
+        AssertCache(periods[2], 2, 2, 2_200_000, 1_200_000, 0.5454545454545454545454545455m);
+        Assert.Equal("cache", periods[0].EnumerateObject().Last().Name);
+        Assert.Equal(0, emptyRun.ExitCode);
+        using JsonDocument emptyJson = JsonDocument.Parse(emptyRun.Out);
+        foreach (JsonElement period in emptyJson.RootElement.GetProperty("periods").EnumerateArray())
+        {
+            AssertCache(period, 0, 0, 0, 0, null);
+        }
+    }
+
+    [Fact]
+    public async Task RP15_BranchAndAgentRowsEndWithCacheCoverage()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = await SeededHarnessAsync(temp.Path);
+
+        CliRun branch = await harness.RunAsync("branch", "--all-repos", "--json");
+        CliRun agents = await harness.RunAsync("agents", "--since", "all", "--json");
+
+        Assert.Equal(0, branch.ExitCode);
+        using JsonDocument branchJson = JsonDocument.Parse(branch.Out);
+        JsonElement[] branchRows = branchJson.RootElement.GetProperty("rows").EnumerateArray().ToArray();
+        Assert.Equal(3, branchRows.Length);
+        AssertCoverage(branchRows[0], 1, 0, 0.6666666666666666666666666667m);
+        AssertCoverage(branchRows[1], 1, 1, 0.4m);
+        AssertCoverage(branchRows[2], 0, 1, null);
+        Assert.Equal(0, agents.ExitCode);
+        using JsonDocument agentJson = JsonDocument.Parse(agents.Out);
+        JsonElement[] agentRows = agentJson.RootElement.GetProperty("rows").EnumerateArray().ToArray();
+        Assert.Equal(["ledger-architect", "ledger-builder", "(none)"], agentRows.Select(row => row.GetProperty("agent").GetString()));
+        AssertCoverage(agentRows[0], 1, 0, 0.6666666666666666666666666667m);
+        AssertCoverage(agentRows[1], 1, 2, 0.4m);
+        AssertCoverage(agentRows[2], 0, 1, null);
+    }
+
     private static async Task<CliHarness> SeededHarnessAsync(
         string root,
         Action<FakeCliPlatform>? configure = null)
@@ -489,6 +541,41 @@ public sealed class ReportCommandTests
     }
 
     private static string Normalize(string value) => value.Replace("\r\n", "\n");
+
+    private static void AssertCache(
+        JsonElement period,
+        long reported,
+        long unreported,
+        long reportedInput,
+        long reportedCacheRead,
+        decimal? hitRatio)
+    {
+        JsonElement cache = period.GetProperty("cache");
+        Assert.Equal(
+            ["cacheReportedSpans", "cacheUnreportedSpans", "reportedInputTokens", "reportedCacheReadInputTokens", "cacheHitRatio"],
+            cache.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(reported, cache.GetProperty("cacheReportedSpans").GetInt64());
+        Assert.Equal(unreported, cache.GetProperty("cacheUnreportedSpans").GetInt64());
+        Assert.Equal(reportedInput, cache.GetProperty("reportedInputTokens").GetInt64());
+        Assert.Equal(reportedCacheRead, cache.GetProperty("reportedCacheReadInputTokens").GetInt64());
+        JsonElement ratio = cache.GetProperty("cacheHitRatio");
+        Assert.Equal(hitRatio, ratio.ValueKind == JsonValueKind.Null ? null : ratio.GetDecimal());
+    }
+
+    private static void AssertCoverage(
+        JsonElement row,
+        long reported,
+        long unreported,
+        decimal? hitRatio)
+    {
+        Assert.Equal(
+            ["localSavedUsd", "cacheReportedSpans", "cacheUnreportedSpans", "cacheHitRatio"],
+            row.EnumerateObject().Select(property => property.Name).TakeLast(4));
+        Assert.Equal(reported, row.GetProperty("cacheReportedSpans").GetInt64());
+        Assert.Equal(unreported, row.GetProperty("cacheUnreportedSpans").GetInt64());
+        JsonElement ratio = row.GetProperty("cacheHitRatio");
+        Assert.Equal(hitRatio, ratio.ValueKind == JsonValueKind.Null ? null : ratio.GetDecimal());
+    }
 
     private static void AssertRollup(
         JsonElement row,
@@ -568,6 +655,11 @@ public sealed class ReportCommandTests
         Today             3         0      342.00       $3.42     $0.00        $0.23
         Last 7 days       4         0      342.00       $3.42     $0.32        $0.23
         Last 30 days      4         0      342.00       $3.42     $0.32        $0.23
+
+        Period        Cache hit  Cache reported
+        Today             54.5%  2 of 3 spans
+        Last 7 days       54.5%  2 of 4 spans
+        Last 30 days      54.5%  2 of 4 spans
 
         """);
 }

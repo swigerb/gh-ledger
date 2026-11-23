@@ -53,9 +53,14 @@ Rates:   2026-11-20
 Copilot: OTel export enabled (COPILOT_OTEL_ENABLED=true)
 
 Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
-Today             1         0       15.00       $0.15     $0.00        $0.00
-Last 7 days       1         0       15.00       $0.15     $0.00        $0.00
-Last 30 days      1         0       15.00       $0.15     $0.00        $0.00
+Today             1         0        7.40       $0.07     $0.00        $0.00
+Last 7 days       1         0        7.40       $0.07     $0.00        $0.00
+Last 30 days      1         0        7.40       $0.07     $0.00        $0.00
+
+Period        Cache hit  Cache reported
+Today             66.7%  1 of 1 span
+Last 7 days       66.7%  1 of 1 span
+Last 30 days      66.7%  1 of 1 span
 ```
 <!-- /sample -->
 
@@ -81,6 +86,11 @@ Period        Spans  Unpriced  AI credits  GitHub USD  BYOK USD  Local saved
 Today             8         0      617.75       $6.18     $0.49        $0.17
 Last 7 days      10         0      764.00       $7.64     $0.49        $0.17
 Last 30 days     11         0      908.00       $9.08     $0.49        $0.17
+
+Period        Cache hit  Cache reported
+Today             53.7%  6 of 8 spans
+Last 7 days       52.7%  8 of 10 spans
+Last 30 days      48.8%  9 of 11 spans
 ```
 <!-- /sample -->
 

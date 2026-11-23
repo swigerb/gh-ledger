@@ -240,6 +240,17 @@ internal static class ReportCommands
             [new("Period", false), .. MoneyColumns],
             totals.Select(item =>
                 (IReadOnlyList<string>)[item.Label, .. MoneyCells(item.Total)]).ToArray());
+        context.Out.WriteLine();
+        TableWriter.Write(
+            context.Out,
+            [new("Period", false), new("Cache hit", true), new("Cache reported", false)],
+            totals.Select(item =>
+                (IReadOnlyList<string>)
+                [
+                    item.Label,
+                    LedgerFormat.Percent(item.Total.CacheHitRatio),
+                    $"{LedgerFormat.Count(item.Total.CacheReportedSpanCount)} of {Spans(item.Total.SpanCount)}",
+                ]).ToArray());
         return 0;
     }
 
@@ -481,6 +492,14 @@ internal static class ReportCommands
             writer.WriteString("label", period.Label);
             LedgerFormat.WriteTime(writer, "from", period.From);
             LedgerFormat.WriteTotals(writer, total);
+            writer.WritePropertyName("cache");
+            writer.WriteStartObject();
+            writer.WriteNumber("cacheReportedSpans", total.CacheReportedSpanCount);
+            writer.WriteNumber("cacheUnreportedSpans", total.CacheUnreportedSpanCount);
+            writer.WriteNumber("reportedInputTokens", total.ReportedInputTokens);
+            writer.WriteNumber("reportedCacheReadInputTokens", total.ReportedCacheReadInputTokens);
+            LedgerFormat.WriteDecimal(writer, "cacheHitRatio", total.CacheHitRatio);
+            writer.WriteEndObject();
             writer.WriteEndObject();
         }
 
@@ -525,6 +544,7 @@ internal static class ReportCommands
             }
 
             LedgerFormat.WriteTotals(writer, row);
+            LedgerFormat.WriteCacheCoverage(writer, row);
             writer.WriteEndObject();
         }
 
@@ -627,6 +647,9 @@ internal static class ReportCommands
 
     private static string Joined(IReadOnlyList<string> values) =>
         values.Count == 0 ? "-" : string.Join(", ", values);
+
+    private static string Spans(long count) =>
+        $"{LedgerFormat.Count(count)} {(count == 1 ? "span" : "spans")}";
 
     private static bool IsOtelEnabled(Func<string, string?> lookup)
     {

@@ -17,6 +17,13 @@ internal static class LedgerFormat
     public static string Count(long value) =>
         value.ToString("N0", CultureInfo.InvariantCulture);
 
+    // ratio as a percentage with one decimal place, rounded half away from zero; n/a for null, never 0.0%.
+    public static string Percent(decimal? ratio) =>
+        ratio is null
+            ? "n/a"
+            : decimal.Round(ratio.Value * 100m, 1, MidpointRounding.AwayFromZero)
+                .ToString("0.0", CultureInfo.InvariantCulture) + "%";
+
     public static string LocalTime(DateTimeOffset value, TimeZoneInfo zone) =>
         TimeZoneInfo.ConvertTime(value, zone)
             .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
@@ -28,6 +35,22 @@ internal static class LedgerFormat
     {
         writer.WritePropertyName(name);
         writer.WriteRawValue(value.ToString("0.############", CultureInfo.InvariantCulture));
+    }
+
+    // value with every digit decimal division gave it, or null. Used for ratios and averages.
+    public static void WriteDecimal(
+        Utf8JsonWriter writer,
+        string name,
+        decimal? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNull(name);
+            return;
+        }
+
+        writer.WritePropertyName(name);
+        writer.WriteRawValue(value.Value.ToString(CultureInfo.InvariantCulture));
     }
 
     public static void WriteTime(
@@ -60,6 +83,16 @@ internal static class LedgerFormat
         WriteMoney(writer, "aiCreditsUsd", row.AiCreditsUsd);
         WriteMoney(writer, "foundryByokUsd", row.FoundryByokUsd);
         WriteMoney(writer, "localSavedUsd", row.LocalSavedUsd);
+    }
+
+    // The cache fields that branch and agents rows end with. Receipts don't write them.
+    public static void WriteCacheCoverage(
+        Utf8JsonWriter writer,
+        LedgerRollupRow row)
+    {
+        writer.WriteNumber("cacheReportedSpans", row.CacheReportedSpanCount);
+        writer.WriteNumber("cacheUnreportedSpans", row.CacheUnreportedSpanCount);
+        WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
     }
 
     public static void WriteTotals(
