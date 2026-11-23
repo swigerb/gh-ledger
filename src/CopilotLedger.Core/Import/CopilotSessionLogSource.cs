@@ -1,3 +1,6 @@
+using System.Globalization;
+using CopilotLedger.Core.Telemetry;
+
 namespace CopilotLedger.Core.Import;
 
 // The session logs that Copilot CLI and the GitHub Copilot app write, <home>/session-state/<session ID>/events.jsonl, as
@@ -8,9 +11,29 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
     public static readonly ProducerVersion MaximumVersion = new(1, 0, 114);
 
     // The events whose allowlisted metadata is read. Every other type is skipped after its "type".
-    private static readonly string[] Types = ["session.start", "journal.link"];
+    private static readonly string[] Types =
+    [
+        "session.start",
+        "session.resume",
+        "session.usage_record",
+        "session.compaction_complete",
+        "subagent.started",
+        "tool.execution_start",
+        "tool.execution_complete",
+        "journal.link",
+    ];
 
-    private static readonly ImportEventKind[] Kinds = [ImportEventKind.SessionStart, ImportEventKind.JournalLink];
+    private static readonly ImportEventKind[] Kinds =
+    [
+        ImportEventKind.SessionStart,
+        ImportEventKind.SessionResume,
+        ImportEventKind.UsageRecord,
+        ImportEventKind.CompactionComplete,
+        ImportEventKind.SubagentStarted,
+        ImportEventKind.ToolExecutionStart,
+        ImportEventKind.ToolExecutionComplete,
+        ImportEventKind.JournalLink,
+    ];
 
     private static readonly PathTree StartPaths = new(
         ("data.sessionId", 128),
@@ -22,6 +45,64 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ("data.context.branch", 256),
         ("data.context.headCommit", 64),
         ("data.context.repository", 512));
+
+    private static readonly PathTree ResumePaths = new(
+        ("data.context.cwd", 4096),
+        ("data.context.gitRoot", 4096),
+        ("data.context.branch", 256),
+        ("data.context.headCommit", 64),
+        ("data.context.repository", 512));
+
+    private static readonly PathTree UsagePaths = new(
+        ("timestamp", 64),
+        ("agentId", 2048),
+        ("data.usage.model", 256),
+        ("data.usage.responseModel", 256),
+        ("data.usage.inputTokens", 0),
+        ("data.usage.outputTokens", 0),
+        ("data.usage.cacheReadTokens", 0),
+        ("data.usage.cacheWriteTokens", 0),
+        ("data.usage.cacheDetailsReported", 0),
+        ("data.usage.isByok", 0),
+        ("data.usage.provider.kind", 64),
+        ("data.usage.providerType", 64),
+        ("data.usage.serviceRequestId", 64),
+        ("data.usage.accounting.usageId", 2048),
+        ("data.usage.parentToolCallId", 2048),
+        ("data.usage.duration", 0),
+        ("data.usage.numToolCalls", 0),
+        ("data.usage.initiator", 64));
+
+    private static readonly PathTree CompactionPaths = new(
+        ("timestamp", 64),
+        ("agentId", 2048),
+        ("data.success", 0),
+        ("data.serviceRequestId", 64),
+        ("data.compactionTokensUsed.requestCount", 0),
+        ("data.compactionTokensUsed.inputTokens", 0),
+        ("data.compactionTokensUsed.outputTokens", 0),
+        ("data.compactionTokensUsed.cacheReadTokens", 0),
+        ("data.compactionTokensUsed.cacheWriteTokens", 0),
+        ("data.compactionTokensUsed.model", 256),
+        ("data.compactionTokensUsed.duration", 0),
+        ("data.compactionTokensUsed.provider.kind", 64));
+
+    private static readonly PathTree SubagentPaths = new(
+        ("agentId", 2048),
+        ("data.agentName", 256),
+        ("data.toolCallId", 2048));
+
+    private static readonly PathTree ToolStartPaths = new(
+        ("timestamp", 64),
+        ("agentId", 2048),
+        ("data.toolCallId", 2048),
+        ("data.toolName", 256),
+        ("data.parentToolCallId", 2048));
+
+    private static readonly PathTree ToolCompletePaths = new(
+        ("data.toolCallId", 2048),
+        ("data.success", 0),
+        ("data.shellExecution.exitCode", 0));
 
     public ImportSourceKind Kind => ImportSourceKind.Copilot;
 
@@ -120,8 +201,21 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         private bool _started;
         private bool _journal;
         private string? _version;
+        private ImportedGitContext? _context;
+        private string? _turnKey;
+        private long _parsed;
+        private long _unsupported;
         private long _malformed;
         private long _skipped;
+
+        // Sub-agents: their names by envelope agentId and by the tool call that started them, and their agentIds by that call.
+        private readonly Dictionary<string, string> _agentNameByAgentId = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _agentNameByToolCallId = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _agentIdByToolCallId = new(StringComparer.Ordinal);
+
+        // The latest usage record of each agent (context key), which owns the tool calls that follow it.
+        private readonly Dictionary<string, string> _latestRecordByContext = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, PendingTool> _pendingTools = new(StringComparer.Ordinal);
 
         internal bool OnLine(ReadOnlySpan<byte> line, long number, long offset)
         {
@@ -142,6 +236,24 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
 
             switch (kind)
             {
+                case ImportEventKind.SessionResume:
+                    Resume(JsonFields.Read(line, ResumePaths), number, offset);
+                    break;
+                case ImportEventKind.UsageRecord:
+                    Usage(JsonFields.Read(line, UsagePaths), number, offset);
+                    break;
+                case ImportEventKind.CompactionComplete:
+                    Compaction(JsonFields.Read(line, CompactionPaths), number, offset);
+                    break;
+                case ImportEventKind.SubagentStarted:
+                    SubagentStarted(JsonFields.Read(line, SubagentPaths));
+                    break;
+                case ImportEventKind.ToolExecutionStart:
+                    ToolStart(JsonFields.Read(line, ToolStartPaths));
+                    break;
+                case ImportEventKind.ToolExecutionComplete:
+                    ToolComplete(JsonFields.Read(line, ToolCompletePaths));
+                    break;
                 case ImportEventKind.JournalLink:
                     if (!_journal)
                     {
@@ -189,8 +301,8 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 Records = _records,
                 ToolCalls = _toolCalls,
                 Diagnostics = _diagnostics.ToList(),
-                RecordsParsed = 0,
-                UnsupportedUsageShapes = 0,
+                RecordsParsed = _parsed,
+                UnsupportedUsageShapes = _unsupported,
                 MalformedLines = _malformed,
                 SkippedEvents = _skipped,
             };
@@ -235,8 +347,260 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
 
             _started = true;
             _version = text;
+            _context = Context(fields);
             return true;
         }
+
+        // A resumed session's context replaces the one before for the records that follow.
+        private void Resume(JsonFields fields, long number, long offset)
+        {
+            if (fields.Duplicate is not null)
+            {
+                Malformed(ImportDiagnosticCode.MalformedLine, ImportEventKind.SessionResume, fields.Duplicate, number, offset);
+            }
+            else if (fields.IsObject("data.context"))
+            {
+                _context = Context(fields);
+            }
+        }
+
+        // A session.usage_record: one model call. The first field that fails validation names the unsupported shape.
+        private void Usage(JsonFields fields, long number, long offset)
+        {
+            const ImportEventKind kind = ImportEventKind.UsageRecord;
+            _parsed++;
+            if (fields.Duplicate is not null)
+            {
+                Unsupported(kind, fields.Duplicate, number, offset);
+                return;
+            }
+
+            if (Time(fields) is not DateTimeOffset end)
+            {
+                Unsupported(kind, "timestamp", number, offset);
+                return;
+            }
+
+            if (!fields.IsObject("data.usage"))
+            {
+                Unsupported(kind, "data.usage", number, offset);
+                return;
+            }
+
+            string? usageId = fields.String("data.usage.accounting.usageId");
+            string? model = fields.String("data.usage.model");
+            string? responseModel = fields.String("data.usage.responseModel");
+            string? tokens = Tokens(fields, "data.usage.", out long input, out long output, out long cacheRead, out long cacheWrite);
+            bool? cacheReported = fields.Boolean("data.usage.cacheDetailsReported");
+            bool? byok = fields.Boolean("data.usage.isByok");
+            string? serviceRequestId = UsageIdentity.NormalizeServiceRequestId(fields.String("data.usage.serviceRequestId"));
+            string? failed =
+                usageId is null ? "data.usage.accounting.usageId"
+                : model is null ? "data.usage.model"
+                : responseModel is null && fields.IsPresent("data.usage.responseModel") ? "data.usage.responseModel"
+                : tokens
+                ?? (cacheReported is null ? "data.usage.cacheDetailsReported"
+                : byok is null ? "data.usage.isByok"
+                : byok == false && fields.String("data.usage.provider.kind") != "copilot" ? "data.usage.provider.kind"
+                : byok == false && serviceRequestId is null ? "data.usage.serviceRequestId"
+                : null);
+            if (failed is not null)
+            {
+                Unsupported(kind, failed, number, offset);
+                return;
+            }
+
+            (string contextKey, string? agentName) = Attribute(
+                fields.String("agentId"),
+                fields.String("data.usage.parentToolCallId"),
+                kind,
+                number,
+                offset);
+            if (contextKey.Length == 0 && fields.String("data.usage.initiator") == "user")
+            {
+                _turnKey = usageId;
+            }
+
+            _records.Add(new ImportedUsageRecord
+            {
+                Source = ImportSourceKind.Copilot,
+                Kind = ImportedRecordKind.Usage,
+                SessionId = location.LogId,
+                RecordKey = usageId!,
+                TurnKey = _turnKey,
+                ServiceRequestId = byok == true ? null : serviceRequestId,
+                StartTime = end.AddMilliseconds(-(Duration(fields.Integer("data.usage.duration")) ?? 0)),
+                EndTime = end,
+                RequestModel = model!,
+                ResponseModel = responseModel,
+                ProviderName = byok == true
+                    ? fields.String("data.usage.providerType")?.ToLowerInvariant()
+                    : UsageIdentity.GitHubProviderName,
+                BillingSource = byok == true ? BillingSource.Provider : BillingSource.Endpoint,
+                AgentName = agentName,
+                InputTokens = input,
+                OutputTokens = output,
+                CacheReadInputTokens = cacheRead,
+                CacheWriteInputTokens = cacheWrite,
+                CacheReadState = cacheReported == true || cacheRead > 0 ? CacheCounterState.Reported : CacheCounterState.Absent,
+                CacheWriteState = cacheReported == true || cacheWrite > 0 ? CacheCounterState.Reported : CacheCounterState.Absent,
+                ToolCallCount = Count(fields.Integer("data.usage.numToolCalls")),
+                Git = _context,
+                LineNumber = number,
+            });
+            _latestRecordByContext[contextKey] = usageId!;
+        }
+
+        // A session.compaction_complete with compactionTokensUsed: the one billed call that summarized the conversation.
+        // Without compactionTokensUsed, it reports no usage and is a skipped event.
+        private void Compaction(JsonFields fields, long number, long offset)
+        {
+            const ImportEventKind kind = ImportEventKind.CompactionComplete;
+            if (fields.Duplicate is null && !fields.IsPresent("data.compactionTokensUsed"))
+            {
+                _skipped++;
+                return;
+            }
+
+            _parsed++;
+            string? serviceRequestId = UsageIdentity.NormalizeServiceRequestId(fields.String("data.serviceRequestId"));
+            string? model = fields.String("data.compactionTokensUsed.model");
+            DateTimeOffset? end = Time(fields);
+            string? failed =
+                fields.Duplicate
+                ?? (end is null ? "timestamp"
+                : fields.Boolean("data.success") != true ? "data.success"
+                : !fields.IsObject("data.compactionTokensUsed") ? "data.compactionTokensUsed"
+                : fields.Integer("data.compactionTokensUsed.requestCount") != 1 ? "data.compactionTokensUsed.requestCount"
+                : serviceRequestId is null ? "data.serviceRequestId"
+                : model is null ? "data.compactionTokensUsed.model"
+                : null);
+            long input = 0;
+            long output = 0;
+            long cacheRead = 0;
+            long cacheWrite = 0;
+            failed ??= Tokens(fields, "data.compactionTokensUsed.", out input, out output, out cacheRead, out cacheWrite)
+                ?? (fields.String("data.compactionTokensUsed.provider.kind") != "copilot"
+                    ? "data.compactionTokensUsed.provider.kind"
+                    : null);
+            if (failed is not null)
+            {
+                Unsupported(kind, failed, number, offset);
+                return;
+            }
+
+            (_, string? agentName) = Attribute(fields.String("agentId"), null, kind, number, offset);
+            _records.Add(new ImportedUsageRecord
+            {
+                Source = ImportSourceKind.Copilot,
+                Kind = ImportedRecordKind.Compaction,
+                SessionId = location.LogId,
+                RecordKey = serviceRequestId!,
+                TurnKey = _turnKey,
+                ServiceRequestId = serviceRequestId,
+                StartTime = end!.Value.AddMilliseconds(-(Duration(fields.Integer("data.compactionTokensUsed.duration")) ?? 0)),
+                EndTime = end.Value,
+                RequestModel = model!,
+                ProviderName = UsageIdentity.GitHubProviderName,
+                BillingSource = BillingSource.Endpoint,
+                AgentName = agentName,
+                InputTokens = input,
+                OutputTokens = output,
+                CacheReadInputTokens = cacheRead,
+                CacheWriteInputTokens = cacheWrite,
+                CacheReadState = CacheCounterState.Reported,
+                CacheWriteState = CacheCounterState.Reported,
+                Git = _context,
+                LineNumber = number,
+            });
+        }
+
+        private void SubagentStarted(JsonFields fields)
+        {
+            string? agentId = fields.String("agentId");
+            string? agentName = fields.String("data.agentName");
+            string? toolCallId = fields.String("data.toolCallId");
+            if (fields.Duplicate is null && agentId is not null && agentName is not null && toolCallId is not null)
+            {
+                _agentNameByAgentId[agentId] = agentName;
+                _agentNameByToolCallId[toolCallId] = agentName;
+                _agentIdByToolCallId[toolCallId] = agentId;
+            }
+        }
+
+        // A tool call belongs to the latest usage record of its agent, whose response asked for it.
+        private void ToolStart(JsonFields fields)
+        {
+            string? toolCallId = fields.String("data.toolCallId");
+            string? toolName = fields.String("data.toolName");
+            if (fields.Duplicate is not null || toolCallId is null || toolName is null || Time(fields) is not DateTimeOffset start)
+            {
+                return;
+            }
+
+            string? agentId = fields.String("agentId");
+            string? parentToolCallId = fields.String("data.parentToolCallId");
+            string contextKey = ContextKey(agentId, parentToolCallId);
+            _pendingTools[toolCallId] = new PendingTool(
+                _latestRecordByContext.GetValueOrDefault(contextKey),
+                toolName,
+                AgentName(agentId, parentToolCallId),
+                start);
+        }
+
+        private void ToolComplete(JsonFields fields)
+        {
+            string? toolCallId = fields.String("data.toolCallId");
+            if (fields.Duplicate is not null ||
+                toolCallId is null ||
+                fields.Boolean("data.success") is not bool success ||
+                !_pendingTools.Remove(toolCallId, out PendingTool? pending) ||
+                pending.Owner is null)
+            {
+                return;
+            }
+
+            _toolCalls.Add(new ImportedToolCall
+            {
+                SessionId = location.LogId,
+                OwnerRecordKey = pending.Owner,
+                ToolCallId = toolCallId,
+                ToolName = pending.ToolName,
+                AgentName = pending.AgentName,
+                StartTime = pending.StartTime,
+                Success = success,
+                ExitCode = fields.Integer("data.shellExecution.exitCode"),
+            });
+        }
+
+        // The context key and agent name of a sub-agent's event: by envelope agentId, else (Copilot 1.0.103's records) by the
+        // tool call that started the sub-agent. The main agent has key "" and no name, as its live spans have none.
+        private (string ContextKey, string? AgentName) Attribute(
+            string? agentId,
+            string? parentToolCallId,
+            ImportEventKind kind,
+            long number,
+            long offset)
+        {
+            string contextKey = ContextKey(agentId, parentToolCallId);
+            string? agentName = AgentName(agentId, parentToolCallId);
+            if (contextKey.Length > 0 && agentName is null)
+            {
+                _diagnostics.Add(ImportDiagnosticCode.UnknownSubagent, kind, null, number, offset);
+            }
+
+            return (contextKey, agentName);
+        }
+
+        private string ContextKey(string? agentId, string? parentToolCallId) =>
+            agentId is not null ? "agent:" + agentId
+            : parentToolCallId is null ? ""
+            : _agentIdByToolCallId.TryGetValue(parentToolCallId, out string? id) ? "agent:" + id
+            : "tool:" + parentToolCallId;
+
+        private string? AgentName(string? agentId, string? parentToolCallId) =>
+            (agentId is not null ? _agentNameByAgentId.GetValueOrDefault(agentId) : null)
+            ?? (parentToolCallId is not null ? _agentNameByToolCallId.GetValueOrDefault(parentToolCallId) : null);
 
         private bool Stop(SessionLogStatus status, ImportEventKind kind, string? version, long number, long offset)
         {
@@ -249,5 +613,58 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             _malformed++;
             _diagnostics.Add(code, kind, field, number, offset);
         }
+
+        private void Unsupported(ImportEventKind kind, string field, long number, long offset)
+        {
+            _unsupported++;
+            _diagnostics.Add(ImportDiagnosticCode.UnsupportedUsageShape, kind, field, number, offset);
+        }
+
+        // The four token counts under prefix, or the first invalid field: each from 0 to ImportLimits.MaxTokenCount, and
+        // cache reads plus cache writes no more than the input, which includes them.
+        private static string? Tokens(
+            JsonFields fields,
+            string prefix,
+            out long input,
+            out long output,
+            out long cacheRead,
+            out long cacheWrite)
+        {
+            input = Count(fields.Integer(prefix + "inputTokens")) ?? -1;
+            output = Count(fields.Integer(prefix + "outputTokens")) ?? -1;
+            cacheRead = Count(fields.Integer(prefix + "cacheReadTokens")) ?? -1;
+            cacheWrite = Count(fields.Integer(prefix + "cacheWriteTokens")) ?? -1;
+            return input < 0 ? prefix + "inputTokens"
+                : output < 0 ? prefix + "outputTokens"
+                : cacheRead < 0 ? prefix + "cacheReadTokens"
+                : cacheWrite < 0 ? prefix + "cacheWriteTokens"
+                : cacheRead + cacheWrite > input ? prefix + "inputTokens"
+                : null;
+        }
+
+        private static long? Count(long? value) => value is >= 0 and <= ImportLimits.MaxTokenCount ? value : null;
+
+        private static long? Duration(long? value) => value is >= 0 and <= ImportLimits.MaxDurationMilliseconds ? value : null;
+
+        // The envelope timestamp, in UTC.
+        private static DateTimeOffset? Time(JsonFields fields) =>
+            DateTimeOffset.TryParse(
+                fields.String("timestamp"),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out DateTimeOffset time)
+                ? time
+                : null;
+
+        private static ImportedGitContext Context(JsonFields fields) => new()
+        {
+            WorkingDirectory = SessionLogs.FullPath(fields.String("data.context.cwd")),
+            RepositoryRoot = SessionLogs.FullPath(fields.String("data.context.gitRoot")),
+            RepositorySlug = SessionLogs.RepositorySlug(fields.String("data.context.repository")),
+            Branch = fields.String("data.context.branch"),
+            HeadCommitSha = SessionLogs.CommitSha(fields.String("data.context.headCommit")),
+        };
+
+        private sealed record PendingTool(string? Owner, string ToolName, string? AgentName, DateTimeOffset StartTime);
     }
 }

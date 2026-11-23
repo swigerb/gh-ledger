@@ -78,6 +78,221 @@ public sealed class CopilotSessionLogs
     public CopilotSessionLogs UserMessage() =>
         Event("user.message", new JsonObject { ["content"] = Canary, ["transformedContent"] = Canary });
 
+    // A session.start or session.resume context.
+    public static JsonObject Context(
+        string cwd,
+        string? gitRoot = null,
+        string? branch = null,
+        string? repository = null,
+        string? headCommit = null)
+    {
+        JsonObject context = new() { ["cwd"] = cwd };
+        if (gitRoot is not null)
+        {
+            context["gitRoot"] = gitRoot;
+            context["branch"] = branch;
+            context["headCommit"] = headCommit;
+            context["baseCommit"] = headCommit;
+            context["repository"] = repository;
+            context["repositoryHost"] = "github.com";
+            context["hostType"] = "github";
+        }
+
+        return context;
+    }
+
+    public CopilotSessionLogs Resume(JsonObject? context) =>
+        Event(
+            "session.resume",
+            context is null
+                ? new JsonObject { ["resumeTime"] = Stamp(_time), ["eventCount"] = _lines.Count }
+                : new JsonObject { ["resumeTime"] = Stamp(_time), ["eventCount"] = _lines.Count, ["context"] = context });
+
+    // A session.usage_record with the shape Copilot 1.0.114 writes; with responseModel null, as 1.0.103 writes it. A BYOK
+    // record has providerType and no provider or service request ID. change can alter data.usage before it's written.
+    public CopilotSessionLogs Usage(
+        string usageId,
+        string? serviceRequestId,
+        string model = "claude-haiku-4.5",
+        string? responseModel = null,
+        long input = 1_000,
+        long output = 100,
+        long cacheRead = 0,
+        long cacheWrite = 0,
+        bool cacheDetailsReported = true,
+        string initiator = "user",
+        long duration = 1_000,
+        long numToolCalls = 0,
+        string? agentId = null,
+        string? parentToolCallId = null,
+        string? providerType = null,
+        Action<JsonObject>? change = null)
+    {
+        JsonObject usage = new() { ["model"] = model };
+        if (responseModel is not null)
+        {
+            usage["responseModel"] = responseModel;
+        }
+
+        if (providerType is null)
+        {
+            usage["provider"] = new JsonObject { ["id"] = "copilot", ["kind"] = "copilot", ["label"] = "GitHub Copilot" };
+        }
+
+        usage["modelDisplayName"] = model;
+        usage["inputTokens"] = input;
+        usage["outputTokens"] = output;
+        usage["cacheReadTokens"] = cacheRead;
+        usage["cacheWriteTokens"] = cacheWrite;
+        usage["reasoningTokens"] = 0;
+        usage["cost"] = JsonNode.Parse("0.33");
+        usage["duration"] = duration;
+        usage["initiator"] = initiator;
+        usage["interactionType"] = "conversation-agent";
+        usage["isByok"] = providerType is not null;
+        usage["apiEndpoint"] = "/v1/messages";
+        usage["apiCallId"] = usageId;
+        if (providerType is null)
+        {
+            usage["providerCallId"] = "chatcmpl-" + Canary;
+            usage["serviceRequestId"] = serviceRequestId;
+        }
+        else
+        {
+            usage["byokKind"] = "custom";
+            usage["modelProvider"] = providerType;
+            usage["providerType"] = providerType;
+        }
+
+        usage["accounting"] = new JsonObject
+        {
+            ["sourceSessionId"] = SessionId,
+            ["sequence"] = _lines.Count,
+            ["usageId"] = usageId,
+        };
+        if (parentToolCallId is not null)
+        {
+            usage["parentToolCallId"] = parentToolCallId;
+        }
+
+        usage["cacheDetailsReported"] = cacheDetailsReported;
+        usage["numToolCalls"] = numToolCalls;
+        usage["toolCounts"] = new JsonObject { [Canary] = numToolCalls };
+        usage["finishReason"] = "tool_calls";
+        change?.Invoke(usage);
+        return Event("session.usage_record", new JsonObject { ["usage"] = usage }, agentId);
+    }
+
+    // A session.compaction_complete with the shape Copilot 1.0.114 writes: its usage in compactionTokensUsed, and content
+    // in summaryContent, checkpointPath, and the request IDs that match nothing. change can alter data before it's written.
+    public CopilotSessionLogs Compaction(
+        string? serviceRequestId,
+        string model = "claude-haiku-4.5",
+        long input = 112_223,
+        long output = 18,
+        long cacheRead = 18_967,
+        long cacheWrite = 93_251,
+        long duration = 891,
+        string? agentId = null,
+        bool tokensUsed = true,
+        Action<JsonObject>? change = null)
+    {
+        JsonObject data = new()
+        {
+            ["success"] = true,
+            ["outcome"] = "applied",
+            ["compactionAttemptId"] = "c0000000-0000-4000-8000-000000000001",
+            ["preCompactionMessagesLength"] = 34,
+            ["summaryContent"] = Canary,
+            ["trigger"] = "threshold",
+            ["execution"] = "background",
+            ["preCompactionTokens"] = 117_765,
+            ["postCompactionTokens"] = 25_805,
+            ["clientRequestId"] = Canary,
+            ["attemptMetrics"] = new JsonObject { ["durationMs"] = 2_640, ["deadlinePolicy"] = Canary },
+        };
+        if (tokensUsed)
+        {
+            data["compactionTokensUsed"] = new JsonObject
+            {
+                ["requestCount"] = 1,
+                ["aiCreditsStatus"] = "complete",
+                ["provider"] = new JsonObject { ["id"] = "copilot", ["kind"] = "copilot", ["label"] = "GitHub Copilot" },
+                ["modelDisplayName"] = Canary,
+                ["inputTokens"] = input,
+                ["outputTokens"] = output,
+                ["cacheReadTokens"] = cacheRead,
+                ["cacheWriteTokens"] = cacheWrite,
+                ["copilotUsage"] = new JsonObject { ["totalNanoAiu"] = 11_855_545_000 },
+                ["duration"] = duration,
+                ["model"] = model,
+            };
+        }
+
+        data["requestId"] = Canary;
+        data["serviceRequestId"] = serviceRequestId;
+        data["checkpointNumber"] = 1;
+        data["checkpointPath"] = Path.Combine(Canary, "checkpoint.md");
+        change?.Invoke(data);
+        return Event("session.compaction_complete", data, agentId);
+    }
+
+    public CopilotSessionLogs SubagentStarted(string agentId, string agentName, string toolCallId) =>
+        Event(
+            "subagent.started",
+            new JsonObject
+            {
+                ["toolCallId"] = toolCallId,
+                ["agentName"] = agentName,
+                ["agentDisplayName"] = Canary,
+                ["agentDescription"] = Canary,
+                ["model"] = "gpt-6-luna",
+                ["agentType"] = agentName,
+            },
+            agentId);
+
+    public CopilotSessionLogs ToolStart(
+        string toolCallId,
+        string toolName,
+        string? agentId = null,
+        string? parentToolCallId = null)
+    {
+        JsonObject data = new()
+        {
+            ["toolCallId"] = toolCallId,
+            ["toolName"] = toolName,
+            ["arguments"] = new JsonObject { ["command"] = Canary },
+            ["toolTitle"] = Canary,
+        };
+        if (parentToolCallId is not null)
+        {
+            data["parentToolCallId"] = parentToolCallId;
+        }
+
+        return Event("tool.execution_start", data, agentId);
+    }
+
+    public CopilotSessionLogs ToolComplete(string toolCallId, bool success, long? exitCode = null, string? agentId = null)
+    {
+        JsonObject data = new()
+        {
+            ["toolCallId"] = toolCallId,
+            ["success"] = success,
+            ["result"] = new JsonObject { ["content"] = Canary },
+        };
+        if (!success)
+        {
+            data["error"] = new JsonObject { ["code"] = "failure", ["message"] = Canary };
+        }
+
+        if (exitCode is long code)
+        {
+            data["shellExecution"] = new JsonObject { ["exitCode"] = code };
+        }
+
+        return Event("tool.execution_complete", data, agentId);
+    }
+
     // The log's bytes: each line followed by "\n".
     public string Text() => string.Concat(_lines.Select(line => line + "\n"));
 
