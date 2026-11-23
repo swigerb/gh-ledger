@@ -11,11 +11,11 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–12 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–16 are sequential, and each builds on the ones before it. Tasks 13–16 fix what an independent review of Tasks 1–12 found; see "Review fixes (Tasks 13–16)".
 
 This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-7.md`, then each task as its own commit, `Sprint 8 Task N: <Title>`, on branch `swigerb-sprint-8-ledger-import-backfill`, and opens one pull request titled exactly "Sprint 8: `gh ledger import`: retroactive backfill from local session stores (Copilot, Claude, Codex)", with `Closes #63`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
-All of this plan's code, tests, and docs are **copy exactly**. The architect built every task in a scratch repository made from `git archive 385da81`, outside this repository's worktree. Each task compiled with `TreatWarningsAsErrors` and passed the whole suite: 1052, 1059, 1083, 1097, 1126, 1162, 1188, 1197, 1215, 1231, 1234, and 1236 tests after Tasks 1–12. The architect then applied this plan's blocks with a script, task by task and in order, to a fresh `git archive 385da81` with Windows line endings (as a `core.autocrlf=true` checkout has them), built and tested after each task, and got the same counts and, line endings aside, the same files. Copy each block character for character, including every comment line, `using` directive, blank line, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs.
+All of this plan's code, tests, and docs are **copy exactly**. The architect built every task in a scratch repository made from `git archive 385da81`, outside this repository's worktree. Each task compiled with `TreatWarningsAsErrors` and passed the whole suite: 1052, 1059, 1083, 1097, 1126, 1162, 1188, 1197, 1215, 1231, 1234, and 1236 tests after Tasks 1–12, then 1251, 1260, 1263, and 1264 after Tasks 13–16. The architect then applied this plan's blocks with a script, task by task and in order, to a fresh `git archive 385da81` with Windows line endings (as a `core.autocrlf=true` checkout has them), built and tested after each task, and got the same counts and, line endings aside, the same files. Copy each block character for character, including every comment line, `using` directive, blank line, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs.
 
 Each task's specification lists its files, summarizes its contracts and algorithms for review, and then gives its code under "Code (copy exactly)". The summaries aren't code to write; the code section is. It has two kinds of blocks:
 
@@ -42,6 +42,10 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 10: `gh ledger import` (CopilotLedger.Cli & tests). The command, with `--repo` or `--all`, `--source`, `--since`, `--dry-run`, `--include-active`, and `--json`; a per-source table and totals in AI credits and API-equivalent USD; at most 20 content-free warnings; exit code 0, 2 (incomplete coverage), or 1. `IngestFailureLog` keeps the messages of database and file errors only.
 - [x] Task 11: The Import Reference and Privacy Allowlist (docs & tests). `docs/cli.md` documents the command, the overlap rules, the report, and the allowlist of every ledger column import writes, which tests compare with the schema and with what import writes; canary fixtures prove that no content reaches the ledger or the output. `docs/configuration.md` documents how imported requests are priced.
 - [x] Task 12: The Backfill Walkthrough (docs & tests). `docs/guide.md` gains "Backfill history after installing", with two samples that `GuideSamplesTests` runs, and the README gains a feature line and a privacy section.
+- [ ] Task 13: Parser and Pricing Review Fixes (CopilotLedger.Core & tests). Review findings 2, 7, 10, and 12: a repository slug comes only from a URL's path and must be a strict `owner/repo`, so no credential in a query or fragment is kept; a provider-billed request is local only by its provider name; a duration that would start a record before the first instant, and a duplicated Codex field, are unsupported shapes.
+- [ ] Task 14: Unchanged-Log Hashes, Unreadable Stores, and Dry-Run Companions (CopilotLedger.Core, Storage, Cli, docs & tests). Review findings 3, 8, and 9: `import_sessions.log_sha256`, so a log is skipped only when its size, last-write time, and SHA-256 all match; store folders that can't be listed are reported and make coverage incomplete; a dry run refuses a ledger that has only one of `-wal` and `-shm`.
+- [ ] Task 15: Late Tool Links, Unmatched Supersession, and Nested Repositories (CopilotLedger.Core, Storage, Cli, docs & tests). Review findings 4, 5, and 6: a tool that ends after its request was imported gets its link; imported rows that live spans superseded without matching them are reported as `Superseded, unmatched`; `--repo` resolves a working directory's repository, so nested repositories stay out.
+- [ ] Task 16: Daemon Import Rules and Failure-Log Privacy (CopilotLedger.Cli, docs & tests). Review findings 1 and 13: the daemon writes `importRules` to `daemon.json`, and `import` stops while a daemon without it runs; `IngestFailureLog` keeps only SQLite's messages; the privacy tests scan the daemon's log.
 
 ## Starting point
 
@@ -145,23 +149,23 @@ Live spans are authoritative. After every transaction:
 - **I3.** A session with an effective live row that has no canonical ID has no effective imported rows.
 - **I4.** Every alias names a row, and a `live` alias a live row; only imported rows are ever superseded, and nothing is deleted.
 
-An imported record resolves as `Duplicate` when its alias exists or another imported row has its canonical ID; `OverlapSkipped` when a live row has its canonical ID; `AmbiguousOverlap` (deferred) when recording it would break I2 or I3; and otherwise `Recorded`. A live row supersedes the imported row with its canonical ID and the imported rows of its session that it can't be matched to (I2, I3), in its own `BEGIN IMMEDIATE` transaction; so does a session that `BackfillFromAgentSpansAsync` assigns to a live row later. I3 is deliberately conservative: one live span without a service request ID, such as every span recorded before this sprint, defers all of its session's imports. `docs/cli.md` says so. There's no matching by time, model, or token counts anywhere. The unique index covers only effective imported rows (`ux_spans_effective_import_usage`), so two live spans with the same ID both stay effective, as before.
+An imported record resolves as `Duplicate` when its alias exists or another imported row has its canonical ID; `OverlapSkipped` when a live row has its canonical ID; `AmbiguousOverlap` (deferred) when recording it would break I2 or I3; and otherwise `Recorded`. A live row supersedes the imported row with its canonical ID and the imported rows of its session that it can't be matched to (I2, I3), in its own `BEGIN IMMEDIATE` transaction; so does a session that `BackfillFromAgentSpansAsync` assigns to a live row later. I3 is deliberately conservative: one live span without a service request ID, such as every span recorded before this sprint, defers all of its session's imports. `docs/cli.md` says so. There's no matching by time, model, or token counts anywhere. The unique index covers only effective imported rows (`ux_spans_effective_import_usage`), so two live spans with the same ID both stay effective, as before. Imported rows that a live span supersedes without sharing their canonical ID (I2, I3) may hold calls that the live spans don't cover, so every later import whose scope holds them reports them as `Superseded, unmatched`, with incomplete coverage (Task 15); they're never made effective again.
 
 ### Pricing imported requests (D9, D10, D11)
 
-`NormalizedGenAiSpan.BillingSource` is `Endpoint` for every live span and for GitHub-billed Copilot imports (provider `github`, no host), which therefore price exactly as their live spans do, including #67's request-model fallback. Copilot BYOK and Codex imports are `Provider`: one early branch in `Calculate`, after the token checks, makes a `Provider` request whose provider name isn't in `localOffload.providerNames` or `foundryByok.providerNames` `Unpriced` with the new status `other_provider`, 0 AI credits, and its usual `ApiEquivalent`; a listed name continues into the existing local or Foundry block. A BYOK request's provider name is its `providerType`, lowercased; Codex's is `model_provider`, with `lmstudio` as `lm_studio`. Each record is priced with the rates in use as of its start time; a request outside every window is `no_rate_for_date`.
+`NormalizedGenAiSpan.BillingSource` is `Endpoint` for every live span and for GitHub-billed Copilot imports (provider `github`, no host), which therefore price exactly as their live spans do, including #67's request-model fallback. Copilot BYOK and Codex imports are `Provider`: one early branch in `Calculate`, after the token checks, makes a `Provider` request whose provider name isn't in `localOffload.providerNames` or `foundryByok.providerNames` `Unpriced` with the new status `other_provider`, 0 AI credits, and its usual `ApiEquivalent`; a listed name continues into the existing local or Foundry block. A `Provider` request is local only by its provider name: the rule that makes a request for a known local model without a host local applies only to `Endpoint` spans (Task 13). A BYOK request's provider name is its `providerType`, lowercased; Codex's is `model_provider`, with `lmstudio` as `lm_studio`. Each record is priced with the rates in use as of its start time; a request outside every window is `no_rate_for_date`.
 
 ### Storage: schema version 6 (D6, D14, D16)
 
-Migration 6 (Task 2) adds provenance and authority columns to `spans`, `owner_span_row_id` to `span_links`, and two tables. Existing rows become live (`otlp`), effective, and unidentified; existing links have no owner. An imported tool call becomes an `execute_tool` link owned by the usage record whose response asked for it, only within the 7 days the daemon keeps links; `numToolCalls` goes only to `imported_tool_call_count`. A log's checkpoint (`import_sessions`: size, last-write time, `complete`, and its counts) is written after its last batch, in its own transaction; a log is skipped only when it was imported completely and its size and last-write time are unchanged.
+Migration 6 (Task 2) adds provenance and authority columns to `spans`, `owner_span_row_id` to `span_links`, and two tables. Existing rows become live (`otlp`), effective, and unidentified; existing links have no owner. An imported tool call becomes an `execute_tool` link owned by the usage record whose response asked for it, only within the 7 days the daemon keeps links; `numToolCalls` goes only to `imported_tool_call_count`. A log's checkpoint (`import_sessions`: size, last-write time, the SHA-256 of the bytes that were parsed, `complete`, and its counts) is written after its last batch, in its own transaction; a log is skipped only when it was imported completely and its size, last-write time, and SHA-256 are unchanged (Task 14). A record read again whose own row still counts gets the links of tool calls that ended since (Task 15).
 
 ### Dry run (D15)
 
-`LedgerSnapshot` never calls `InitializeAsync`: with no ledger, it's empty; with neither `-wal` nor `-shm`, it opens `immutable=1`; otherwise `Mode=ReadOnly`, in one deferred read transaction. It decides every record with the same function as the write path, plus an in-memory overlay of its own decisions. A version 5 ledger is evaluated as one without imports whose live rows are all unidentified.
+`LedgerSnapshot` never calls `InitializeAsync`: with no ledger, it's empty; with neither `-wal` nor `-shm`, it opens `immutable=1`; with both, `Mode=ReadOnly`, in one deferred read transaction; with only one of them, it refuses, because SQLite could create the other (Task 14). It decides every record with the same function as the write path, plus an in-memory overlay of its own decisions. A version 5 ledger is evaluated as one without imports whose live rows are all unidentified.
 
 ### CLI (D12, D21, D22, D24, D25)
 
-`gh ledger import (--repo <path> | --all) [--source copilot|codex]... [--since <period>] [--dry-run] [--include-active] [--json]`. `--repo` is a working-tree path, resolved with `FileSystemGitContextResolver`; a session matches by the root it recorded, else by its working directory. Exit codes: 0 when every source's coverage is complete, 2 when the import finished with incomplete coverage, and 1 for invalid usage or a fatal error. The table has a row per count and a column per source, then the recorded requests' AI credits, GitHub USD, and API-equivalent USD. Warnings about the logs go to standard error, at most 20, then a count; `--json` lists them all as `diagnostics` instead. A daemon of another gh-ledger version gets a warning. `CliContext.CodexHome` is `CODEX_HOME` when it's set and non-empty, else `~/.codex`, as Codex reads it. `IngestFailureLog` keeps the messages of `SqliteException`, `IOException`, and `UnauthorizedAccessException` only, so a `JsonException` that quotes a request never reaches `daemon.log`.
+`gh ledger import (--repo <path> | --all) [--source copilot|codex]... [--since <period>] [--dry-run] [--include-active] [--json]`. `--repo` is a working-tree path, resolved with `FileSystemGitContextResolver`; a session matches by the root it recorded, else by the repository of its working directory, resolved on disk the same way, so a nested repository doesn't match (Task 15). Exit codes: 0 when every source's coverage is complete, 2 when the import finished with incomplete coverage, and 1 for invalid usage, a running daemon without the import rules, or a fatal error. The table has a row per count and a column per source, then the recorded requests' AI credits, GitHub USD, and API-equivalent USD. Warnings about the logs go to standard error, at most 20, then a count; `--json` lists them all as `diagnostics` instead. While a daemon without `importRules` in `daemon.json` holds its lock, `import` exits with 1 and `--dry-run` warns (Task 16). `CliContext.CodexHome` is `CODEX_HOME` when it's set and non-empty, else `~/.codex`, as Codex reads it. `IngestFailureLog` keeps only a `SqliteException`'s message (Task 16), so neither a `JsonException` that quotes a request nor an I/O error that names a path from it reaches `daemon.log`.
 
 ### Docs
 
@@ -179,39 +183,62 @@ Migration 6 (Task 2) adds provenance and authority columns to `spans`, `owner_sp
 | D6 | `UNIQUE … WHERE canonical_usage_id IS NOT NULL` | Unique only over effective imported rows, plus a lookup index | Never changes how live spans are recorded; superseded rows don't conflict |
 | D7 | A Claude Code adapter | `--source claude` is refused; nothing is read | The format is internal and undocumented; #63 says to fail explicitly without a verified adapter |
 | D8 | Codex candidate fields from `token_count` | Only `token_usage_record`, keyed by `response_id`; cache writes reported when present | The verified contract at `rust-v0.171.0`; `token_count` totals are cumulative and resettable |
-| D9 | A billing hint on imported spans | `BillingSource` with one early branch in `Calculate`; GitHub-billed imports keep `Endpoint` | Same classification as their live spans, including #67's fallback; a localized edit |
+| D9 | A billing hint on imported spans | `BillingSource` with one early branch in `Calculate`; GitHub-billed imports keep `Endpoint`; a `Provider` request is local only by its provider name (Task 13) | Same classification as their live spans, including #67's fallback; a localized edit; a provider-billed request has no endpoint to be local by |
 | D10 | — | New pricing status `other_provider` for direct-provider requests, which keep their API-equivalent price | `unrecognized_endpoint`'s fix (add a host) would mislead |
 | D11 | — | A BYOK provider name is `providerType`; a BYOK request through a local OpenAI-compatible server is `other_provider` | No census of provider values (privacy rule); unpriced, never mispriced |
-| D12 | Exit codes "following the repository's conventions" | 0, 2 for incomplete coverage, 1 | The repository uses 0 and 1; 2 lets scripts tell partial results apart |
+| D12 | Exit codes "following the repository's conventions" | 0, 2 for incomplete coverage, 1 (also while a daemon without the import rules runs, D29) | The repository uses 0 and 1; 2 lets scripts tell partial results apart |
 | D13 | Optional `ingestSource` counts over MCP | None; imported rows reach every MCP tool through the store | No schema change for clients; deferred |
 | D14 | Tool links within 7 days | Links owned by their record (`owner_span_row_id`); a superseded owner's links don't count | Avoids doubled failure counts when a live span supersedes an import |
-| D16 | Checkpoints with `last_record_key`, upserted by `UpsertImportSessionAsync` | `RecordImportedAsync` writes the checkpoint, in its own transaction after a log's last batch; no `last_record_key` | A crash before the checkpoint only makes the next run read the log again, and its records resolve as duplicates |
+| D16 | Checkpoints with `last_record_key`, upserted by `UpsertImportSessionAsync` | `RecordImportedAsync` writes the checkpoint, in its own transaction after a log's last batch; no `last_record_key`; a log is skipped only when its size, last-write time, and `log_sha256`, the SHA-256 of the bytes parsed, all match (Task 14) | A crash before the checkpoint only makes the next run read the log again, and its records resolve as duplicates; size and time are only hints, as #63 says, so a same-size rewrite is read again |
 | D20 | — | Compactions are imported from `session.compaction_complete` with a fixed allowlist | They're billed calls without usage records |
-| D26 | Every query "reports coverage limitations" | `gh ledger import` reports coverage (its table, JSON, warnings, and exit code); reports, receipts, and MCP exclude superseded rows without notes | Export and audit (#64, #65) don't exist yet; notes everywhere would change many pinned outputs; deferred |
+| D26 | Every query "reports coverage limitations" | `gh ledger import` reports coverage (its table, JSON, warnings, and exit code), including the imported rows in its scope that live spans superseded without matching them (`Superseded, unmatched`, Task 15); reports, receipts, and MCP exclude superseded rows without notes | Export and audit (#64, #65) don't exist yet; notes everywhere would change many pinned outputs; deferred |
 | D27 | `ISessionLogSource` streams records; `Discover(SessionDiscoveryOptions)`; `ProviderKind`, `ProviderId`, `IsByok` | `ReadAsync` returns one `SessionLogReadResult` per log; `Discover(string home)`; records carry `ProviderName` and `BillingSource` | The gate and tool ownership need the whole log; the CLI resolves homes and the importer applies `--since` so it can count what it skips |
+| D28 | `cacheDetailsReported:false` → `Absent` | A record with `cacheDetailsReported:false` and a nonzero cache counter keeps that counter `Reported`; a consistent record, both counters 0, is `Absent` | Sprint 6's D2: a nonzero counter can only have been reported, and `Absent` would price cached input as uncached (review finding 11; a clarification, not a change) |
+| D29 | — | A write-mode import exits with 1 while a daemon without `importRules` in `daemon.json` holds its lock; a dry run only warns (Task 16) | An earlier daemon records live spans without the authority rules, so a delayed live export of an imported call would count twice; both builds call themselves 0.4.1 |
+| D30 | `--repo` imports only that root | A record without a recorded root is in scope when the repository of its working directory, resolved on disk now, is that root; one that can't be resolved is out of scope (Task 15) | A path prefix can't tell a nested repository apart; #63 allows resolving repository identity, never today's branch, for filtering |
 
 ### Acceptance criteria traceability
 
 | #63 criterion | Tasks | Tests or deviation |
 |---|---|---|
-| Privacy canaries absent from the database, `-wal`, `-shm`, stdout, stderr, JSON, and the ingest-failure log | 5, 6, 7, 10, 11 | IP1 (all six canary kinds and more, Copilot and Codex, text, JSON, and dry run), CS7, CS8, CU12, CC6, CX9, CX12, IC5, IC9; Claude per D7 |
+| Privacy canaries absent from the database, `-wal`, `-shm`, stdout, stderr, JSON, and the ingest-failure log | 5, 6, 7, 10, 11, 13, 16 | IP1 (all six canary kinds and more, Copilot and Codex, text, JSON, dry run, and `daemon.log`), IP4 (the daemon's failure log), CS7, CS8, CU12, CU14, CC6, CX9, CX12, CX13, IC5, IC9; Claude per D7 |
 | Allowlist test with a schema snapshot | 11 | IP2, IP3 |
-| Idempotency, convergence after appends, truncation, replacement, same-size rewrites, cancellation, and restart | 3, 9 | UA3, UA13, IR1, IR2 (4), IR3 |
-| Overlap: one charge live-first, import-first, repeated, and concurrent; identical-looking calls stay distinct; a delayed live export adds nothing | 3 | UA1, UA2, UA3, UA4, UA5, UA6, UA17 |
-| Legacy ambiguity: deferral, incomplete coverage, atomic supersession, every query excludes superseded rows, no fuzzy matching | 3, 4, 8, 9, 10 | UA7–UA10, UA15, ER1–ER10, SN3, IR9, IC6; coverage notes outside `import` per D26 |
-| Copilot mapping: `cacheDetailsReported:false` → `Absent`; sub-agent names; resume; Copilot provenance priced as GitHub; Foundry and local provenance; unresolved stays unpriced; no fall-through to Copilot billing; no synthetic endpoint | 1, 6, 8, 9 | CU3, CU4 (2), CU6, CU1 with IR7 and IR15, BI1, BI2, BI3, BI5, CU7, MP1, CC1–CC6 |
+| Idempotency, convergence after appends, truncation, replacement, same-size rewrites, cancellation, and restart | 3, 9, 14, 15 | UA3, UA13, IR1, IR2 (4), IR3, IR16 (a same-size rewrite with its old last-write time), IR18 (tool completions appended later) |
+| Overlap: one charge live-first, import-first, repeated, and concurrent; identical-looking calls stay distinct; a delayed live export adds nothing | 3, 16 | UA1, UA2, UA3, UA4, UA5, UA6, UA17; IC10 and DM1 (no import beside a daemon without the import rules, D29) |
+| Legacy ambiguity: deferral, incomplete coverage, atomic supersession, every query excludes superseded rows, no fuzzy matching | 3, 4, 8, 9, 10, 15 | UA7–UA10, UA15, ER1–ER10, SN3, IR9, IC6, IR19 and IC14 (`Superseded, unmatched`); coverage notes outside `import` per D26 |
+| Copilot mapping: `cacheDetailsReported:false` → `Absent`; sub-agent names; resume; Copilot provenance priced as GitHub; Foundry and local provenance; unresolved stays unpriced; no fall-through to Copilot billing; no synthetic endpoint | 1, 6, 8, 9, 13 | CU3, CU4 (2), CU6, CU1 with IR7 and IR15, BI1, BI2, BI3, BI5, BI8, CU7, MP1, CC1–CC6; nonzero counters with `cacheDetailsReported:false` per D28 |
 | Claude mapping | — | Deviation D7: refused (IC1, IP1) |
-| Codex mapping: repeated snapshots count once; resets and missing IDs explicit; `repository_url` credentials stripped | 7, 9 | CX6, CX7, CX9, IR10 |
-| `--repo` imports only that root; `--repo` with `--all`, or neither, fails validation | 9, 10 | IR5, IC1, IC2, IC3 |
-| `--dry-run` leaves the ledger byte for byte and prints accurate counts | 8, 9, 10 | SN1, SN2, SN4, IR9, IC6 |
+| Codex mapping: repeated snapshots count once; resets and missing IDs explicit; `repository_url` credentials stripped | 7, 9, 13 | CX6, CX7, CX9, CX13, CX14, IR10 |
+| `--repo` imports only that root; `--repo` with `--all`, or neither, fails validation | 9, 10, 15 | IR5 (nested and unresolvable working directories, D30), IC1, IC2, IC3 |
+| `--dry-run` leaves the ledger byte for byte and prints accurate counts | 8, 9, 10, 14 | SN1, SN2, SN4, SN7, IR9, IC6, IC12 |
 | `inuse.*.lock` sessions skipped by default, imported with `--include-active` | 5, 9, 10 | CS1, IR6, IC3 |
-| Malformed and oversized lines and unknown types counted without echo; content before `type` and canaries in malformed JSON don't leak; unsupported shapes mark incomplete coverage | 5, 6, 10, 11 | CS4–CS10, CU8, CC4, IC5, IP1 |
+| Malformed and oversized lines and unknown types counted without echo; content before `type` and canaries in malformed JSON don't leak; unsupported shapes mark incomplete coverage | 5, 6, 10, 11, 13, 14 | CS4–CS10, CU8, CU13, CC4, CC7, CX14, IC5, IP1; stores that can't be listed: CS15, CX15, IR17, IC13 |
 | Missing historical branch stays unknown; aggregate tool counts make no spans | 9 | IR13, IR8, CU11 |
 | Imported spans in `branch`, `agents`, `top-prompts`, and MCP with Git attribution; no `invoke_agent` totals | 6, 10 | IC7, IC8, CU11 |
 | No `double` money; decimal pricing through `JsonRateCardCalculator` | all | Review; BI*, IR7, IR15, IC3, IC4 use `decimal` and pico-USD integers |
 | Hermetic tests | all | `TempDirectory`, `CliHarness` homes (`copilot-home`, `codex-home`), builders that write synthetic logs; no network, no `git` |
 | `docs/cli.md` and `docs/guide.md` updated; `GuideSamplesTests` passes | 11, 12 | IP2, IP3, GS1, GS2 |
 | Build and tests exit 0 with warnings as errors | all | Every task |
+
+### Review fixes (Tasks 13–16)
+
+An independent review of Tasks 1–12, as built in the scratch repository at `4211484`, found the problems below. Tasks 13–16 fix them on top of Task 12, each with tests that fail without the fix; where these tasks and the design above differ, the tasks win.
+
+| Finding | Problem | Fix | Task |
+|---|---|---|---|
+| 1 | A daemon started before migration 6 keeps recording live rows without the authority rules, so a delayed live export of an imported call counts twice (I3); both builds call themselves 0.4.1, so a version warning can't tell them apart | `daemon.json` gains `importRules`; while a daemon without it holds the lock, `import` exits with 1 and `--dry-run` warns (D29) | 16 |
+| 2 | `GetRepositorySlug` kept a URL's query and fragment: `https://git.example/o/r.git?token=…` stored `o/r.git?token=…` | Only the path counts, and the slug must be `owner/repo` of `[A-Za-z0-9._-]`, on the live path and in import | 13 |
+| 3 | Size and last-write time were treated as proof that a log is unchanged | `import_sessions.log_sha256`; a log is skipped only when size, time, and hash all match (D16) | 14 |
+| 4 | A tool that ended after its request was imported never got a link | A record read again whose own row still counts gets its new links | 15 |
+| 5 | Imported rows that unmatched live spans superseded were never reported | `Superseded, unmatched`: a count, a diagnostic per session, incomplete coverage, exit code 2 (D26) | 15 |
+| 6 | `--repo` took in nested repositories through the working-directory fallback | The working directory's repository is resolved on disk; one that can't be resolved is out of scope (D30) | 15 |
+| 7 | A provider-billed import that names a Foundry provider and a known local model was priced as local | The hostless known-local-model rule applies only to `Endpoint` spans (D9) | 13 |
+| 8 | A dry run beside only one of `-wal` and `-shm` could create the other | The dry run refuses with exit code 1 (D15) | 14 |
+| 9 | Errors while listing a store were swallowed, and coverage was reported complete | `UnreadableStore`: a count, a diagnostic, and incomplete coverage; a missing store still has no logs | 14 |
+| 10 | A duration that would start a record before `DateTimeOffset.MinValue` threw and stopped the import | An unsupported shape | 13 |
+| 11 | `cacheDetailsReported:false` with a nonzero counter stays `Reported` | Kept, and documented as D28 | — |
+| 12 | A Codex record with a duplicated `thread_id` was judged inherited before its duplicate was seen | Duplicated fields are unsupported before the thread check | 13 |
+| 13 | The privacy tests didn't look at the ingest-failure log, and an `IOException`'s message can name a path from the request | `IngestFailureLog` keeps only `SqliteException` messages (D21 narrowed); IP1 scans `daemon.log`, and IP4 makes the daemon log a failure for a canary-bearing span | 16 |
 
 ## Task 1 specification: Billing Source and Service Request Identity
 
@@ -11696,6 +11723,4513 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 13 specification: Parser and Pricing Review Fixes
+
+Review findings 2, 7, 10, and 12 (see "Review fixes (Tasks 13–16)").
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Git/GitRemoteUrl.cs` | `GetRepositorySlug` reads only a URL's path and accepts only a strict `owner/repo` |
+| `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs` | The hostless known-local-model rule applies only to `Endpoint` spans |
+| `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` | A duration that would start a record before `DateTimeOffset.MinValue` is an unsupported shape |
+| `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs` | A `token_usage_record` that gives an allowlisted field twice is unsupported before its thread is read |
+| `tests/CopilotLedger.Tests/Git/GitRemoteUrlTests.cs` | 4 more cases of `UrlHelpers_ReturnExpectedValues` |
+| `tests/CopilotLedger.Tests/Pricing/BillingSourceTests.cs` | New: BI8 (3) |
+| `tests/CopilotLedger.Tests/Import/CopilotRecordTests.cs` | New: CU13, CU14 (3) |
+| `tests/CopilotLedger.Tests/Import/CopilotCompactionTests.cs` | New: CC7 |
+| `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs` | New: CX13 (2), CX14 |
+
+### Rules
+
+1. **Slugs (finding 2).** `GetRepositorySlug` trims the value, cuts it at the first `?` or `#`, drops one trailing `/` and then a trailing `.git`, and takes the path after `scheme://host/` (a `file://` URL has none) or after the colon of an SCP-style `host:path` (a Windows drive path has none). The slug is `owner/repo` only when that path has exactly two non-empty segments of 1 to 100 ASCII letters, digits, `.`, `_`, or `-`; anything else is `null`. So `https://git.example/o/r.git?token=…` and `git@git.example:o/r.git?token=…` give `o/r`, and `https://git.example/o/r%3Ftoken.git` gives `null`. The live path (the normalizer and `FileSystemGitContextResolver`) and import (`SessionLogs.RepositorySlug`) share the function, so both are fixed.
+2. **Provider-billed local pricing (finding 7).** In `Calculate`, `localByKnownModel` requires `BillingSource == Endpoint`, no host, and a known local model. A `Provider` span is local only by its provider name (`localOffload.providerNames`).
+3. **Durations (finding 10).** A usage record's or compaction's start is its end less its duration. When `end − DateTimeOffset.MinValue` is shorter than the duration, the record is an unsupported shape with field `data.usage.duration` or `data.compactionTokensUsed.duration`, checked after every other field, instead of an exception that stops the import.
+4. **Duplicated Codex fields (finding 12).** `Usage` checks `JsonFields.Duplicate` first: a record that gives an allowlisted path twice counts as parsed and unsupported, with that path as its field, before `payload.thread_id` decides whether it's inherited.
+
+### Code (copy exactly)
+
+Edit 1 of 2 in `src/CopilotLedger.Core/Git/GitRemoteUrl.cs`, replace:
+
+```csharp
+    }
+
+    public static string? GetRepositorySlug(string remoteUrl)
+    {
+        ArgumentNullException.ThrowIfNull(remoteUrl);
+        string value = remoteUrl.Trim();
+        if (value.EndsWith('/'))
+        {
+```
+
+with:
+
+```csharp
+    }
+
+    // The "owner/repo" of a remote URL or an SCP-style address: its path, without a query, a fragment, a trailing "/", or
+    // ".git", when that path is exactly two parts of 1 to 100 ASCII letters, digits, '.', '_', or '-'. Anything else is null,
+    // so a credential in a query or a fragment is never kept.
+    public static string? GetRepositorySlug(string remoteUrl)
+    {
+        ArgumentNullException.ThrowIfNull(remoteUrl);
+        string value = remoteUrl.Trim();
+        int query = value.IndexOfAny(['?', '#']);
+        if (query >= 0)
+        {
+            value = value[..query];
+        }
+
+        if (value.EndsWith('/'))
+        {
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Core/Git/GitRemoteUrl.cs`, replace:
+
+```csharp
+        }
+
+        string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length == 2 ? $"{segments[0]}/{segments[1]}" : null;
+    }
+
+    private static bool IsWindowsDrivePath(string value, int colon) =>
+```
+
+with:
+
+```csharp
+        }
+
+        string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length == 2 && segments.All(IsSlugPart) ? $"{segments[0]}/{segments[1]}" : null;
+    }
+
+    private static bool IsSlugPart(string part) =>
+        part.Length is >= 1 and <= 100 &&
+        part.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-');
+
+    private static bool IsWindowsDrivePath(string value, int colon) =>
+```
+
+Edit 1 of 3 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+        }
+
+        // A token_usage_record: one completed response. A record of another thread, inherited by a fork, is skipped.
+        private void Usage(JsonFields fields, long number, long offset)
+        {
+            const ImportEventKind kind = ImportEventKind.TokenUsageRecord;
+            string? threadId = SessionLogs.Uuid(fields.String("payload.thread_id"));
+            if (threadId is not null && threadId != _threadId)
+```
+
+with:
+
+```csharp
+        }
+
+        // A token_usage_record: one completed response. A record of another thread, inherited by a fork, is skipped; a record
+        // that gives an allowlisted field twice is unsupported before its thread is read, so it can't pass for inherited.
+        private void Usage(JsonFields fields, long number, long offset)
+        {
+            const ImportEventKind kind = ImportEventKind.TokenUsageRecord;
+            if (fields.Duplicate is not null)
+            {
+                _parsed++;
+                _unsupported++;
+                _diagnostics.Add(ImportDiagnosticCode.UnsupportedUsageShape, kind, fields.Duplicate, number, offset);
+                return;
+            }
+
+            string? threadId = SessionLogs.Uuid(fields.String("payload.thread_id"));
+            if (threadId is not null && threadId != _threadId)
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+            string? model = (turnId is not null ? _modelByTurn.GetValueOrDefault(turnId) : null) ?? _latestModel;
+            string? failed =
+                fields.Duplicate
+                ?? (time is null ? "timestamp"
+                : threadId is null ? "payload.thread_id"
+                : SessionLogs.Uuid(fields.String("payload.session_id")) != _sessionId ? "payload.session_id"
+```
+
+with:
+
+```csharp
+            string? model = (turnId is not null ? _modelByTurn.GetValueOrDefault(turnId) : null) ?? _latestModel;
+            string? failed =
+                time is null ? "timestamp"
+                : threadId is null ? "payload.thread_id"
+                : SessionLogs.Uuid(fields.String("payload.session_id")) != _sessionId ? "payload.session_id"
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+                : cached + written > input ? "payload.usage.input_tokens"
+                : model is null ? "turn_context.model"
+                : null);
+            if (failed is not null)
+            {
+```
+
+with:
+
+```csharp
+                : cached + written > input ? "payload.usage.input_tokens"
+                : model is null ? "turn_context.model"
+                : null;
+            if (failed is not null)
+            {
+```
+
+Edit 1 of 6 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+            bool? byok = fields.Boolean("data.usage.isByok");
+            string? serviceRequestId = UsageIdentity.NormalizeServiceRequestId(fields.String("data.usage.serviceRequestId"));
+            string? failed =
+                usageId is null ? "data.usage.accounting.usageId"
+```
+
+with:
+
+```csharp
+            bool? byok = fields.Boolean("data.usage.isByok");
+            string? serviceRequestId = UsageIdentity.NormalizeServiceRequestId(fields.String("data.usage.serviceRequestId"));
+            long duration = Duration(fields.Integer("data.usage.duration")) ?? 0;
+            string? failed =
+                usageId is null ? "data.usage.accounting.usageId"
+```
+
+Edit 2 of 6 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+                : byok == false && fields.String("data.usage.provider.kind") != "copilot" ? "data.usage.provider.kind"
+                : byok == false && serviceRequestId is null ? "data.usage.serviceRequestId"
+                : null);
+            if (failed is not null)
+```
+
+with:
+
+```csharp
+                : byok == false && fields.String("data.usage.provider.kind") != "copilot" ? "data.usage.provider.kind"
+                : byok == false && serviceRequestId is null ? "data.usage.serviceRequestId"
+                : StartsBeforeTime(end, duration) ? "data.usage.duration"
+                : null);
+            if (failed is not null)
+```
+
+Edit 3 of 6 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+                TurnKey = _turnKey,
+                ServiceRequestId = byok == true ? null : serviceRequestId,
+                StartTime = end.AddMilliseconds(-(Duration(fields.Integer("data.usage.duration")) ?? 0)),
+                EndTime = end,
+                RequestModel = model!,
+```
+
+with:
+
+```csharp
+                TurnKey = _turnKey,
+                ServiceRequestId = byok == true ? null : serviceRequestId,
+                StartTime = end.AddMilliseconds(-duration),
+                EndTime = end,
+                RequestModel = model!,
+```
+
+Edit 4 of 6 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+            long cacheRead = 0;
+            long cacheWrite = 0;
+            failed ??= Tokens(fields, "data.compactionTokensUsed.", out input, out output, out cacheRead, out cacheWrite)
+                ?? (fields.String("data.compactionTokensUsed.provider.kind") != "copilot"
+                    ? "data.compactionTokensUsed.provider.kind"
+                    : null);
+            if (failed is not null)
+```
+
+with:
+
+```csharp
+            long cacheRead = 0;
+            long cacheWrite = 0;
+            long duration = Duration(fields.Integer("data.compactionTokensUsed.duration")) ?? 0;
+            failed ??= Tokens(fields, "data.compactionTokensUsed.", out input, out output, out cacheRead, out cacheWrite)
+                ?? (fields.String("data.compactionTokensUsed.provider.kind") != "copilot"
+                    ? "data.compactionTokensUsed.provider.kind"
+                    : StartsBeforeTime(end!.Value, duration) ? "data.compactionTokensUsed.duration"
+                    : null);
+            if (failed is not null)
+```
+
+Edit 5 of 6 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+                TurnKey = _turnKey,
+                ServiceRequestId = serviceRequestId,
+                StartTime = end!.Value.AddMilliseconds(-(Duration(fields.Integer("data.compactionTokensUsed.duration")) ?? 0)),
+                EndTime = end.Value,
+                RequestModel = model!,
+```
+
+with:
+
+```csharp
+                TurnKey = _turnKey,
+                ServiceRequestId = serviceRequestId,
+                StartTime = end!.Value.AddMilliseconds(-duration),
+                EndTime = end.Value,
+                RequestModel = model!,
+```
+
+Edit 6 of 6 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+        private static long? Duration(long? value) => value is >= 0 and <= ImportLimits.MaxDurationMilliseconds ? value : null;
+
+        // The envelope timestamp, in UTC.
+        private static DateTimeOffset? Time(JsonFields fields) =>
+```
+
+with:
+
+```csharp
+        private static long? Duration(long? value) => value is >= 0 and <= ImportLimits.MaxDurationMilliseconds ? value : null;
+
+        // A call that ended at end and lasted duration milliseconds would have started before the first instant.
+        private static bool StartsBeforeTime(DateTimeOffset end, long duration) =>
+            end - DateTimeOffset.MinValue < TimeSpan.FromMilliseconds(duration);
+
+        // The envelope timestamp, in UTC.
+        private static DateTimeOffset? Time(JsonFields fields) =>
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+
+```csharp
+        }
+
+        LocalModelRate? localModel = model is null ? null : _localModels.FirstOrDefault(item => item.Matches(model));
+        bool localByKnownModel = string.IsNullOrWhiteSpace(host) && localModel is not null;
+        if (IsLoopback(host) ||
+            MatchesValue(host, _localHosts) ||
+```
+
+with:
+
+```csharp
+        }
+
+        LocalModelRate? localModel = model is null ? null : _localModels.FirstOrDefault(item => item.Matches(model));
+        bool localByKnownModel = span.BillingSource == BillingSource.Endpoint &&
+                                 string.IsNullOrWhiteSpace(host) &&
+                                 localModel is not null;
+        if (IsLoopback(host) ||
+            MatchesValue(host, _localHosts) ||
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Git/GitRemoteUrlTests.cs`, replace:
+
+```csharp
+        { "file:///srv/git/mirror.git", "file:///srv/git/mirror.git", null },
+        { "/srv/git/mirror.git", "/srv/git/mirror.git", null },
+    };
+
+    [Theory]
+```
+
+with:
+
+```csharp
+        { "file:///srv/git/mirror.git", "file:///srv/git/mirror.git", null },
+        { "/srv/git/mirror.git", "/srv/git/mirror.git", null },
+        { "https://git.example/o/r.git?token=CANARY-TOKEN-7c1d", "https://git.example/o/r.git?token=CANARY-TOKEN-7c1d", "o/r" },
+        { "https://git.example/o/r#CANARY-TOKEN-7c1d", "https://git.example/o/r#CANARY-TOKEN-7c1d", "o/r" },
+        { "git@git.example:o/r.git?token=CANARY-TOKEN-7c1d", "git@git.example:o/r.git?token=CANARY-TOKEN-7c1d", "o/r" },
+        { "https://git.example/o/r%3Ftoken.git", "https://git.example/o/r%3Ftoken.git", null },
+    };
+
+    [Theory]
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs`, replace:
+
+```csharp
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+```
+
+with:
+
+```csharp
+    }
+
+    // A credential in a URL's query or fragment is dropped with them: the slug comes from the path alone.
+    [Theory]
+    [InlineData("https://git.example/o/r.git?token=" + CopilotSessionLogs.Canary)]
+    [InlineData("https://git.example/o/r#" + CopilotSessionLogs.Canary)]
+    public async Task CX13_AQueryOrFragmentOfTheRepositoryUrlIsNeverKept(string url)
+    {
+        using TempDirectory temp = new();
+        new CodexRollouts(Thread, git: new JsonObject { ["repository_url"] = url })
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_1", "turn-1")
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal("o/r", Assert.Single(result.Records).Git!.RepositorySlug);
+        AssertNoCanary(result);
+    }
+
+    // A record that gives thread_id twice is an unsupported shape, whichever thread its first value names.
+    [Fact]
+    public async Task CX14_ARecordThatGivesAFieldTwiceIsUnsupportedNotInherited()
+    {
+        using TempDirectory temp = new();
+        new CodexRollouts(Thread)
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Raw(
+                """{"timestamp":"2026-11-20T12:00:02.000Z","type":"token_usage_record","payload":{"thread_id":"FORK","thread_id":"THREAD","turn_id":"turn-1","session_id":"THREAD","root_turn_id":"turn-1","response_id":"resp_1","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}}"""
+                    .Replace("FORK", Fork, StringComparison.Ordinal)
+                    .Replace("THREAD", Thread, StringComparison.Ordinal))
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Empty(result.Records);
+        Assert.Equal((1, 1), (result.RecordsParsed, result.UnsupportedUsageShapes));
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(
+            (ImportDiagnosticCode.UnsupportedUsageShape, "payload.thread_id", 3L),
+            (diagnostic.Code, diagnostic.Field, diagnostic.FirstLine));
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Import/CopilotCompactionTests.cs`, replace:
+
+```csharp
+        CopilotRecordTests.AssertNoCanary(result);
+    }
+}
+```
+
+with:
+
+```csharp
+        CopilotRecordTests.AssertNoCanary(result);
+    }
+
+    // A compaction that would have started before the first instant is an unsupported shape, not an error.
+    [Fact]
+    public async Task CC7_ACompactionThatWouldStartBeforeTheFirstInstantIsUnsupported()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId, "1.0.114", start: DateTimeOffset.MinValue)
+            .Compaction(S9, duration: 5_000)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await CopilotRecordTests.ReadAsync(temp.Path);
+
+        Assert.Empty(result.Records);
+        Assert.Equal((1, 1), (result.RecordsParsed, result.UnsupportedUsageShapes));
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(
+            (ImportDiagnosticCode.UnsupportedUsageShape, ImportEventKind.CompactionComplete, "data.compactionTokensUsed.duration"),
+            (diagnostic.Code, diagnostic.Event, diagnostic.Field));
+    }
+}
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Import/CopilotRecordTests.cs`, replace:
+
+```csharp
+    }
+
+    internal static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+```
+
+with:
+
+```csharp
+    }
+
+    // A call that would have started before the first instant can't be recorded; it's an unsupported shape, not an error.
+    [Fact]
+    public async Task CU13_ARecordThatWouldStartBeforeTheFirstInstantIsUnsupported()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId, start: DateTimeOffset.MinValue)
+            .Usage("msg_1", S1, duration: 2_000)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Empty(result.Records);
+        Assert.Equal((1, 1), (result.RecordsParsed, result.UnsupportedUsageShapes));
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(
+            (ImportDiagnosticCode.UnsupportedUsageShape, "data.usage.duration"),
+            (diagnostic.Code, diagnostic.Field));
+    }
+
+    // A credential in the recorded repository's query or fragment is dropped with them, and a slug with one is no slug.
+    [Theory]
+    [InlineData("https://user:" + CopilotSessionLogs.Canary + "@git.example/o/r.git?token=" + CopilotSessionLogs.Canary + "#" + CopilotSessionLogs.Canary, "o/r")]
+    [InlineData("git@git.example:o/r.git?token=" + CopilotSessionLogs.Canary, "o/r")]
+    [InlineData("o/r?token=" + CopilotSessionLogs.Canary, null)]
+    public async Task CU14_AQueryOrFragmentOfTheRepositoryIsNeverKept(string repository, string? slug)
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(
+                SessionId,
+                context: new JsonObject
+                {
+                    ["cwd"] = CopilotSessionLogs.DefaultWorkingDirectory,
+                    ["gitRoot"] = CopilotSessionLogs.DefaultWorkingDirectory,
+                    ["repository"] = repository,
+                })
+            .Usage("msg_1", S1)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(slug, Assert.Single(result.Records).Git!.RepositorySlug);
+        AssertNoCanary(result);
+    }
+
+    internal static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Pricing/BillingSourceTests.cs`, replace:
+
+```csharp
+    }
+
+    private static NormalizedGenAiSpan Span(string? provider, string model, long input, long output) =>
+        TestSpans.Chat(
+```
+
+with:
+
+```csharp
+    }
+
+    // A provider-billed request is local only by its provider name: a known local model without an endpoint makes a live
+    // span local, but never a Foundry BYOK or another provider's imported request.
+    [Theory]
+    [InlineData("azure.ai.inference", BillingChannel.FoundryByok, PricingStatus.ByokUnpriced)]
+    [InlineData("openai", BillingChannel.Unpriced, PricingStatus.OtherProvider)]
+    [InlineData("ollama", BillingChannel.Local, PricingStatus.LocalOffload)]
+    public void BI8_AProviderBilledRequestIsLocalOnlyByItsProviderName(
+        string provider,
+        BillingChannel channel,
+        PricingStatus status)
+    {
+        JsonRateCardCalculator builtIn = JsonRateCardCalculator.LoadEmbedded();
+
+        CreditCalculationResult result = builtIn.Calculate(Span(provider, "qwen3.8-27b", 100_000, 10_000));
+        CreditCalculationResult live = builtIn.Calculate(
+            Span(provider, "qwen3.8-27b", 100_000, 10_000) with { BillingSource = BillingSource.Endpoint, ProviderName = null });
+
+        Assert.Equal((channel, status), (result.Channel, result.Status));
+        Assert.Equal((BillingChannel.Local, PricingStatus.LocalOffload), (live.Channel, live.Status));
+    }
+
+    private static NormalizedGenAiSpan Span(string? provider, string model, long input, long output) =>
+        TestSpans.Chat(
+```
+
+### Tests
+
+- `UrlHelpers_ReturnExpectedValues` (4 more cases): a query token and a fragment token after `https://git.example/o/r`, and a query after an SCP-style address, give `o/r`; `https://git.example/o/r%3Ftoken.git` gives `null`.
+- **BI8** (3): a `Provider` request for `qwen3.8-27b`, a built-in local model, with no host, is `foundry_byok` and `byok_unpriced` for `azure.ai.inference`, `unpriced` and `other_provider` for `openai`, and `local` and `local_offload` for `ollama`; the same request as an `Endpoint` span without a provider stays `local`.
+- **CU13**: a usage record whose `duration` (2,000 ms) would start it before `DateTimeOffset.MinValue` is 1 parsed, 1 unsupported, with one diagnostic for `data.usage.duration`. **CC7**: the same for a compaction (5,000 ms), `data.compactionTokensUsed.duration`.
+- **CU14** (3): `data.context.repository` with credentials in its userinfo, query, and fragment, or an SCP-style address with a query token, gives `o/r`; `o/r?token=…` gives no slug; no canary is in the result.
+- **CX13** (2): a `repository_url` with a query or fragment token gives `o/r`, and no canary is in the result. **CX14**: a `token_usage_record` that gives `thread_id` twice, the fork's first, is unsupported with field `payload.thread_id` on line 3, not an inherited record.
+
+### Acceptance criteria
+
+- No credential from a remote URL's query or fragment reaches a slug (GitRemoteUrlTests, CU14, CX13); a provider-billed request is local only by its provider name (BI8); bad durations and duplicated Codex fields are unsupported shapes (CU13, CC7, CX14).
+- `dotnet test CopilotLedger.slnx` passes **1251** tests (1236 + 15).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 14 specification: Unchanged-Log Hashes, Unreadable Stores, and Dry-Run Companions
+
+Review findings 3, 8, and 9.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Import/JsonlLineReader.cs` | A new `IncrementalHash? hash` parameter: every byte read is added to it |
+| `src/CopilotLedger.Core/Import/SessionLogReadResult.cs` | `ContentSha256` |
+| `src/CopilotLedger.Core/Import/SessionLogHash.cs` | New: `ComputeAsync` |
+| `src/CopilotLedger.Core/Import/SessionLogDiscovery.cs` | New: `Logs` and `UnreadableEntries` |
+| `src/CopilotLedger.Core/Import/ISessionLogSource.cs` | `Discover` returns `SessionLogDiscovery` |
+| `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, `CodexSessionLogSource.cs` | Discovery counts unreadable entries; a read hashes the bytes it parses |
+| `src/CopilotLedger.Core/Import/ImportDiagnosticCode.cs` | `UnreadableStore` |
+| `src/CopilotLedger.Storage/LedgerMigrations.cs` | Migration 6: `import_sessions.log_sha256` (version 6 isn't released, so migration 6 changes in place) |
+| `src/CopilotLedger.Storage/ImportSessionCheckpoint.cs` | Required `LogSha256` |
+| `src/CopilotLedger.Storage/UsageAuthority.cs` | Writes and reads `log_sha256` |
+| `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs` | A checkpoint's `LogSha256` must be 64 lowercase hex characters |
+| `src/CopilotLedger.Storage/LedgerSnapshot.cs` | `MissingCompanionMessage`; refuses a ledger with one of `-wal` and `-shm` |
+| `src/CopilotLedger.Storage/Import/ImportReport.cs` | `UnreadableStoreEntries`; `Complete` requires 0 |
+| `src/CopilotLedger.Storage/Import/LedgerImporter.cs` | Store diagnostics, the hash-checked skip, and the checkpoint's hash |
+| `src/CopilotLedger.Cli/Import/ImportCommands.cs` | JSON `unreadableStoreEntries`, the store warning, and the `--since` hint's condition |
+| `docs/cli.md` | The unchanged-log rule, `--since` and last-write times, the dry run's refusal, the JSON fields, the allowlist, and coverage |
+| `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs` | CS1 changed; new: CS15 |
+| `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs` | CX1 changed; new: CX15, CX16 |
+| `tests/CopilotLedger.Tests/Import/CopilotRecordTests.cs` | `ReadAsync` uses `Discover(home).Logs` |
+| `tests/CopilotLedger.Tests/Import/LedgerImporterTests.cs` | New: IR16, IR17 |
+| `tests/CopilotLedger.Tests/Storage/LedgerSnapshotTests.cs` | SN6 changed; new: SN7 (2) |
+| `tests/CopilotLedger.Tests/Storage/UsageAuthorityTests.cs` | UA12 and UA13 changed |
+| `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs` | IC4 changed; new: IC12, IC13 |
+
+### Contracts and DDL
+
+- `SessionLogDiscovery { required IReadOnlyList<SessionLogLocation> Logs; required long UnreadableEntries; }`; `ISessionLogSource.Discover(string home)` returns it.
+- `SessionLogReadResult.ContentSha256` (`string?`): for a `Read` log, the lowercase hex SHA-256 of exactly the bytes parsed, the first `SizeBytes` bytes (fewer when the file shrank).
+- `SessionLogHash.ComputeAsync(SessionLogLocation, CancellationToken)`: the same hash, read in 64 KiB chunks; `null` for a compressed log (never opened) or an `IOException` or `UnauthorizedAccessException`.
+- `ImportSessionCheckpoint.LogSha256` (required); `ImportSourceReport.UnreadableStoreEntries` (required); `ImportDiagnosticCode.UnreadableStore` (last); `LedgerSnapshot.MissingCompanionMessage` (public `const string`).
+- Migration 6's `import_sessions` gains, after `log_last_write_unix_ms`: `log_sha256 TEXT NOT NULL CHECK (length(log_sha256) = 64)`.
+
+### Algorithm
+
+1. **Discovery.** A store folder that doesn't exist is no logs (`DirectoryNotFoundException` while the path isn't a file). A store folder that exists but can't be listed, including a path that's a file, is one unreadable entry, and listing it stops; Codex's other folder is still listed. A session folder or rollout that can't be examined is one unreadable entry, and the others are still listed.
+2. **Store diagnostics.** For each source, `UnreadableStoreEntries` is discovery's count; when it's above 0, a diagnostic `UnreadableStore` with an empty `LogId` and that count comes before the source's log diagnostics, and the source's coverage is incomplete.
+3. **Unchanged logs.** A log is skipped as unchanged only when its checkpoint is complete, its size and last-write time (milliseconds) match, and `SessionLogHash.ComputeAsync` equals `LogSha256`. Size and time are only hints, so each such log is read once to hash it.
+4. **Checkpoints.** The reader hashes every byte it parses, and the checkpoint stores that hash, never one taken after parsing, so bytes appended in between are never marked imported.
+5. **Dry run.** `LedgerSnapshot.OpenAsync` throws `InvalidOperationException(MissingCompanionMessage)` when exactly one of `<ledger>-wal` and `<ledger>-shm` exists, before it opens anything. The command prints the message on standard error and exits with 1.
+
+### Output
+
+- Warning: `Warning: Copilot session logs: 1 folder or file couldn't be listed; any logs there weren't imported` (`<n> folders or files couldn't be listed; …` for more; `Codex session logs: …` for Codex).
+- Dry-run refusal: `Dry run stopped: the ledger has a -wal or -shm file without the other, and reading it could create the missing one. Open the ledger once with another gh-ledger command, such as status, and try again.`
+- JSON: `unreadableStoreEntries` after `sessionsScanned` in each source; a store diagnostic's `log` is `""`.
+
+### Code (copy exactly)
+
+Edit 1 of 5 in `docs/cli.md`, replace:
+
+```markdown
+- `--repo <path>` imports only requests made in the Git repository at `<path>`, a working-tree path such as `.`, unlike the reports' repository key. A session is in the repository when the repository root it recorded is that repository's root, or, when it recorded none, when its working directory is inside it. `--all` imports requests from every repository and from outside any. Use one of the two.
+- `--source copilot`, the default, reads Copilot's session logs, `session-state/<session>/events.jsonl` under `~/.copilot`, or under `COPILOT_HOME` when it's set. `--source codex` reads Codex's rollouts under `sessions` and `archived_sessions` in `~/.codex`, or in `CODEX_HOME` when it's set. Repeat `--source` to read both. `--source claude` is refused: Claude Code's session-log format is internal and undocumented, so gh-ledger doesn't read it.
+- `--since` takes the reports' periods and defaults to `all`. Logs last written before the period starts aren't read, and requests that started before it aren't recorded.
+- `--dry-run` reads the logs and reports what the import would record. It never creates, upgrades, or writes the ledger.
+- `--include-active` also reads Copilot sessions that are still open, which have an `inuse.*.lock` file in their folder. Without it, they're skipped, and you can import them after they end.
+- `--json` writes the report as JSON.
+```
+
+with:
+
+```markdown
+- `--repo <path>` imports only requests made in the Git repository at `<path>`, a working-tree path such as `.`, unlike the reports' repository key. A session is in the repository when the repository root it recorded is that repository's root, or, when it recorded none, when its working directory is inside it. `--all` imports requests from every repository and from outside any. Use one of the two.
+- `--source copilot`, the default, reads Copilot's session logs, `session-state/<session>/events.jsonl` under `~/.copilot`, or under `COPILOT_HOME` when it's set. `--source codex` reads Codex's rollouts under `sessions` and `archived_sessions` in `~/.codex`, or in `CODEX_HOME` when it's set. Repeat `--source` to read both. `--source claude` is refused: Claude Code's session-log format is internal and undocumented, so gh-ledger doesn't read it.
+- `--since` takes the reports' periods and defaults to `all`. Logs last written before the period starts aren't read, by the last-write time the file system reports, and requests that started before it aren't recorded.
+- `--dry-run` reads the logs and reports what the import would record. It never creates, upgrades, or writes the ledger. It stops with an error when the ledger has a `-wal` or `-shm` file without the other, because reading the ledger then could create the missing file.
+- `--include-active` also reads Copilot sessions that are still open, which have an `inuse.*.lock` file in their folder. Without it, they're skipped, and you can import them after they end.
+- `--json` writes the report as JSON.
+```
+
+Edit 2 of 5 in `docs/cli.md`, replace:
+
+```markdown
+- A live span that arrives after its request was imported supersedes the imported row, in the same transaction: the imported row stays in the ledger but no longer counts in any report, MCP tool, budget, or circuit-breaker rule. A live span without a service request ID supersedes every imported row of its session, and any live span supersedes the imported rows of its session that have no ID.
+
+Importing again records nothing twice. A log that was imported completely is skipped while its size and last-write time stay the same. Any other log is read again, and the requests recorded from it before count as `Duplicate`. An import stopped by Ctrl+C or an error keeps the requests it recorded, and running it again completes it.
+
+### The import report
+```
+
+with:
+
+```markdown
+- A live span that arrives after its request was imported supersedes the imported row, in the same transaction: the imported row stays in the ledger but no longer counts in any report, MCP tool, budget, or circuit-breaker rule. A live span without a service request ID supersedes every imported row of its session, and any live span supersedes the imported rows of its session that have no ID.
+
+Importing again records nothing twice. A log that was imported completely is skipped while its size, last-write time, and SHA-256 hash stay the same, so import reads such a log once to hash it: the size and last-write time alone could miss a log rewritten in place. Any other log is read again, and the requests recorded from it before count as `Duplicate`. An import stopped by Ctrl+C or an error keeps the requests it recorded, and running it again completes it.
+
+### The import report
+```
+
+Edit 3 of 5 in `docs/cli.md`, replace:
+
+```markdown
+`--json` writes no warnings; it lists them as `diagnostics`. Its fields are `dryRun`, `period`, `from`, `repository` (the `owner/repo` slug, or the root when the repository has none) and `repositoryRoot` (both `null` with `--all`), `coverage`, and:
+
+- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
+- `totals`: `recorded` and the same amounts over every source.
+- `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`.
+
+| Exit code | Meaning |
+```
+
+with:
+
+```markdown
+`--json` writes no warnings; it lists them as `diagnostics`. Its fields are `dryRun`, `period`, `from`, `repository` (the `owner/repo` slug, or the root when the repository has none) and `repositoryRoot` (both `null` with `--all`), `coverage`, and:
+
+- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `unreadableStoreEntries` (folders and files of the source's store that couldn't be listed), `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
+- `totals`: `recorded` and the same amounts over every source.
+- `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`. `log` is empty for `unreadableStore`, which is about the source's store rather than one log.
+
+| Exit code | Meaning |
+```
+
+Edit 4 of 5 in `docs/cli.md`, replace:
+
+```markdown
+| 1 | The options are invalid, or an error stopped the import. |
+
+Skipped active, unchanged, and out-of-scope logs don't make coverage incomplete. When the only gap is sessions from before Copilot 1.0.103, the report's last line suggests `--since`, which leaves them out. With `--repo`, logs of other repositories are read again on every run, because they may hold requests of this one.
+
+Imported requests count in every report and MCP tool, as live ones do, with the branch their log recorded. Tool calls are imported only from the last 7 days, as long as the ledger keeps tool calls; an older request keeps only the number of tool calls it made. Imported requests have no agent-invocation span, so `status --cache --turns` shows their `Growth` as `n/a`, and the input-growth ranking of `--bloat` leaves them out. `import` warns when the daemon runs another gh-ledger version: restart the daemon, so that the live spans it records supersede imported rows by this version's rules.
+```
+
+with:
+
+```markdown
+| 1 | The options are invalid, or an error stopped the import. |
+
+Skipped active, unchanged, and out-of-scope logs don't make coverage incomplete. A folder or file of a session store that exists but can't be listed does, with a warning such as `Copilot session logs: 1 folder or file couldn't be listed`; a store that doesn't exist only has no logs. When the only gap is sessions from before Copilot 1.0.103, the report's last line suggests `--since`, which leaves them out. With `--repo`, logs of other repositories are read again on every run, because they may hold requests of this one.
+
+Imported requests count in every report and MCP tool, as live ones do, with the branch their log recorded. Tool calls are imported only from the last 7 days, as long as the ledger keeps tool calls; an older request keeps only the number of tool calls it made. Imported requests have no agent-invocation span, so `status --cache --turns` shows their `Growth` as `n/a`, and the input-growth ranking of `--bloat` leaves them out. `import` warns when the daemon runs another gh-ledger version: restart the daemon, so that the live spans it records supersede imported rows by this version's rules.
+```
+
+Edit 5 of 5 in `docs/cli.md`, replace:
+
+```markdown
+| `span_links.recorded_at_unix_ms` | Kept by the ledger | — |
+| `import_sessions.source`, `import_sessions.log_id` | `copilot`, and the session folder's name | `codex`, and the IDs in the rollout's file name, after `archived/` for an archived rollout |
+| `import_sessions.log_size_bytes`, `import_sessions.log_last_write_unix_ms` | The log file's size and last-write time | The rollout file's size and last-write time |
+| `import_sessions.complete`, `import_sessions.records_recorded`, `import_sessions.records_duplicate`, `import_sessions.records_overlap`, `import_sessions.records_ambiguous`, `import_sessions.imported_at_unix_ms` | The import's own results | The import's own results |
+| `import_record_aliases.source`, `import_record_aliases.record_key_sha256` | `copilot`, and SHA-256 of the record's usage ID, or of a compaction's service request ID | `codex`, and SHA-256 of `payload.response_id` |
+```
+
+with:
+
+```markdown
+| `span_links.recorded_at_unix_ms` | Kept by the ledger | — |
+| `import_sessions.source`, `import_sessions.log_id` | `copilot`, and the session folder's name | `codex`, and the IDs in the rollout's file name, after `archived/` for an archived rollout |
+| `import_sessions.log_size_bytes`, `import_sessions.log_last_write_unix_ms`, `import_sessions.log_sha256` | The log file's size and last-write time, and the SHA-256 hash of its bytes up to that size | The rollout file's size and last-write time, and the SHA-256 hash of its bytes up to that size |
+| `import_sessions.complete`, `import_sessions.records_recorded`, `import_sessions.records_duplicate`, `import_sessions.records_overlap`, `import_sessions.records_ambiguous`, `import_sessions.imported_at_unix_ms` | The import's own results | The import's own results |
+| `import_record_aliases.source`, `import_record_aliases.record_key_sha256` | `copilot`, and SHA-256 of the record's usage ID, or of a compaction's service request ID | `codex`, and SHA-256 of `payload.response_id` |
+```
+
+Edit 1 of 4 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+    // Every gap in the source's coverage is a session from before Copilot 1.0.103.
+    private static bool OnlyOldSessionsMissing(ImportSourceReport source) =>
+        source.SessionsUnsupported == source.SessionsAggregateOnly &&
+        source.MalformedLines == 0 &&
+```
+
+with:
+
+```csharp
+    // Every gap in the source's coverage is a session from before Copilot 1.0.103.
+    private static bool OnlyOldSessionsMissing(ImportSourceReport source) =>
+        source.UnreadableStoreEntries == 0 &&
+        source.SessionsUnsupported == source.SessionsAggregateOnly &&
+        source.MalformedLines == 0 &&
+```
+
+Edit 2 of 4 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+            writer.WriteString("coverage", Coverage(source.Complete));
+            writer.WriteNumber("sessionsScanned", source.SessionsScanned);
+            writer.WriteNumber("sessionsSkippedUnchanged", source.SessionsSkippedUnchanged);
+            writer.WriteNumber("sessionsSkippedActive", source.SessionsSkippedActive);
+```
+
+with:
+
+```csharp
+            writer.WriteString("coverage", Coverage(source.Complete));
+            writer.WriteNumber("sessionsScanned", source.SessionsScanned);
+            writer.WriteNumber("unreadableStoreEntries", source.UnreadableStoreEntries);
+            writer.WriteNumber("sessionsSkippedUnchanged", source.SessionsSkippedUnchanged);
+            writer.WriteNumber("sessionsSkippedActive", source.SessionsSkippedActive);
+```
+
+Edit 3 of 4 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+    }
+
+    // "<source> <session|rollout> <log ID>[, line <n> (byte <offset>)]: <message>"
+    private static string Describe(ImportDiagnostic diagnostic)
+    {
+        string log = diagnostic.Source == ImportSourceKind.Codex ? "Codex rollout" : "Copilot session";
+        string line = diagnostic.FirstLine > 0
+```
+
+with:
+
+```csharp
+    }
+
+    // "<source> <session|rollout> <log ID>[, line <n> (byte <offset>)]: <message>", or "<source> session logs: <message>"
+    // for the store itself.
+    private static string Describe(ImportDiagnostic diagnostic)
+    {
+        if (diagnostic.Code == ImportDiagnosticCode.UnreadableStore)
+        {
+            return $"{Name(diagnostic.Source)} session logs: {Message(diagnostic)}";
+        }
+
+        string log = diagnostic.Source == ImportSourceKind.Codex ? "Codex rollout" : "Copilot session";
+        string line = diagnostic.FirstLine > 0
+```
+
+Edit 4 of 4 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+                $"{Plural(count, "request")} deferred: this conversation has live spans without a call ID",
+            ImportDiagnosticCode.CostOutOfRange => $"{Plural(count, "request")} skipped: cost beyond the ledger's range",
+            _ => throw new ArgumentOutOfRangeException(nameof(diagnostic), diagnostic.Code, null),
+        };
+```
+
+with:
+
+```csharp
+                $"{Plural(count, "request")} deferred: this conversation has live spans without a call ID",
+            ImportDiagnosticCode.CostOutOfRange => $"{Plural(count, "request")} skipped: cost beyond the ledger's range",
+            ImportDiagnosticCode.UnreadableStore => count == 1
+                ? "1 folder or file couldn't be listed; any logs there weren't imported"
+                : $"{LedgerFormat.Count(count)} folders or files couldn't be listed; any logs there weren't imported",
+            _ => throw new ArgumentOutOfRangeException(nameof(diagnostic), diagnostic.Code, null),
+        };
+```
+
+Edit 1 of 9 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+using System.Globalization;
+using CopilotLedger.Core.Telemetry;
+
+namespace CopilotLedger.Core.Import;
+```
+
+with:
+
+```csharp
+using System.Globalization;
+using System.Security.Cryptography;
+using CopilotLedger.Core.Telemetry;
+
+namespace CopilotLedger.Core.Import;
+```
+
+Edit 2 of 9 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+        string.IsNullOrEmpty(codexHome) ? Path.Combine(userProfile, ".codex") : codexHome;
+
+    // Rollouts under <home>/sessions, and under <home>/archived_sessions with LogIds that start with "archived/". A
+    // .jsonl.zst rollout is listed as compressed and never opened.
+    public IReadOnlyList<SessionLogLocation> Discover(string home)
+    {
+        ArgumentNullException.ThrowIfNull(home);
+        List<SessionLogLocation> logs = [];
+        AddRollouts(logs, Path.Combine(home, "sessions"), "");
+        AddRollouts(logs, Path.Combine(home, "archived_sessions"), "archived/");
+        return [.. logs.OrderBy(log => log.LogId, StringComparer.Ordinal)];
+    }
+
+    public Task<SessionLogReadResult> ReadAsync(SessionLogLocation location, CancellationToken cancellationToken)
+```
+
+with:
+
+```csharp
+        string.IsNullOrEmpty(codexHome) ? Path.Combine(userProfile, ".codex") : codexHome;
+
+    // Rollouts under <home>/sessions, and under <home>/archived_sessions with LogIds that start with "archived/". A
+    // .jsonl.zst rollout is listed as compressed and never opened. A folder or rollout that exists but can't be listed or
+    // examined is an unreadable entry; listing stops at the first folder that can't be listed.
+    public SessionLogDiscovery Discover(string home)
+    {
+        ArgumentNullException.ThrowIfNull(home);
+        List<SessionLogLocation> logs = [];
+        long unreadable = AddRollouts(logs, Path.Combine(home, "sessions"), "") +
+                          AddRollouts(logs, Path.Combine(home, "archived_sessions"), "archived/");
+        return new SessionLogDiscovery
+        {
+            Logs = [.. logs.OrderBy(log => log.LogId, StringComparer.Ordinal)],
+            UnreadableEntries = unreadable,
+        };
+    }
+
+    public Task<SessionLogReadResult> ReadAsync(SessionLogLocation location, CancellationToken cancellationToken)
+```
+
+Edit 3 of 9 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+    }
+
+    private static void AddRollouts(List<SessionLogLocation> logs, string root, string prefix)
+    {
+        try
+        {
+```
+
+with:
+
+```csharp
+    }
+
+    // Adds root's rollouts to logs and returns how many entries couldn't be listed or examined.
+    private static long AddRollouts(List<SessionLogLocation> logs, string root, string prefix)
+    {
+        long unreadable = 0;
+        try
+        {
+```
+
+Edit 4 of 9 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    // rollout-YYYY-MM-DDTHH-MM-SS-<thread ID>[_<rollout ID>].jsonl, or .jsonl.zst: the IDs in lowercase, joined by "_".
+```
+
+with:
+
+```csharp
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    unreadable++;
+                }
+            }
+        }
+        catch (DirectoryNotFoundException) when (!File.Exists(root))
+        {
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            unreadable++;
+        }
+
+        return unreadable;
+    }
+
+    // rollout-YYYY-MM-DDTHH-MM-SS-<thread ID>[_<rollout ID>].jsonl, or .jsonl.zst: the IDs in lowercase, joined by "_".
+```
+
+Edit 5 of 9 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+        }
+
+        Rollout rollout = new(location);
+        try
+        {
+```
+
+with:
+
+```csharp
+        }
+
+        Rollout rollout = new(location);
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        try
+        {
+```
+
+Edit 6 of 9 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+                rollout.OnOversized,
+                rollout.OnUnterminated,
+                cancellationToken);
+        }
+```
+
+with:
+
+```csharp
+                rollout.OnOversized,
+                rollout.OnUnterminated,
+                hash,
+                cancellationToken);
+        }
+```
+
+Edit 7 of 9 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+        }
+
+        return rollout.Finish();
+    }
+
+    // One rollout's reading state.
+```
+
+with:
+
+```csharp
+        }
+
+        return rollout.Finish(Convert.ToHexStringLower(hash.GetHashAndReset()));
+    }
+
+    // One rollout's reading state.
+```
+
+Edit 8 of 9 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+            Malformed(ImportDiagnosticCode.UnterminatedLine, ImportEventKind.Unknown, null, number, offset);
+
+        internal SessionLogReadResult Finish()
+        {
+            if (_stop is { } stop)
+```
+
+with:
+
+```csharp
+            Malformed(ImportDiagnosticCode.UnterminatedLine, ImportEventKind.Unknown, null, number, offset);
+
+        // contentSha256: the SHA-256 of the bytes that were read, which a Read result keeps.
+        internal SessionLogReadResult Finish(string contentSha256)
+        {
+            if (_stop is { } stop)
+```
+
+Edit 9 of 9 in `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`, replace:
+
+```csharp
+                MalformedLines = _malformed,
+                SkippedEvents = _skipped,
+            };
+        }
+```
+
+with:
+
+```csharp
+                MalformedLines = _malformed,
+                SkippedEvents = _skipped,
+                ContentSha256 = contentSha256,
+            };
+        }
+```
+
+Edit 1 of 8 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+using System.Globalization;
+using CopilotLedger.Core.Telemetry;
+
+namespace CopilotLedger.Core.Import;
+```
+
+with:
+
+```csharp
+using System.Globalization;
+using System.Security.Cryptography;
+using CopilotLedger.Core.Telemetry;
+
+namespace CopilotLedger.Core.Import;
+```
+
+Edit 2 of 8 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+    public ImportSourceKind Kind => ImportSourceKind.Copilot;
+
+    // Each <home>/session-state/<session ID>/events.jsonl whose directory name is a valid session ID.
+    public IReadOnlyList<SessionLogLocation> Discover(string home)
+    {
+        ArgumentNullException.ThrowIfNull(home);
+        List<SessionLogLocation> logs = [];
+        try
+        {
+            foreach (string directory in Directory.EnumerateDirectories(Path.Combine(home, "session-state")))
+            {
+                string sessionId = Path.GetFileName(directory);
+```
+
+with:
+
+```csharp
+    public ImportSourceKind Kind => ImportSourceKind.Copilot;
+
+    // Each <home>/session-state/<session ID>/events.jsonl whose directory name is a valid session ID. A session folder, or a
+    // session-state that exists but isn't a folder that can be listed, is an unreadable entry.
+    public SessionLogDiscovery Discover(string home)
+    {
+        ArgumentNullException.ThrowIfNull(home);
+        string root = Path.Combine(home, "session-state");
+        List<SessionLogLocation> logs = [];
+        long unreadable = 0;
+        try
+        {
+            foreach (string directory in Directory.EnumerateDirectories(root))
+            {
+                string sessionId = Path.GetFileName(directory);
+```
+
+Edit 3 of 8 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        return [.. logs.OrderBy(log => log.LogId, StringComparer.Ordinal)];
+    }
+
+    public Task<SessionLogReadResult> ReadAsync(SessionLogLocation location, CancellationToken cancellationToken)
+```
+
+with:
+
+```csharp
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    unreadable++;
+                }
+            }
+        }
+        catch (DirectoryNotFoundException) when (!File.Exists(root))
+        {
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            unreadable++;
+        }
+
+        return new SessionLogDiscovery
+        {
+            Logs = [.. logs.OrderBy(log => log.LogId, StringComparer.Ordinal)],
+            UnreadableEntries = unreadable,
+        };
+    }
+
+    public Task<SessionLogReadResult> ReadAsync(SessionLogLocation location, CancellationToken cancellationToken)
+```
+
+Edit 4 of 8 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+    {
+        Session session = new(location);
+        try
+        {
+```
+
+with:
+
+```csharp
+    {
+        Session session = new(location);
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        try
+        {
+```
+
+Edit 5 of 8 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+                session.OnOversized,
+                session.OnUnterminated,
+                cancellationToken);
+        }
+```
+
+with:
+
+```csharp
+                session.OnOversized,
+                session.OnUnterminated,
+                hash,
+                cancellationToken);
+        }
+```
+
+Edit 6 of 8 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+        }
+
+        return session.Finish();
+    }
+
+    // One log's reading state.
+```
+
+with:
+
+```csharp
+        }
+
+        return session.Finish(Convert.ToHexStringLower(hash.GetHashAndReset()));
+    }
+
+    // One log's reading state.
+```
+
+Edit 7 of 8 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+            Malformed(ImportDiagnosticCode.UnterminatedLine, ImportEventKind.Unknown, null, number, offset);
+
+        internal SessionLogReadResult Finish()
+        {
+            if (_stop is { } stop)
+```
+
+with:
+
+```csharp
+            Malformed(ImportDiagnosticCode.UnterminatedLine, ImportEventKind.Unknown, null, number, offset);
+
+        // contentSha256: the SHA-256 of the bytes that were read, which a Read result keeps.
+        internal SessionLogReadResult Finish(string contentSha256)
+        {
+            if (_stop is { } stop)
+```
+
+Edit 8 of 8 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+                MalformedLines = _malformed,
+                SkippedEvents = _skipped,
+            };
+        }
+```
+
+with:
+
+```csharp
+                MalformedLines = _malformed,
+                SkippedEvents = _skipped,
+                ContentSha256 = contentSha256,
+            };
+        }
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Import/ISessionLogSource.cs`, replace:
+
+```csharp
+    ImportSourceKind Kind { get; }
+
+    // The logs under home, ordered by LogId (ordinal). A missing or unreadable home gives none.
+    IReadOnlyList<SessionLogLocation> Discover(string home);
+
+    // Reads at most location.SizeBytes bytes of the log. Throws only ArgumentException (a location of another source) and
+    // OperationCanceledException; a log that can't be read has Status Unreadable.
+    Task<SessionLogReadResult> ReadAsync(SessionLogLocation location, CancellationToken cancellationToken);
+}
+```
+
+with:
+
+```csharp
+    ImportSourceKind Kind { get; }
+
+    // The logs under home, ordered by LogId (ordinal), and how many entries couldn't be listed or examined. A missing home
+    // gives none of either.
+    SessionLogDiscovery Discover(string home);
+
+    // Reads at most location.SizeBytes bytes of the log. Throws only ArgumentException (a location of another source) and
+    // OperationCanceledException; a log that can't be read has Status Unreadable. A Read result has the SHA-256 of the bytes
+    // it parsed.
+    Task<SessionLogReadResult> ReadAsync(SessionLogLocation location, CancellationToken cancellationToken);
+}
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Import/ImportDiagnosticCode.cs`, replace:
+
+```csharp
+    AmbiguousOverlap,             // set by the importer
+    CostOutOfRange,               // set by the importer
+}
+```
+
+with:
+
+```csharp
+    AmbiguousOverlap,             // set by the importer
+    CostOutOfRange,               // set by the importer
+    UnreadableStore,              // set by the importer: entries of the store that couldn't be listed or examined
+}
+```
+
+Edit 1 of 4 in `src/CopilotLedger.Core/Import/JsonlLineReader.cs`, replace:
+
+```csharp
+using System.Buffers;
+
+namespace CopilotLedger.Core.Import;
+```
+
+with:
+
+```csharp
+using System.Buffers;
+using System.Security.Cryptography;
+
+namespace CopilotLedger.Core.Import;
+```
+
+Edit 2 of 4 in `src/CopilotLedger.Core/Import/JsonlLineReader.cs`, replace:
+
+```csharp
+// Splits the first maxBytes bytes of a JSON Lines stream into lines, reading 64 KiB at a time, and hands each complete line
+// to a callback. A line longer than maxLineBytes is skipped without being kept, and a last line without "\n" is reported but
+// never handed over. Blank lines are skipped silently. Line numbers are 1-based and count every "\n".
+internal static class JsonlLineReader
+{
+```
+
+with:
+
+```csharp
+// Splits the first maxBytes bytes of a JSON Lines stream into lines, reading 64 KiB at a time, and hands each complete line
+// to a callback. A line longer than maxLineBytes is skipped without being kept, and a last line without "\n" is reported but
+// never handed over. Blank lines are skipped silently. Line numbers are 1-based and count every "\n". Every byte read is also
+// added to hash, when it isn't null.
+internal static class JsonlLineReader
+{
+```
+
+Edit 3 of 4 in `src/CopilotLedger.Core/Import/JsonlLineReader.cs`, replace:
+
+```csharp
+        Action<long, long> onOversized,
+        Action<long, long> onUnterminated,
+        CancellationToken cancellationToken)
+    {
+```
+
+with:
+
+```csharp
+        Action<long, long> onOversized,
+        Action<long, long> onUnterminated,
+        IncrementalHash? hash,
+        CancellationToken cancellationToken)
+    {
+```
+
+Edit 4 of 4 in `src/CopilotLedger.Core/Import/JsonlLineReader.cs`, replace:
+
+```csharp
+                }
+
+                int start = 0;
+                while (start < read)
+```
+
+with:
+
+```csharp
+                }
+
+                hash?.AppendData(chunk, 0, read);
+                int start = 0;
+                while (start < read)
+```
+
+New file `src/CopilotLedger.Core/Import/SessionLogDiscovery.cs`:
+
+```csharp
+namespace CopilotLedger.Core.Import;
+
+// What discovery found under a home. A missing home, or a missing store folder in it, is no logs and no unreadable entries;
+// a store folder, session folder, or log file that exists but can't be listed or examined is an unreadable entry.
+public sealed record SessionLogDiscovery
+{
+    public required IReadOnlyList<SessionLogLocation> Logs { get; init; }   // ordered by LogId (ordinal)
+    public required long UnreadableEntries { get; init; }
+}
+```
+
+New file `src/CopilotLedger.Core/Import/SessionLogHash.cs`:
+
+```csharp
+using System.Security.Cryptography;
+
+namespace CopilotLedger.Core.Import;
+
+// The SHA-256 of a session log's content: the bytes from its start up to the size it had when it was discovered. A log's
+// size and last-write time only hint that it's unchanged; this hash decides it.
+public static class SessionLogHash
+{
+    private const int ChunkBytes = 64 * 1024;
+
+    // The lowercase hex SHA-256 of location's first SizeBytes bytes (fewer when it has shrunk since), or null when the log
+    // can't be read. A compressed log is never opened, so it has none.
+    public static Task<string?> ComputeAsync(SessionLogLocation location, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(location);
+        return location.IsCompressed
+            ? Task.FromResult<string?>(null)
+            : Task.Run(() => Compute(location, cancellationToken), cancellationToken);
+    }
+
+    private static string? Compute(SessionLogLocation location, CancellationToken cancellationToken)
+    {
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] chunk = new byte[ChunkBytes];
+        try
+        {
+            using FileStream stream = new(
+                location.Path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                0,
+                FileOptions.SequentialScan);
+            long position = 0;
+            while (position < location.SizeBytes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                int read = stream.Read(chunk, 0, (int)Math.Min(ChunkBytes, location.SizeBytes - position));
+                if (read == 0)
+                {
+                    break;
+                }
+
+                hash.AppendData(chunk, 0, read);
+                position += read;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
+    }
+}
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Import/SessionLogReadResult.cs`, replace:
+
+```csharp
+    public required long MalformedLines { get; init; }            // invalid JSON, oversized, or an unterminated last line
+    public required long SkippedEvents { get; init; }             // well-formed lines of any other type, known or not
+}
+```
+
+with:
+
+```csharp
+    public required long MalformedLines { get; init; }            // invalid JSON, oversized, or an unterminated last line
+    public required long SkippedEvents { get; init; }             // well-formed lines of any other type, known or not
+    public string? ContentSha256 { get; init; }                   // a Read log's bytes that were parsed (SessionLogHash)
+}
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Storage/Import/ImportReport.cs`, replace:
+
+```csharp
+    public required ImportSourceKind Source { get; init; }
+    public required long SessionsScanned { get; init; }             // every log discovered
+    public required long SessionsSkippedUnchanged { get; init; }    // completely imported, and unchanged since
+    public required long SessionsSkippedActive { get; init; }       // still open, without IncludeActive
+```
+
+with:
+
+```csharp
+    public required ImportSourceKind Source { get; init; }
+    public required long SessionsScanned { get; init; }             // every log discovered
+    public required long UnreadableStoreEntries { get; init; }      // folders and files of the store that couldn't be listed
+    public required long SessionsSkippedUnchanged { get; init; }    // completely imported, and unchanged since
+    public required long SessionsSkippedActive { get; init; }       // still open, without IncludeActive
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Storage/Import/ImportReport.cs`, replace:
+
+```csharp
+    public required long ApiEquivalentEstimatedSpans { get; init; } // priced without a reported cache counter
+
+    public bool Complete =>
+        SessionsUnsupported == 0 &&
+        MalformedLines == 0 &&
+```
+
+with:
+
+```csharp
+    public required long ApiEquivalentEstimatedSpans { get; init; } // priced without a reported cache counter
+
+    public bool Complete =>
+        UnreadableStoreEntries == 0 &&
+        SessionsUnsupported == 0 &&
+        MalformedLines == 0 &&
+```
+
+Edit 1 of 6 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+            {
+                Tally tally = new(source.Source.Kind);
+                foreach (SessionLogLocation log in source.Source.Discover(source.Home))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+```
+
+with:
+
+```csharp
+            {
+                Tally tally = new(source.Source.Kind);
+                SessionLogDiscovery discovery = source.Source.Discover(source.Home);
+                tally.UnreadableStoreEntries = discovery.UnreadableEntries;
+                if (discovery.UnreadableEntries > 0)
+                {
+                    diagnostics.Add(new ImportDiagnostic
+                    {
+                        Source = source.Source.Kind,
+                        LogId = string.Empty,
+                        Code = ImportDiagnosticCode.UnreadableStore,
+                        Count = discovery.UnreadableEntries,
+                    });
+                }
+
+                foreach (SessionLogLocation log in discovery.Logs)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+```
+
+Edit 2 of 6 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+        }
+
+        ImportSessionCheckpoint? checkpoint = store is not null
+            ? await store.GetImportSessionAsync(log.Source, log.LogId, cancellationToken)
+```
+
+with:
+
+```csharp
+        }
+
+        // Size and last-write time only hint that a log is unchanged: it's skipped when the SHA-256 of its content matches too.
+        ImportSessionCheckpoint? checkpoint = store is not null
+            ? await store.GetImportSessionAsync(log.Source, log.LogId, cancellationToken)
+```
+
+Edit 3 of 6 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+        if (checkpoint is { Complete: true } &&
+            checkpoint.LogSizeBytes == log.SizeBytes &&
+            checkpoint.LogLastWriteTime.ToUnixTimeMilliseconds() == log.LastWriteTime.ToUnixTimeMilliseconds())
+        {
+            tally.SessionsSkippedUnchanged++;
+```
+
+with:
+
+```csharp
+        if (checkpoint is { Complete: true } &&
+            checkpoint.LogSizeBytes == log.SizeBytes &&
+            checkpoint.LogLastWriteTime.ToUnixTimeMilliseconds() == log.LastWriteTime.ToUnixTimeMilliseconds() &&
+            await SessionLogHash.ComputeAsync(log, cancellationToken) == checkpoint.LogSha256)
+        {
+            tally.SessionsSkippedUnchanged++;
+```
+
+Edit 4 of 6 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+                    LogSizeBytes = log.SizeBytes,
+                    LogLastWriteTime = log.LastWriteTime,
+                    Complete = result.MalformedLines == 0 &&
+                               result.UnsupportedUsageShapes == 0 &&
+```
+
+with:
+
+```csharp
+                    LogSizeBytes = log.SizeBytes,
+                    LogLastWriteTime = log.LastWriteTime,
+                    LogSha256 = result.ContentSha256 ??
+                                throw new InvalidOperationException("A log that was read has no content hash."),
+                    Complete = result.MalformedLines == 0 &&
+                               result.UnsupportedUsageShapes == 0 &&
+```
+
+Edit 5 of 6 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+        private bool _apiEquivalentPriced;
+
+        public long SessionsScanned { get; set; }
+        public long SessionsSkippedUnchanged { get; set; }
+        public long SessionsSkippedActive { get; set; }
+```
+
+with:
+
+```csharp
+        private bool _apiEquivalentPriced;
+
+        public long SessionsScanned { get; set; }
+        public long UnreadableStoreEntries { get; set; }
+        public long SessionsSkippedUnchanged { get; set; }
+        public long SessionsSkippedActive { get; set; }
+```
+
+Edit 6 of 6 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+            Source = source,
+            SessionsScanned = SessionsScanned,
+            SessionsSkippedUnchanged = SessionsSkippedUnchanged,
+            SessionsSkippedActive = SessionsSkippedActive,
+```
+
+with:
+
+```csharp
+            Source = source,
+            SessionsScanned = SessionsScanned,
+            UnreadableStoreEntries = UnreadableStoreEntries,
+            SessionsSkippedUnchanged = SessionsSkippedUnchanged,
+            SessionsSkippedActive = SessionsSkippedActive,
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Storage/ImportSessionCheckpoint.cs`, replace:
+
+```csharp
+namespace CopilotLedger.Storage;
+
+// What the last import of one session log saw, so an unchanged, completely imported log can be skipped.
+public sealed record ImportSessionCheckpoint
+{
+```
+
+with:
+
+```csharp
+namespace CopilotLedger.Storage;
+
+// What the last import of one session log saw, so an unchanged, completely imported log can be skipped: its size and
+// last-write time hint that it's unchanged, and the SHA-256 of its content decides.
+public sealed record ImportSessionCheckpoint
+{
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Storage/ImportSessionCheckpoint.cs`, replace:
+
+```csharp
+    public required long LogSizeBytes { get; init; }
+    public required DateTimeOffset LogLastWriteTime { get; init; }   // stored in Unix milliseconds
+    public required bool Complete { get; init; }                     // every record of the whole log was resolved
+    public required long Recorded { get; init; }
+```
+
+with:
+
+```csharp
+    public required long LogSizeBytes { get; init; }
+    public required DateTimeOffset LogLastWriteTime { get; init; }   // stored in Unix milliseconds
+    public required string LogSha256 { get; init; }                  // SessionLogReadResult.ContentSha256: 64 lowercase hex
+    public required bool Complete { get; init; }                     // every record of the whole log was resolved
+    public required long Recorded { get; init; }
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/LedgerMigrations.cs`, replace:
+
+```csharp
+                log_size_bytes         INTEGER NOT NULL CHECK (log_size_bytes >= 0),
+                log_last_write_unix_ms INTEGER NOT NULL,
+                complete               INTEGER NOT NULL CHECK (complete IN (0, 1)),
+                records_recorded       INTEGER NOT NULL CHECK (records_recorded >= 0),
+```
+
+with:
+
+```csharp
+                log_size_bytes         INTEGER NOT NULL CHECK (log_size_bytes >= 0),
+                log_last_write_unix_ms INTEGER NOT NULL,
+                log_sha256             TEXT    NOT NULL CHECK (length(log_sha256) = 64),
+                complete               INTEGER NOT NULL CHECK (complete IN (0, 1)),
+                records_recorded       INTEGER NOT NULL CHECK (records_recorded >= 0),
+```
+
+Edit 1 of 3 in `src/CopilotLedger.Storage/LedgerSnapshot.cs`, replace:
+
+```csharp
+// The ledger as one consistent, read-only snapshot, for a dry run: it decides each imported record as RecordImportedAsync
+// would, and remembers its own decisions, without ever creating, migrating, or writing the ledger. With neither -wal nor -shm
+// beside the ledger, it opens the file as immutable, so SQLite doesn't create them either.
+public sealed class LedgerSnapshot : IAsyncDisposable
+{
+    private readonly SqliteConnection? _connection;
+    private readonly SqliteTransaction? _transaction;
+```
+
+with:
+
+```csharp
+// The ledger as one consistent, read-only snapshot, for a dry run: it decides each imported record as RecordImportedAsync
+// would, and remembers its own decisions, without ever creating, migrating, or writing the ledger. With neither -wal nor -shm
+// beside the ledger, it opens the file as immutable, so SQLite doesn't create them either. With only one of them, SQLite could
+// create the other, so it refuses.
+public sealed class LedgerSnapshot : IAsyncDisposable
+{
+    public const string MissingCompanionMessage =
+        "Dry run stopped: the ledger has a -wal or -shm file without the other, and reading it could create the missing one. Open the ledger once with another gh-ledger command, such as status, and try again.";
+
+    private readonly SqliteConnection? _connection;
+    private readonly SqliteTransaction? _transaction;
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Storage/LedgerSnapshot.cs`, replace:
+
+```csharp
+    public int SchemaVersion { get; }
+
+    // Throws InvalidOperationException for a ledger newer than this gh-ledger, as InitializeAsync does.
+    public static async Task<LedgerSnapshot> OpenAsync(string databasePath, CancellationToken cancellationToken = default)
+    {
+```
+
+with:
+
+```csharp
+    public int SchemaVersion { get; }
+
+    // Throws InvalidOperationException for a ledger newer than this gh-ledger, as InitializeAsync does, and with
+    // MissingCompanionMessage when exactly one of -wal and -shm exists.
+    public static async Task<LedgerSnapshot> OpenAsync(string databasePath, CancellationToken cancellationToken = default)
+    {
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Storage/LedgerSnapshot.cs`, replace:
+
+```csharp
+        }
+
+        bool companions = File.Exists(path + "-wal") || File.Exists(path + "-shm");
+        SqliteConnection connection = new(new SqliteConnectionStringBuilder
+        {
+            DataSource = companions ? path : ImmutableUri(path),
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+```
+
+with:
+
+```csharp
+        }
+
+        bool wal = File.Exists(path + "-wal");
+        if (wal != File.Exists(path + "-shm"))
+        {
+            throw new InvalidOperationException(MissingCompanionMessage);
+        }
+
+        SqliteConnection connection = new(new SqliteConnectionStringBuilder
+        {
+            DataSource = wal ? path : ImmutableUri(path),
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs`, replace:
+
+```csharp
+            string.IsNullOrEmpty(checkpoint.LogId) ||
+            checkpoint.LogSizeBytes < 0 ||
+            checkpoint.Recorded < 0 ||
+            checkpoint.Duplicates < 0 ||
+```
+
+with:
+
+```csharp
+            string.IsNullOrEmpty(checkpoint.LogId) ||
+            checkpoint.LogSizeBytes < 0 ||
+            checkpoint.LogSha256 is not { Length: 64 } ||
+            !checkpoint.LogSha256.All(character => char.IsAsciiDigit(character) || character is >= 'a' and <= 'f') ||
+            checkpoint.Recorded < 0 ||
+            checkpoint.Duplicates < 0 ||
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs`, replace:
+
+```csharp
+        {
+            throw new ArgumentException(
+                "A checkpoint must name a Copilot or Codex log, and its size and counts can't be negative.",
+                parameterName);
+        }
+```
+
+with:
+
+```csharp
+        {
+            throw new ArgumentException(
+                "A checkpoint must name a Copilot or Codex log and its SHA-256, and its size and counts can't be negative.",
+                parameterName);
+        }
+```
+
+Edit 1 of 4 in `src/CopilotLedger.Storage/UsageAuthority.cs`, replace:
+
+```csharp
+        command.CommandText = """
+            INSERT INTO import_sessions (
+                source, log_id, log_size_bytes, log_last_write_unix_ms, complete, records_recorded, records_duplicate,
+                records_overlap, records_ambiguous, imported_at_unix_ms
+            ) VALUES (
+                @source, @log, @size, @time, @complete, @recorded, @duplicate, @overlap, @ambiguous, @now
+            ) ON CONFLICT (source, log_id) DO UPDATE SET
+                log_size_bytes = excluded.log_size_bytes,
+                log_last_write_unix_ms = excluded.log_last_write_unix_ms,
+                complete = excluded.complete,
+                records_recorded = excluded.records_recorded,
+```
+
+with:
+
+```csharp
+        command.CommandText = """
+            INSERT INTO import_sessions (
+                source, log_id, log_size_bytes, log_last_write_unix_ms, log_sha256, complete, records_recorded,
+                records_duplicate, records_overlap, records_ambiguous, imported_at_unix_ms
+            ) VALUES (
+                @source, @log, @size, @time, @sha256, @complete, @recorded, @duplicate, @overlap, @ambiguous, @now
+            ) ON CONFLICT (source, log_id) DO UPDATE SET
+                log_size_bytes = excluded.log_size_bytes,
+                log_last_write_unix_ms = excluded.log_last_write_unix_ms,
+                log_sha256 = excluded.log_sha256,
+                complete = excluded.complete,
+                records_recorded = excluded.records_recorded,
+```
+
+Edit 2 of 4 in `src/CopilotLedger.Storage/UsageAuthority.cs`, replace:
+
+```csharp
+        command.Parameters.AddWithValue("@size", checkpoint.LogSizeBytes);
+        command.Parameters.AddWithValue("@time", checkpoint.LogLastWriteTime.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("@complete", checkpoint.Complete ? 1 : 0);
+        command.Parameters.AddWithValue("@recorded", checkpoint.Recorded);
+```
+
+with:
+
+```csharp
+        command.Parameters.AddWithValue("@size", checkpoint.LogSizeBytes);
+        command.Parameters.AddWithValue("@time", checkpoint.LogLastWriteTime.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("@sha256", checkpoint.LogSha256);
+        command.Parameters.AddWithValue("@complete", checkpoint.Complete ? 1 : 0);
+        command.Parameters.AddWithValue("@recorded", checkpoint.Recorded);
+```
+
+Edit 3 of 4 in `src/CopilotLedger.Storage/UsageAuthority.cs`, replace:
+
+```csharp
+        command.CommandText = """
+            SELECT log_size_bytes, log_last_write_unix_ms, complete, records_recorded, records_duplicate, records_overlap,
+                   records_ambiguous, imported_at_unix_ms
+            FROM import_sessions
+            WHERE source = @source AND log_id = @log;
+```
+
+with:
+
+```csharp
+        command.CommandText = """
+            SELECT log_size_bytes, log_last_write_unix_ms, complete, records_recorded, records_duplicate, records_overlap,
+                   records_ambiguous, imported_at_unix_ms, log_sha256
+            FROM import_sessions
+            WHERE source = @source AND log_id = @log;
+```
+
+Edit 4 of 4 in `src/CopilotLedger.Storage/UsageAuthority.cs`, replace:
+
+```csharp
+            LogSizeBytes = reader.GetInt64(0),
+            LogLastWriteTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)),
+            Complete = reader.GetInt64(2) == 1,
+            Recorded = reader.GetInt64(3),
+```
+
+with:
+
+```csharp
+            LogSizeBytes = reader.GetInt64(0),
+            LogLastWriteTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)),
+            LogSha256 = reader.GetString(8),
+            Complete = reader.GetInt64(2) == 1,
+            Recorded = reader.GetInt64(3),
+```
+
+Edit 1 of 3 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+                  "source": "copilot",
+                  "coverage": "complete",
+                  "sessionsScanned": 1,
+                  "sessionsSkippedUnchanged": 0,
+                  "sessionsSkippedActive": 0,
+```
+
+with:
+
+```csharp
+                  "source": "copilot",
+                  "coverage": "complete",
+                  "sessionsScanned": 1,
+                  "unreadableStoreEntries": 0,
+                  "sessionsSkippedUnchanged": 0,
+                  "sessionsSkippedActive": 0,
+```
+
+Edit 2 of 3 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+                  "coverage": "complete",
+                  "sessionsScanned": 1,
+                  "sessionsSkippedUnchanged": 0,
+                  "sessionsSkippedActive": 0,
+```
+
+with:
+
+```csharp
+                  "coverage": "complete",
+                  "sessionsScanned": 1,
+                  "unreadableStoreEntries": 0,
+                  "sessionsSkippedUnchanged": 0,
+                  "sessionsSkippedActive": 0,
+```
+
+Edit 3 of 3 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+```
+
+with:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task IC12_ADryRunRefusesALedgerWithOneCompanionFile()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        await new SqliteLedgerStore(harness.Context.DatabasePath, harness.TimeProvider).InitializeAsync();
+        SqliteConnection.ClearAllPools();
+        await File.WriteAllBytesAsync(harness.Context.DatabasePath + "-wal", []);
+        new CopilotSessionLogs("s-a").Usage("u1", S1).Write(harness.Context.CopilotHome);
+
+        CliRun run = await harness.RunAsync("import", "--all", "--dry-run");
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal("", run.Out);
+        Assert.Equal(
+            "Dry run stopped: the ledger has a -wal or -shm file without the other, and reading it could create the missing one. Open the ledger once with another gh-ledger command, such as status, and try again.\n",
+            run.Error);
+        Assert.False(File.Exists(harness.Context.DatabasePath + "-shm"));
+        Assert.Equal(0, new FileInfo(harness.Context.DatabasePath + "-wal").Length);
+    }
+
+    [Fact]
+    public async Task IC13_AStoreThatCantBeListedIsAWarning()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        Directory.CreateDirectory(harness.Context.CopilotHome);
+        await File.WriteAllTextAsync(Path.Combine(harness.Context.CopilotHome, "session-state"), "not a folder");
+
+        CliRun text = await harness.RunAsync("import", "--all");
+        CliRun json = await harness.RunAsync("import", "--all", "--json");
+
+        Assert.Equal(2, text.ExitCode);
+        Assert.Contains("Sessions scanned                   0\n", text.Out);
+        Assert.Contains("Coverage                  incomplete\n", text.Out);
+        Assert.EndsWith("\nNothing new to record.\nCoverage is incomplete; see the warnings.\n", text.Out);
+        Assert.Equal(
+            "Warning: Copilot session logs: 1 folder or file couldn't be listed; any logs there weren't imported\n",
+            text.Error);
+        Assert.Equal(2, json.ExitCode);
+        using JsonDocument document = JsonDocument.Parse(json.Out);
+        Assert.Equal(1, document.RootElement.GetProperty("sources")[0].GetProperty("unreadableStoreEntries").GetInt64());
+        Assert.Equal(
+            """{"source":"copilot","log":"","code":"unreadableStore","event":"unknown","field":null,"version":null,"count":1,"line":null,"byteOffset":null}""",
+            JsonSerializer.Serialize(Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray())));
+    }
+
+    private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+```
+
+Edit 1 of 5 in `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs`, replace:
+
+```csharp
+using System.Text.Json;
+using System.Text.Json.Nodes;
+```
+
+with:
+
+```csharp
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+```
+
+Edit 2 of 5 in `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs`, replace:
+
+```csharp
+        File.WriteAllText(Path.Combine(day, $"rollout-2026-13-20T12-00-00-{Thread}.jsonl"), "x");
+
+        IReadOnlyList<SessionLogLocation> logs = Source.Discover(temp.Path);
+
+        Assert.Equal(
+```
+
+with:
+
+```csharp
+        File.WriteAllText(Path.Combine(day, $"rollout-2026-13-20T12-00-00-{Thread}.jsonl"), "x");
+
+        SessionLogDiscovery discovery = Source.Discover(temp.Path);
+        IReadOnlyList<SessionLogLocation> logs = discovery.Logs;
+
+        Assert.Equal(
+```
+
+Edit 3 of 5 in `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs`, replace:
+
+```csharp
+        Assert.Equal([false, false, true, false], logs.Select(log => log.IsCompressed));
+        Assert.All(logs, log => Assert.False(log.IsActive));
+        Assert.Empty(Source.Discover(Path.Combine(temp.Path, "missing")));
+    }
+
+    [Theory]
+```
+
+with:
+
+```csharp
+        Assert.Equal([false, false, true, false], logs.Select(log => log.IsCompressed));
+        Assert.All(logs, log => Assert.False(log.IsActive));
+        Assert.Equal(0, discovery.UnreadableEntries);
+        SessionLogDiscovery missing = Source.Discover(Path.Combine(temp.Path, "missing"));
+        Assert.Empty(missing.Logs);
+        Assert.Equal(0, missing.UnreadableEntries);
+    }
+
+    [Theory]
+```
+
+Edit 4 of 5 in `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs`, replace:
+
+```csharp
+        using TempDirectory temp = new();
+        string path = new CodexRollouts(Thread).Write(temp.Path, compressed: true);
+        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path));
+        File.Delete(path);
+
+        SessionLogReadResult result = await Source.ReadAsync(location, CancellationToken.None);
+```
+
+with:
+
+```csharp
+        using TempDirectory temp = new();
+        string path = new CodexRollouts(Thread).Write(temp.Path, compressed: true);
+        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path).Logs);
+        File.Delete(path);
+
+        SessionLogReadResult result = await Source.ReadAsync(location, CancellationToken.None);
+```
+
+Edit 5 of 5 in `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs`, replace:
+
+```csharp
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+
+    private static void AssertNoCanary(SessionLogReadResult result) =>
+```
+
+with:
+
+```csharp
+    }
+
+    // A rollout folder that can't be listed is counted, and the other folder's rollouts are still found.
+    [Fact]
+    public async Task CX15_ARolloutFolderThatCantBeListedIsCounted()
+    {
+        using TempDirectory temp = new();
+        new CodexRollouts(Thread).Write(temp.Path, archived: true);
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "sessions"), "not a folder");
+
+        SessionLogDiscovery discovery = Source.Discover(temp.Path);
+
+        Assert.Equal([$"archived/{Thread}"], discovery.Logs.Select(log => log.LogId));
+        Assert.Equal(1, discovery.UnreadableEntries);
+    }
+
+    // A rollout's SHA-256 covers the bytes it was read up to.
+    [Fact]
+    public async Task CX16_AReadRolloutHasTheHashOfItsBytes()
+    {
+        using TempDirectory temp = new();
+        string path = new CodexRollouts(Thread).TurnContext("turn-1", "gpt-6.1-sol").Usage("resp_1", "turn-1").Write(temp.Path);
+        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path).Logs);
+        byte[] bytes = await File.ReadAllBytesAsync(path);
+        await File.AppendAllTextAsync(path, "{\"type\":\"event_msg\"}\n");
+
+        SessionLogReadResult result = await Source.ReadAsync(location, CancellationToken.None);
+
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), result.ContentSha256);
+        Assert.Equal(result.ContentSha256, await SessionLogHash.ComputeAsync(location, CancellationToken.None));
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
+
+    private static void AssertNoCanary(SessionLogReadResult result) =>
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Import/CopilotRecordTests.cs`, replace:
+
+```csharp
+    }
+
+    internal static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+
+    internal static void AssertNoCanary(SessionLogReadResult result) =>
+```
+
+with:
+
+```csharp
+    }
+
+    internal static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
+
+    internal static void AssertNoCanary(SessionLogReadResult result) =>
+```
+
+Edit 1 of 4 in `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`, replace:
+
+```csharp
+        await File.WriteAllTextAsync(Path.Combine(root, "stray.jsonl"), "{}\n");
+
+        IReadOnlyList<SessionLogLocation> logs = Source.Discover(temp.Path);
+
+        Assert.Equal(["a-session", "b-session"], logs.Select(log => log.LogId));
+```
+
+with:
+
+```csharp
+        await File.WriteAllTextAsync(Path.Combine(root, "stray.jsonl"), "{}\n");
+
+        SessionLogDiscovery discovery = Source.Discover(temp.Path);
+        IReadOnlyList<SessionLogLocation> logs = discovery.Logs;
+
+        Assert.Equal(["a-session", "b-session"], logs.Select(log => log.LogId));
+```
+
+Edit 2 of 4 in `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`, replace:
+
+```csharp
+        Assert.Equal(new DateTimeOffset(File.GetLastWriteTimeUtc(first), TimeSpan.Zero), logs[0].LastWriteTime);
+        Assert.All(logs, log => Assert.Equal(ImportSourceKind.Copilot, log.Source));
+        Assert.Empty(Source.Discover(Path.Combine(temp.Path, "missing")));
+    }
+
+    [Theory]
+```
+
+with:
+
+```csharp
+        Assert.Equal(new DateTimeOffset(File.GetLastWriteTimeUtc(first), TimeSpan.Zero), logs[0].LastWriteTime);
+        Assert.All(logs, log => Assert.Equal(ImportSourceKind.Copilot, log.Source));
+        Assert.Equal(0, discovery.UnreadableEntries);
+        SessionLogDiscovery missing = Source.Discover(Path.Combine(temp.Path, "missing"));
+        Assert.Empty(missing.Logs);
+        Assert.Equal(0, missing.UnreadableEntries);
+    }
+
+    [Theory]
+```
+
+Edit 3 of 4 in `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`, replace:
+
+```csharp
+        using TempDirectory temp = new();
+        string path = new CopilotSessionLogs(SessionId).Write(temp.Path);
+        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path));
+        await File.AppendAllTextAsync(path, "{not json\n");
+
+        SessionLogReadResult result = await Source.ReadAsync(location, CancellationToken.None);
+```
+
+with:
+
+```csharp
+        using TempDirectory temp = new();
+        string path = new CopilotSessionLogs(SessionId).Write(temp.Path);
+        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path).Logs);
+        await File.AppendAllTextAsync(path, "{not json\n");
+
+        SessionLogReadResult result = await Source.ReadAsync(location, CancellationToken.None);
+```
+
+Edit 4 of 4 in `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`, replace:
+
+```csharp
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+
+    private static async Task WriteAsync(string home, string text)
+```
+
+with:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task CS15_ASessionStoreThatCantBeListedIsCounted()
+    {
+        using TempDirectory temp = new();
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "session-state"), "not a folder");
+
+        SessionLogDiscovery discovery = Source.Discover(temp.Path);
+
+        Assert.Empty(discovery.Logs);
+        Assert.Equal(1, discovery.UnreadableEntries);
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
+
+    private static async Task WriteAsync(string home, string text)
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Import/LedgerImporterTests.cs`, replace:
+
+```csharp
+    }
+
+    private static string CopilotHome(TempDirectory temp) => Path.Combine(temp.Path, "copilot");
+
+    private static string CodexHome(TempDirectory temp) => Path.Combine(temp.Path, "codex");
+```
+
+with:
+
+```csharp
+    }
+
+    // Size and last-write time only hint that a log is unchanged: a log rewritten with the same size and its old last-write
+    // time is read again, because its SHA-256 differs.
+    [Fact]
+    public async Task IR16_ASameSizeRewriteWithItsOldLastWriteTimeIsReadAgain()
+    {
+        using TempDirectory temp = new();
+        string path = new CopilotSessionLogs("s-a").Usage("u1", S1).Write(CopilotHome(temp));
+        byte[] bytes = await FileRetry.ReadAllBytesAsync(path);
+        ImportSourceReport first = Copilot(await RunAsync(temp));
+        DateTime written = File.GetLastWriteTimeUtc(path);
+        ImportSessionCheckpoint? checkpoint =
+            await (await StoreAsync(temp)).GetImportSessionAsync(ImportSourceKind.Copilot, "s-a");
+        new CopilotSessionLogs("s-a").Usage("u2", S2).Write(CopilotHome(temp));
+        File.SetLastWriteTimeUtc(path, written);
+
+        ImportSourceReport second = Copilot(await RunAsync(temp));
+        ImportSourceReport third = Copilot(await RunAsync(temp));
+
+        Assert.Equal(1, first.Recorded);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), checkpoint!.LogSha256);
+        Assert.Equal(bytes.Length, new FileInfo(path).Length);
+        Assert.Equal(written, File.GetLastWriteTimeUtc(path));
+        Assert.Equal((0, 1), (second.SessionsSkippedUnchanged, second.Recorded));
+        Assert.Equal((1, 0), (third.SessionsSkippedUnchanged, third.Recorded));
+        Assert.Equal(2L, await LedgerSql.ScalarAsync(Database(temp), "SELECT COUNT(*) FROM spans;"));
+    }
+
+    // A store that exists but can't be listed makes its coverage incomplete; a missing one only has no logs.
+    [Fact]
+    public async Task IR17_AStoreThatCantBeListedIsReported()
+    {
+        using TempDirectory temp = new();
+        Directory.CreateDirectory(CopilotHome(temp));
+        await File.WriteAllTextAsync(Path.Combine(CopilotHome(temp), "session-state"), "not a folder");
+
+        ImportReport report = await RunAsync(temp);
+
+        ImportSourceReport copilot = Copilot(report);
+        ImportSourceReport codex = Assert.Single(report.Sources, source => source.Source == ImportSourceKind.Codex);
+        Assert.Equal((1, 0), (copilot.UnreadableStoreEntries, copilot.SessionsScanned));
+        Assert.False(copilot.Complete);
+        Assert.Equal((0, true), (codex.UnreadableStoreEntries, codex.Complete));
+        Assert.Equal(
+            new ImportDiagnostic
+            {
+                Source = ImportSourceKind.Copilot,
+                LogId = "",
+                Code = ImportDiagnosticCode.UnreadableStore,
+                Count = 1,
+            },
+            Assert.Single(report.Diagnostics));
+    }
+
+    private static string CopilotHome(TempDirectory temp) => Path.Combine(temp.Path, "copilot");
+
+    private static string CodexHome(TempDirectory temp) => Path.Combine(temp.Path, "codex");
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Storage/LedgerSnapshotTests.cs`, replace:
+
+```csharp
+            LogSizeBytes = 10,
+            LogLastWriteTime = new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero),
+            Complete = true,
+            Recorded = 0,
+```
+
+with:
+
+```csharp
+            LogSizeBytes = 10,
+            LogLastWriteTime = new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero),
+            LogSha256 = new string('c', 64),
+            Complete = true,
+            Recorded = 0,
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Storage/LedgerSnapshotTests.cs`, replace:
+
+```csharp
+            await snapshot.GetImportSessionAsync(ImportSourceKind.Codex, checkpoint.LogId));
+    }
+}
+```
+
+with:
+
+```csharp
+            await snapshot.GetImportSessionAsync(ImportSourceKind.Codex, checkpoint.LogId));
+    }
+
+    // With only one of -wal and -shm, a read-only open could create the other, so the snapshot refuses before opening.
+    [Theory]
+    [InlineData("-wal", "-shm")]
+    [InlineData("-shm", "-wal")]
+    public async Task SN7_ALedgerWithOneCompanionFileIsRefusedUnchanged(string present, string missing)
+    {
+        using TempDirectory temp = new();
+        string path = Path.Combine(temp.Path, "ledger.db");
+        SqliteLedgerStore store = new(path);
+        await store.InitializeAsync();
+        await store.RecordAsync([ImportEntries.Live("session-a", S1)]);
+        SqliteConnection.ClearAllPools();
+        await File.WriteAllBytesAsync(path + present, []);
+        DateTime written = File.GetLastWriteTimeUtc(path + present);
+        byte[] before = SHA256.HashData(await FileRetry.ReadAllBytesAsync(path));
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => LedgerSnapshot.OpenAsync(path));
+
+        Assert.Equal(LedgerSnapshot.MissingCompanionMessage, exception.Message);
+        Assert.False(File.Exists(path + missing));
+        Assert.Equal(0, new FileInfo(path + present).Length);
+        Assert.Equal(written, File.GetLastWriteTimeUtc(path + present));
+        Assert.Equal(before, SHA256.HashData(await FileRetry.ReadAllBytesAsync(path)));
+    }
+}
+```
+
+Edit 1 of 4 in `tests/CopilotLedger.Tests/Storage/UsageAuthorityTests.cs`, replace:
+
+```csharp
+            LogSizeBytes = 4_096,
+            LogLastWriteTime = new DateTimeOffset(2026, 11, 20, 12, 34, 56, 789, TimeSpan.Zero),
+            Complete = true,
+            Recorded = 1,
+```
+
+with:
+
+```csharp
+            LogSizeBytes = 4_096,
+            LogLastWriteTime = new DateTimeOffset(2026, 11, 20, 12, 34, 56, 789, TimeSpan.Zero),
+            LogSha256 = new string('a', 64),
+            Complete = true,
+            Recorded = 1,
+```
+
+Edit 2 of 4 in `tests/CopilotLedger.Tests/Storage/UsageAuthorityTests.cs`, replace:
+
+```csharp
+        ImportSessionCheckpoint? written = await store.GetImportSessionAsync(ImportSourceKind.Copilot, "session-a");
+        time.Advance(TimeSpan.FromHours(1));
+        await store.RecordImportedAsync([], checkpoint with { Complete = false, LogSizeBytes = 8_192 });
+
+        Assert.Equal(checkpoint with { ImportedAt = new DateTimeOffset(2026, 11, 23, 10, 0, 0, TimeSpan.Zero) }, written);
+```
+
+with:
+
+```csharp
+        ImportSessionCheckpoint? written = await store.GetImportSessionAsync(ImportSourceKind.Copilot, "session-a");
+        time.Advance(TimeSpan.FromHours(1));
+        await store.RecordImportedAsync(
+            [],
+            checkpoint with { Complete = false, LogSizeBytes = 8_192, LogSha256 = new string('b', 64) });
+
+        Assert.Equal(checkpoint with { ImportedAt = new DateTimeOffset(2026, 11, 23, 10, 0, 0, TimeSpan.Zero) }, written);
+```
+
+Edit 3 of 4 in `tests/CopilotLedger.Tests/Storage/UsageAuthorityTests.cs`, replace:
+
+```csharp
+                Complete = false,
+                LogSizeBytes = 8_192,
+                ImportedAt = new DateTimeOffset(2026, 11, 23, 11, 0, 0, TimeSpan.Zero),
+            },
+```
+
+with:
+
+```csharp
+                Complete = false,
+                LogSizeBytes = 8_192,
+                LogSha256 = new string('b', 64),
+                ImportedAt = new DateTimeOffset(2026, 11, 23, 11, 0, 0, TimeSpan.Zero),
+            },
+```
+
+Edit 4 of 4 in `tests/CopilotLedger.Tests/Storage/UsageAuthorityTests.cs`, replace:
+
+```csharp
+                LogSizeBytes = 1,
+                LogLastWriteTime = ImportEntries.Start,
+                Complete = true,
+                Recorded = 1,
+```
+
+with:
+
+```csharp
+                LogSizeBytes = 1,
+                LogLastWriteTime = ImportEntries.Start,
+                LogSha256 = new string('a', 64),
+                Complete = true,
+                Recorded = 1,
+```
+
+### Tests
+
+- **CS1** and **CX1** (changed): discovery reports 0 unreadable entries, and a missing home has neither logs nor unreadable entries. **CS15**: a `session-state` that's a file is 1 unreadable entry and no logs. **CX15**: a `sessions` that's a file is 1 unreadable entry, and `archived_sessions` is still listed. **CX16**: a read rollout's `ContentSha256` is the SHA-256 of its bytes at discovery, and `SessionLogHash.ComputeAsync` agrees after bytes are appended.
+- **IR16**: a log rewritten with the same size and its old last-write time is read again (its new request is recorded); the first checkpoint's hash is the SHA-256 of the first log's bytes; a third run skips it as unchanged. **IR17**: an unlistable Copilot store is 1 unreadable entry, 0 sessions scanned, and incomplete coverage, with one `UnreadableStore` diagnostic whose log ID is empty; Codex stays complete.
+- **SN6**, **UA12**, and **UA13** (changed): checkpoints carry `LogSha256`, and UA12 checks that a later checkpoint replaces it. **SN7** (2): with only an empty `-wal` or only an empty `-shm`, `OpenAsync` throws with `MissingCompanionMessage`, creates no other file, and leaves the companion's length and last-write time and the ledger's hash as they were.
+- **IC4** (changed): `unreadableStoreEntries` is 0 in both sources. **IC12**: a dry run beside a lone `-wal` exits with 1, prints the refusal on standard error and nothing on standard output, and creates no `-shm`. **IC13**: an unlistable Copilot store exits with 2, prints the exact warning and `Coverage is incomplete; see the warnings.`, and its JSON has `unreadableStoreEntries` 1 and the diagnostic `{"source":"copilot","log":"","code":"unreadableStore","event":"unknown","field":null,"version":null,"count":1,"line":null,"byteOffset":null}`.
+
+### Acceptance criteria
+
+- A same-size rewrite is never skipped (IR16); discovery failures limit coverage (CS15, CX15, IR17, IC13); a dry run never creates a companion file (SN7, IC12).
+- `dotnet test CopilotLedger.slnx` passes **1260** tests (1251 + 9).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 15 specification: Late Tool Links, Unmatched Supersession, and Nested Repositories
+
+Review findings 4, 5, and 6.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Import/ImportDiagnosticCode.cs` | `SupersededUnmatched` |
+| `src/CopilotLedger.Storage/UsageAuthority.cs` | `UnmatchedSupersession`, `RecordedRowAsync`, `ReadUnmatchedSupersessionsAsync` |
+| `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs` | A duplicate whose own row still counts gets its new tool links; internal `GetUnmatchedSupersessionsAsync` |
+| `src/CopilotLedger.Storage/LedgerSnapshot.cs` | The same decisions on the snapshot |
+| `src/CopilotLedger.Storage/Import/ImportRequest.cs` | `RepositorySlug` |
+| `src/CopilotLedger.Storage/Import/ImportReport.cs` | `SupersededUnmatched`; `Complete` requires 0 |
+| `src/CopilotLedger.Storage/Import/LedgerImporter.cs` | An optional `IGitContextResolver`; the working directory's repository for `--repo`; the unmatched-supersession report |
+| `src/CopilotLedger.Cli/Import/ImportCommands.cs` | The row, the JSON field, the warning, and `RepositorySlug` |
+| `docs/cli.md` | `--repo`, the overlap rules, the report, JSON, coverage, tool calls, and Troubleshooting |
+| `docs/guide.md` | Both import samples gain the new row |
+| `tests/CopilotLedger.Tests/Import/LedgerImporterTests.cs` | IR5 changed; new: IR18, IR19 |
+| `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs` | IC3, IC4, and IC6 changed; new: IC14 |
+
+### Contracts
+
+- `UsageAuthority.UnmatchedSupersession(string ConversationId, string? RepositoryRoot, string? RepositorySlug, long Count)` (internal); `ImportRequest.RepositorySlug` (`string?`); `ImportSourceReport.SupersededUnmatched` (required, after `AmbiguousOverlap`); `ImportDiagnosticCode.SupersededUnmatched` (last).
+- `LedgerImporter(ICreditCalculator calculator, TimeProvider? timeProvider = null, IGitContextResolver? gitResolver = null)`; the resolver defaults to `FileSystemGitContextResolver`.
+
+### Algorithm
+
+1. **Late tool links (finding 4).** When `RecordImportedAsync` resolves a record with tool links as `Duplicate` because its alias exists, `RecordedRowAsync` looks for the row of its `recorded` alias that is still effective and has the record's own trace and span IDs: the same record read again from the same log, never another session's copy. Each link is inserted, owned by that row, with `ON CONFLICT (trace_id, span_id) DO NOTHING`, and `ToolLinksRecorded` counts the inserted ones. A dry run counts the links that don't exist yet and weren't counted earlier in the run.
+2. **Unmatched supersession (finding 5).** After a source's logs, the importer reads the source's imported rows (`ingest_source = 'import:<source>'`) that are superseded by a row that doesn't share their canonical ID (`NOT EXISTS` a row with `id = superseded_by` and the same non-null `canonical_usage_id`), that started at or after `--since`, grouped by conversation, recorded root, and slug. With `--repo`, a group counts when its recorded root is the repository's root (case-insensitive on Windows), or, without one, when its slug is the repository's slug (case-insensitive). Each conversation that counts adds to `SupersededUnmatched` and gets one `SupersededUnmatched` diagnostic whose `LogId` is its conversation ID, so coverage is incomplete and the exit code is 2. A row superseded by its own call's live span doesn't count, and no row is ever made effective again. A dry run reads the same rows from its snapshot (none before schema version 6).
+3. **Nested repositories (finding 6).** A record with a recorded root matches by it, as before. Otherwise its working directory must be the root or below it, and `IGitContextResolver.Resolve(workingDirectory)?.RepositoryRoot` must be the root. A `null` result (a folder that's gone or outside any repository), or an `IOException`, `UnauthorizedAccessException`, `ArgumentException`, or `NotSupportedException`, is out of scope. Results are cached per run by working directory, and only the repository root is used, never today's branch (#63 allows repository identity for filtering).
+
+### Output
+
+- The table gains `Superseded, unmatched` after `Ambiguous-overlap`; JSON gains `supersededUnmatched` after `ambiguousOverlap`.
+- Warning: `Warning: Copilot session <conversation ID>: <n> imported request(s) superseded by live spans that can't be matched to it|them; requests the daemon missed may not count` (`Codex session …` for Codex).
+- The `--since` hint needs `SupersededUnmatched` 0 too.
+
+### Code (copy exactly)
+
+Edit 1 of 6 in `docs/cli.md`, replace:
+
+````markdown
+```
+
+- `--repo <path>` imports only requests made in the Git repository at `<path>`, a working-tree path such as `.`, unlike the reports' repository key. A session is in the repository when the repository root it recorded is that repository's root, or, when it recorded none, when its working directory is inside it. `--all` imports requests from every repository and from outside any. Use one of the two.
+- `--source copilot`, the default, reads Copilot's session logs, `session-state/<session>/events.jsonl` under `~/.copilot`, or under `COPILOT_HOME` when it's set. `--source codex` reads Codex's rollouts under `sessions` and `archived_sessions` in `~/.codex`, or in `CODEX_HOME` when it's set. Repeat `--source` to read both. `--source claude` is refused: Claude Code's session-log format is internal and undocumented, so gh-ledger doesn't read it.
+- `--since` takes the reports' periods and defaults to `all`. Logs last written before the period starts aren't read, by the last-write time the file system reports, and requests that started before it aren't recorded.
+````
+
+with:
+
+````markdown
+```
+
+- `--repo <path>` imports only requests made in the Git repository at `<path>`, a working-tree path such as `.`, unlike the reports' repository key. A session is in the repository when the repository root it recorded is that repository's root, or, when it recorded none, when its working directory is in that repository and not in another repository nested inside it. For that, import finds the working directory's repository on disk now, and leaves the session out when it can't, such as when the folder is gone. `--all` imports requests from every repository and from outside any. Use one of the two.
+- `--source copilot`, the default, reads Copilot's session logs, `session-state/<session>/events.jsonl` under `~/.copilot`, or under `COPILOT_HOME` when it's set. `--source codex` reads Codex's rollouts under `sessions` and `archived_sessions` in `~/.codex`, or in `CODEX_HOME` when it's set. Repeat `--source` to read both. `--source claude` is refused: Claude Code's session-log format is internal and undocumented, so gh-ledger doesn't read it.
+- `--since` takes the reports' periods and defaults to `all`. Logs last written before the period starts aren't read, by the last-write time the file system reports, and requests that started before it aren't recorded.
+````
+
+Edit 2 of 6 in `docs/cli.md`, replace:
+
+```markdown
+- A Copilot BYOK request and a Codex request have no such ID. They're recorded only from sessions that have no live spans. In a session with live spans, they're deferred (`Ambiguous-overlap`).
+- A session's live spans without a service request ID, such as the spans an earlier gh-ledger recorded, can't be matched to anything, so every imported request of that session is deferred.
+- A live span that arrives after its request was imported supersedes the imported row, in the same transaction: the imported row stays in the ledger but no longer counts in any report, MCP tool, budget, or circuit-breaker rule. A live span without a service request ID supersedes every imported row of its session, and any live span supersedes the imported rows of its session that have no ID.
+
+Importing again records nothing twice. A log that was imported completely is skipped while its size, last-write time, and SHA-256 hash stay the same, so import reads such a log once to hash it: the size and last-write time alone could miss a log rewritten in place. Any other log is read again, and the requests recorded from it before count as `Duplicate`. An import stopped by Ctrl+C or an error keeps the requests it recorded, and running it again completes it.
+```
+
+with:
+
+```markdown
+- A Copilot BYOK request and a Codex request have no such ID. They're recorded only from sessions that have no live spans. In a session with live spans, they're deferred (`Ambiguous-overlap`).
+- A session's live spans without a service request ID, such as the spans an earlier gh-ledger recorded, can't be matched to anything, so every imported request of that session is deferred.
+- A live span that arrives after its request was imported supersedes the imported row, in the same transaction: the imported row stays in the ledger but no longer counts in any report, MCP tool, budget, or circuit-breaker rule. A live span without a service request ID supersedes every imported row of its session, and any live span supersedes the imported rows of its session that have no ID. Those live spans may not cover every request of the session, so each later import whose scope holds such rows reports them as `Superseded, unmatched`, and its coverage as incomplete. They never count again.
+
+Importing again records nothing twice. A log that was imported completely is skipped while its size, last-write time, and SHA-256 hash stay the same, so import reads such a log once to hash it: the size and last-write time alone could miss a log rewritten in place. Any other log is read again, and the requests recorded from it before count as `Duplicate`. An import stopped by Ctrl+C or an error keeps the requests it recorded, and running it again completes it.
+```
+
+Edit 3 of 6 in `docs/cli.md`, replace:
+
+```markdown
+| Overlap-skipped | Requests that live spans recorded |
+| Ambiguous-overlap | Requests deferred because their session's live spans can't be matched to them |
+| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete |
+| Unsupported usage shapes | Usage records with a missing or invalid field |
+```
+
+with:
+
+```markdown
+| Overlap-skipped | Requests that live spans recorded |
+| Ambiguous-overlap | Requests deferred because their session's live spans can't be matched to them |
+| Superseded, unmatched | Imported requests in scope that live spans superseded without matching them, from any run; they no longer count, and the live spans may not cover them all |
+| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete |
+| Unsupported usage shapes | Usage records with a missing or invalid field |
+```
+
+Edit 4 of 6 in `docs/cli.md`, replace:
+
+```markdown
+`--json` writes no warnings; it lists them as `diagnostics`. Its fields are `dryRun`, `period`, `from`, `repository` (the `owner/repo` slug, or the root when the repository has none) and `repositoryRoot` (both `null` with `--all`), `coverage`, and:
+
+- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `unreadableStoreEntries` (folders and files of the source's store that couldn't be listed), `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
+- `totals`: `recorded` and the same amounts over every source.
+- `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`. `log` is empty for `unreadableStore`, which is about the source's store rather than one log.
+
+| Exit code | Meaning |
+```
+
+with:
+
+```markdown
+`--json` writes no warnings; it lists them as `diagnostics`. Its fields are `dryRun`, `period`, `from`, `repository` (the `owner/repo` slug, or the root when the repository has none) and `repositoryRoot` (both `null` with `--all`), `coverage`, and:
+
+- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `unreadableStoreEntries` (folders and files of the source's store that couldn't be listed), `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `supersededUnmatched`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
+- `totals`: `recorded` and the same amounts over every source.
+- `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`. `log` is empty for `unreadableStore`, which is about the source's store rather than one log, and is the session ID for `supersededUnmatched`.
+
+| Exit code | Meaning |
+```
+
+Edit 5 of 6 in `docs/cli.md`, replace:
+
+```markdown
+| 1 | The options are invalid, or an error stopped the import. |
+
+Skipped active, unchanged, and out-of-scope logs don't make coverage incomplete. A folder or file of a session store that exists but can't be listed does, with a warning such as `Copilot session logs: 1 folder or file couldn't be listed`; a store that doesn't exist only has no logs. When the only gap is sessions from before Copilot 1.0.103, the report's last line suggests `--since`, which leaves them out. With `--repo`, logs of other repositories are read again on every run, because they may hold requests of this one.
+
+Imported requests count in every report and MCP tool, as live ones do, with the branch their log recorded. Tool calls are imported only from the last 7 days, as long as the ledger keeps tool calls; an older request keeps only the number of tool calls it made. Imported requests have no agent-invocation span, so `status --cache --turns` shows their `Growth` as `n/a`, and the input-growth ranking of `--bloat` leaves them out. `import` warns when the daemon runs another gh-ledger version: restart the daemon, so that the live spans it records supersede imported rows by this version's rules.
+
+### What import reads and keeps
+```
+
+with:
+
+```markdown
+| 1 | The options are invalid, or an error stopped the import. |
+
+Skipped active, unchanged, and out-of-scope logs don't make coverage incomplete. A folder or file of a session store that exists but can't be listed does, with a warning such as `Copilot session logs: 1 folder or file couldn't be listed`; a store that doesn't exist only has no logs. So do `Superseded, unmatched` requests: those that started in the `--since` period and, with `--repo`, recorded that repository's root, or its `owner/repo` slug when they recorded no root. When the only gap is sessions from before Copilot 1.0.103, the report's last line suggests `--since`, which leaves them out. With `--repo`, logs of other repositories are read again on every run, because they may hold requests of this one.
+
+Imported requests count in every report and MCP tool, as live ones do, with the branch their log recorded. Tool calls are imported only from the last 7 days, as long as the ledger keeps tool calls; an older request keeps only the number of tool calls it made. A tool call that ended after its request was imported, such as in a session imported with `--include-active`, is added when a later import reads the session again. Imported requests have no agent-invocation span, so `status --cache --turns` shows their `Growth` as `n/a`, and the input-growth ranking of `--bloat` leaves them out. `import` warns when the daemon runs another gh-ledger version: restart the daemon, so that the live spans it records supersede imported rows by this version's rules.
+
+### What import reads and keeps
+```
+
+Edit 6 of 6 in `docs/cli.md`, replace:
+
+```markdown
+- **`gh ledger import` exits with code 2.** Some coverage is incomplete, and the warnings say why; everything else was imported. A session from before Copilot 1.0.103 is never imported, so leave it out with `--since`. A malformed line or an unsupported usage record is skipped on every run, and the rest of its log is imported.
+- **`gh ledger import` defers requests (`Ambiguous-overlap`).** Their session has live spans that can't be matched to them, such as spans an earlier gh-ledger recorded, so import leaves them out rather than risk charging a request twice. The live spans still count.
+- **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
+- **`gh extension upgrade` or `remove` fails on Windows.** A program is running the extension's binary: the daemon, or the MCP server of a Copilot session. Run `gh ledger daemon stop`, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code, then try again.
+```
+
+with:
+
+```markdown
+- **`gh ledger import` exits with code 2.** Some coverage is incomplete, and the warnings say why; everything else was imported. A session from before Copilot 1.0.103 is never imported, so leave it out with `--since`. A malformed line or an unsupported usage record is skipped on every run, and the rest of its log is imported.
+- **`gh ledger import` defers requests (`Ambiguous-overlap`).** Their session has live spans that can't be matched to them, such as spans an earlier gh-ledger recorded, so import leaves them out rather than risk charging a request twice. The live spans still count.
+- **`gh ledger import` reports `Superseded, unmatched` requests.** Live spans that can't be matched to them arrived after they were imported and replaced them, as above. The live spans count, but they may not cover every request of the session, so import reports these on every run whose scope holds them; `--since` can leave older ones out.
+- **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
+- **`gh extension upgrade` or `remove` fails on Windows.** A program is running the extension's binary: the daemon, or the MCP server of a Copilot session. Run `gh ledger daemon stop`, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code, then try again.
+```
+
+Edit 1 of 2 in `docs/guide.md`, replace:
+
+```markdown
+Unsupported sessions             0
+Records parsed                   6
+Out of scope                     1
+Recorded                         5
+Duplicate                        0
+Overlap-skipped                  0
+Ambiguous-overlap                0
+Malformed lines                  0
+Unsupported usage shapes         0
+Cost out of range                0
+Unpriced                         0
+Coverage                  complete
+
+Importing would record 5 requests: 38.70 AI credits ($0.39), API equivalent $0.39.
+```
+
+with:
+
+```markdown
+Unsupported sessions             0
+Records parsed                   6
+Out of scope                     1
+Recorded                         5
+Duplicate                        0
+Overlap-skipped                  0
+Ambiguous-overlap                0
+Superseded, unmatched            0
+Malformed lines                  0
+Unsupported usage shapes         0
+Cost out of range                0
+Unpriced                         0
+Coverage                  complete
+
+Importing would record 5 requests: 38.70 AI credits ($0.39), API equivalent $0.39.
+```
+
+Edit 2 of 2 in `docs/guide.md`, replace:
+
+```markdown
+Overlap-skipped                  0
+Ambiguous-overlap                0
+Malformed lines                  0
+Unsupported usage shapes         0
+```
+
+with:
+
+```markdown
+Overlap-skipped                  0
+Ambiguous-overlap                0
+Superseded, unmatched            0
+Malformed lines                  0
+Unsupported usage shapes         0
+```
+
+Edit 1 of 7 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+        ("Overlap-skipped", report => report.OverlapSkipped),
+        ("Ambiguous-overlap", report => report.AmbiguousOverlap),
+        ("Malformed lines", report => report.MalformedLines),
+        ("Unsupported usage shapes", report => report.UnsupportedUsageShapes),
+```
+
+with:
+
+```csharp
+        ("Overlap-skipped", report => report.OverlapSkipped),
+        ("Ambiguous-overlap", report => report.AmbiguousOverlap),
+        ("Superseded, unmatched", report => report.SupersededUnmatched),
+        ("Malformed lines", report => report.MalformedLines),
+        ("Unsupported usage shapes", report => report.UnsupportedUsageShapes),
+```
+
+Edit 2 of 7 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+            ],
+            RepositoryRoot = git?.RepositoryRoot,
+            Since = period.From,
+            DryRun = dryRun,
+```
+
+with:
+
+```csharp
+            ],
+            RepositoryRoot = git?.RepositoryRoot,
+            RepositorySlug = git?.RepositorySlug,
+            Since = period.From,
+            DryRun = dryRun,
+```
+
+Edit 3 of 7 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+        source.UnsupportedUsageShapes == 0 &&
+        source.AmbiguousOverlap == 0 &&
+        source.CostOutOfRange == 0 &&
+        source.JournalPredecessors == 0;
+```
+
+with:
+
+```csharp
+        source.UnsupportedUsageShapes == 0 &&
+        source.AmbiguousOverlap == 0 &&
+        source.SupersededUnmatched == 0 &&
+        source.CostOutOfRange == 0 &&
+        source.JournalPredecessors == 0;
+```
+
+Edit 4 of 7 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+            writer.WriteNumber("overlapSkipped", source.OverlapSkipped);
+            writer.WriteNumber("ambiguousOverlap", source.AmbiguousOverlap);
+            writer.WriteNumber("malformedLines", source.MalformedLines);
+            writer.WriteNumber("unsupportedUsageShapes", source.UnsupportedUsageShapes);
+```
+
+with:
+
+```csharp
+            writer.WriteNumber("overlapSkipped", source.OverlapSkipped);
+            writer.WriteNumber("ambiguousOverlap", source.AmbiguousOverlap);
+            writer.WriteNumber("supersededUnmatched", source.SupersededUnmatched);
+            writer.WriteNumber("malformedLines", source.MalformedLines);
+            writer.WriteNumber("unsupportedUsageShapes", source.UnsupportedUsageShapes);
+```
+
+Edit 5 of 7 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+    }
+
+    // "<source> <session|rollout> <log ID>[, line <n> (byte <offset>)]: <message>", or "<source> session logs: <message>"
+    // for the store itself.
+    private static string Describe(ImportDiagnostic diagnostic)
+    {
+```
+
+with:
+
+```csharp
+    }
+
+    // "<source> <session|rollout> <log ID>[, line <n> (byte <offset>)]: <message>", "<source> session <conversation ID>:
+    // <message>" for superseded rows, or "<source> session logs: <message>" for the store itself.
+    private static string Describe(ImportDiagnostic diagnostic)
+    {
+```
+
+Edit 6 of 7 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+        {
+            return $"{Name(diagnostic.Source)} session logs: {Message(diagnostic)}";
+        }
+
+        string log = diagnostic.Source == ImportSourceKind.Codex ? "Codex rollout" : "Copilot session";
+```
+
+with:
+
+```csharp
+        {
+            return $"{Name(diagnostic.Source)} session logs: {Message(diagnostic)}";
+        }
+
+        if (diagnostic.Code == ImportDiagnosticCode.SupersededUnmatched)
+        {
+            return $"{Name(diagnostic.Source)} session {diagnostic.LogId}: {Message(diagnostic)}";
+        }
+
+        string log = diagnostic.Source == ImportSourceKind.Codex ? "Codex rollout" : "Copilot session";
+```
+
+Edit 7 of 7 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+                ? "1 folder or file couldn't be listed; any logs there weren't imported"
+                : $"{LedgerFormat.Count(count)} folders or files couldn't be listed; any logs there weren't imported",
+            _ => throw new ArgumentOutOfRangeException(nameof(diagnostic), diagnostic.Code, null),
+        };
+```
+
+with:
+
+```csharp
+                ? "1 folder or file couldn't be listed; any logs there weren't imported"
+                : $"{LedgerFormat.Count(count)} folders or files couldn't be listed; any logs there weren't imported",
+            ImportDiagnosticCode.SupersededUnmatched =>
+                $"{Plural(count, "imported request")} superseded by live spans that can't be matched to {(count == 1 ? "it" : "them")}; requests the daemon missed may not count",
+            _ => throw new ArgumentOutOfRangeException(nameof(diagnostic), diagnostic.Code, null),
+        };
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Import/ImportDiagnosticCode.cs`, replace:
+
+```csharp
+    CostOutOfRange,               // set by the importer
+    UnreadableStore,              // set by the importer: entries of the store that couldn't be listed or examined
+}
+```
+
+with:
+
+```csharp
+    CostOutOfRange,               // set by the importer
+    UnreadableStore,              // set by the importer: entries of the store that couldn't be listed or examined
+    SupersededUnmatched,          // set by the importer: LogId is the conversation whose imported rows live rows superseded
+}
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Storage/Import/ImportReport.cs`, replace:
+
+```csharp
+    public required long OverlapSkipped { get; init; }
+    public required long AmbiguousOverlap { get; init; }
+    public required long MalformedLines { get; init; }
+    public required long UnsupportedUsageShapes { get; init; }
+```
+
+with:
+
+```csharp
+    public required long OverlapSkipped { get; init; }
+    public required long AmbiguousOverlap { get; init; }
+    public required long SupersededUnmatched { get; init; }         // imported rows in scope that unmatched live rows superseded
+    public required long MalformedLines { get; init; }
+    public required long UnsupportedUsageShapes { get; init; }
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Storage/Import/ImportReport.cs`, replace:
+
+```csharp
+        UnsupportedUsageShapes == 0 &&
+        AmbiguousOverlap == 0 &&
+        CostOutOfRange == 0 &&
+        JournalPredecessors == 0;
+```
+
+with:
+
+```csharp
+        UnsupportedUsageShapes == 0 &&
+        AmbiguousOverlap == 0 &&
+        SupersededUnmatched == 0 &&
+        CostOutOfRange == 0 &&
+        JournalPredecessors == 0;
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/Import/ImportRequest.cs`, replace:
+
+```csharp
+    public required IReadOnlyList<ImportSourceRequest> Sources { get; init; }   // at most one per kind, never Claude
+    public string? RepositoryRoot { get; init; }     // --repo: a fully qualified working-tree root
+    public DateTimeOffset? Since { get; init; }      // --since; null for all time
+    public bool DryRun { get; init; }
+```
+
+with:
+
+```csharp
+    public required IReadOnlyList<ImportSourceRequest> Sources { get; init; }   // at most one per kind, never Claude
+    public string? RepositoryRoot { get; init; }     // --repo: a fully qualified working-tree root
+    public string? RepositorySlug { get; init; }     // with RepositoryRoot: its owner/repo slug, for rows without a root
+    public DateTimeOffset? Since { get; init; }      // --since; null for all time
+    public bool DryRun { get; init; }
+```
+
+Edit 1 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+using CopilotLedger.Core.Import;
+using CopilotLedger.Core.Pricing;
+```
+
+with:
+
+```csharp
+using CopilotLedger.Core.Git;
+using CopilotLedger.Core.Import;
+using CopilotLedger.Core.Pricing;
+```
+
+Edit 2 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+    public static readonly TimeSpan ToolLinkRetention = TimeSpan.FromDays(7);
+
+    private readonly ICreditCalculator _calculator;
+    private readonly TimeProvider _timeProvider;
+
+    public LedgerImporter(ICreditCalculator calculator, TimeProvider? timeProvider = null)
+    {
+        ArgumentNullException.ThrowIfNull(calculator);
+        _calculator = calculator;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    // Throws ArgumentException for an invalid request, InvalidOperationException for a ledger newer than this gh-ledger,
+```
+
+with:
+
+```csharp
+    public static readonly TimeSpan ToolLinkRetention = TimeSpan.FromDays(7);
+
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    private readonly ICreditCalculator _calculator;
+    private readonly TimeProvider _timeProvider;
+    private readonly IGitContextResolver _gitResolver;
+
+    // gitResolver finds the repository of a record that recorded only its working directory, for RepositoryRoot; it
+    // defaults to FileSystemGitContextResolver. Only the repository's root is used, never its current branch.
+    public LedgerImporter(
+        ICreditCalculator calculator,
+        TimeProvider? timeProvider = null,
+        IGitContextResolver? gitResolver = null)
+    {
+        ArgumentNullException.ThrowIfNull(calculator);
+        _calculator = calculator;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _gitResolver = gitResolver ?? new FileSystemGitContextResolver();
+    }
+
+    // Throws ArgumentException for an invalid request, InvalidOperationException for a ledger newer than this gh-ledger,
+```
+
+Edit 3 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+            List<ImportSourceReport> reports = [];
+            List<ImportDiagnostic> diagnostics = [];
+            foreach (ImportSourceRequest source in request.Sources.OrderBy(source => source.Source.Kind))
+            {
+```
+
+with:
+
+```csharp
+            List<ImportSourceReport> reports = [];
+            List<ImportDiagnostic> diagnostics = [];
+            Dictionary<string, string?> roots = new(StringComparer.Ordinal);
+            foreach (ImportSourceRequest source in request.Sources.OrderBy(source => source.Source.Kind))
+            {
+```
+
+Edit 4 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await ImportLogAsync(request, source.Source, log, store, snapshot, linkCutoff, tally, diagnostics, cancellationToken);
+                }
+
+                reports.Add(tally.ToReport());
+```
+
+with:
+
+```csharp
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await ImportLogAsync(
+                        request, source.Source, log, store, snapshot, linkCutoff, tally, diagnostics, roots, cancellationToken);
+                }
+
+                // Imported rows that live spans superseded without matching them may hold requests the live spans don't
+                // cover, so they limit coverage on every run whose scope holds them. They're never made effective again.
+                IReadOnlyList<UsageAuthority.UnmatchedSupersession> superseded = store is not null
+                    ? await store.GetUnmatchedSupersessionsAsync(source.Source.Kind, request.Since, cancellationToken)
+                    : await snapshot!.GetUnmatchedSupersessionsAsync(source.Source.Kind, request.Since, cancellationToken);
+                foreach (IGrouping<string, UsageAuthority.UnmatchedSupersession> conversation in superseded
+                             .Where(row => IsInRepository(row, request))
+                             .GroupBy(row => row.ConversationId, StringComparer.Ordinal))
+                {
+                    long count = conversation.Sum(row => row.Count);
+                    tally.SupersededUnmatched += count;
+                    diagnostics.Add(new ImportDiagnostic
+                    {
+                        Source = source.Source.Kind,
+                        LogId = conversation.Key,
+                        Code = ImportDiagnosticCode.SupersededUnmatched,
+                        Count = count,
+                    });
+                }
+
+                reports.Add(tally.ToReport());
+```
+
+Edit 5 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+        Tally tally,
+        List<ImportDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+```
+
+with:
+
+```csharp
+        Tally tally,
+        List<ImportDiagnostic> diagnostics,
+        Dictionary<string, string?> roots,
+        CancellationToken cancellationToken)
+    {
+```
+
+Edit 6 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+        foreach (ImportedUsageRecord record in result.Records)
+        {
+            if (IsOutOfScope(record, request))
+            {
+                outOfScope++;
+```
+
+with:
+
+```csharp
+        foreach (ImportedUsageRecord record in result.Records)
+        {
+            if (IsOutOfScope(record, request, roots))
+            {
+                outOfScope++;
+```
+
+Edit 7 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+    }
+
+    // Out of scope: started before Since, or, with RepositoryRoot, recorded in another repository: by its Git root when the
+    // log recorded one, else by its working directory (the root or below it).
+    private static bool IsOutOfScope(ImportedUsageRecord record, ImportRequest request)
+    {
+        if (request.Since is DateTimeOffset since && record.StartTime < since)
+```
+
+with:
+
+```csharp
+    }
+
+    // Out of scope: started before Since, or, with RepositoryRoot, recorded in another repository: by its Git root when the
+    // log recorded one, else by the Git root of its working directory, found now (roots caches them). A working directory
+    // whose repository can't be found is out of scope, and so is one in a repository nested inside RepositoryRoot.
+    private bool IsOutOfScope(ImportedUsageRecord record, ImportRequest request, Dictionary<string, string?> roots)
+    {
+        if (request.Since is DateTimeOffset since && record.StartTime < since)
+```
+
+Edit 8 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+        }
+
+        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (record.Git?.RepositoryRoot is string recorded)
+        {
+            return !string.Equals(recorded, root, comparison);
+        }
+
+        string? directory = record.Git?.WorkingDirectory;
+        return directory is null ||
+               !(string.Equals(directory, root, comparison) ||
+                 directory.StartsWith(root + Path.DirectorySeparatorChar, comparison));
+    }
+
+    private static void Validate(ImportRequest request)
+```
+
+with:
+
+```csharp
+        }
+
+        if (record.Git?.RepositoryRoot is string recorded)
+        {
+            return !string.Equals(recorded, root, PathComparison);
+        }
+
+        string? directory = record.Git?.WorkingDirectory;
+        if (directory is null ||
+            !(string.Equals(directory, root, PathComparison) ||
+              directory.StartsWith(root + Path.DirectorySeparatorChar, PathComparison)))
+        {
+            return true;
+        }
+
+        if (!roots.TryGetValue(directory, out string? resolved))
+        {
+            try
+            {
+                resolved = _gitResolver.Resolve(directory)?.RepositoryRoot;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                resolved = null;
+            }
+
+            roots[directory] = resolved;
+        }
+
+        return !string.Equals(resolved, root, PathComparison);
+    }
+
+    // With RepositoryRoot, a superseded row is in scope when it recorded that root, or, without a root, that repository's slug.
+    private static bool IsInRepository(UsageAuthority.UnmatchedSupersession row, ImportRequest request) =>
+        request.RepositoryRoot is not string root ||
+        (row.RepositoryRoot is string recorded
+            ? string.Equals(recorded, root, PathComparison)
+            : row.RepositorySlug is not null &&
+              string.Equals(row.RepositorySlug, request.RepositorySlug, StringComparison.OrdinalIgnoreCase));
+
+    private static void Validate(ImportRequest request)
+```
+
+Edit 9 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+        public long OverlapSkipped { get; set; }
+        public long AmbiguousOverlap { get; set; }
+        public long MalformedLines { get; set; }
+        public long UnsupportedUsageShapes { get; set; }
+```
+
+with:
+
+```csharp
+        public long OverlapSkipped { get; set; }
+        public long AmbiguousOverlap { get; set; }
+        public long SupersededUnmatched { get; set; }
+        public long MalformedLines { get; set; }
+        public long UnsupportedUsageShapes { get; set; }
+```
+
+Edit 10 of 10 in `src/CopilotLedger.Storage/Import/LedgerImporter.cs`, replace:
+
+```csharp
+            OverlapSkipped = OverlapSkipped,
+            AmbiguousOverlap = AmbiguousOverlap,
+            MalformedLines = MalformedLines,
+            UnsupportedUsageShapes = UnsupportedUsageShapes,
+```
+
+with:
+
+```csharp
+            OverlapSkipped = OverlapSkipped,
+            AmbiguousOverlap = AmbiguousOverlap,
+            SupersededUnmatched = SupersededUnmatched,
+            MalformedLines = MalformedLines,
+            UnsupportedUsageShapes = UnsupportedUsageShapes,
+```
+
+Edit 1 of 5 in `src/CopilotLedger.Storage/LedgerSnapshot.cs`, replace:
+
+```csharp
+    private readonly HashSet<(string Source, string Key)> _aliases = [];
+    private readonly HashSet<string> _recordedCanonicalIds = new(StringComparer.Ordinal);
+
+    private LedgerSnapshot(SqliteConnection? connection, SqliteTransaction? transaction, int schemaVersion)
+```
+
+with:
+
+```csharp
+    private readonly HashSet<(string Source, string Key)> _aliases = [];
+    private readonly HashSet<string> _recordedCanonicalIds = new(StringComparer.Ordinal);
+    private readonly HashSet<(string TraceId, string SpanId)> _links = [];
+
+    private LedgerSnapshot(SqliteConnection? connection, SqliteTransaction? transaction, int schemaVersion)
+```
+
+Edit 2 of 5 in `src/CopilotLedger.Storage/LedgerSnapshot.cs`, replace:
+
+```csharp
+                entry.Span.ConversationId!,
+                cancellationToken);
+            if (_aliases.Contains((source, entry.RecordKeySha256)))
+            {
+```
+
+with:
+
+```csharp
+                entry.Span.ConversationId!,
+                cancellationToken);
+            bool aliasInLedger = facts.AliasExists;
+            if (_aliases.Contains((source, entry.RecordKeySha256)))
+            {
+```
+
+Edit 3 of 5 in `src/CopilotLedger.Storage/LedgerSnapshot.cs`, replace:
+
+```csharp
+            {
+                links += entry.ToolLinks.Count;
+                if (canonical is not null)
+                {
+                    _recordedCanonicalIds.Add(canonical);
+                }
+            }
+```
+
+with:
+
+```csharp
+            {
+                links += entry.ToolLinks.Count;
+                foreach (GenAiSpanLink link in entry.ToolLinks)
+                {
+                    _links.Add((link.TraceId, link.SpanId));
+                }
+
+                if (canonical is not null)
+                {
+                    _recordedCanonicalIds.Add(canonical);
+                }
+            }
+            else if (resolution == ImportResolution.Duplicate &&
+                     aliasInLedger &&
+                     entry.ToolLinks.Count > 0 &&
+                     await UsageAuthority.RecordedRowAsync(_transaction!, source, entry, cancellationToken) is not null)
+            {
+                foreach (GenAiSpanLink link in entry.ToolLinks)
+                {
+                    if (_links.Add((link.TraceId, link.SpanId)) && !await LinkExistsAsync(link, cancellationToken))
+                    {
+                        links++;
+                    }
+                }
+            }
+```
+
+Edit 4 of 5 in `src/CopilotLedger.Storage/LedgerSnapshot.cs`, replace:
+
+```csharp
+            : await UsageAuthority.ReadCheckpointAsync(_connection!, _transaction, source, logId, cancellationToken);
+    }
+
+    public async ValueTask DisposeAsync()
+```
+
+with:
+
+```csharp
+            : await UsageAuthority.ReadCheckpointAsync(_connection!, _transaction, source, logId, cancellationToken);
+    }
+
+    // As SqliteLedgerStore.GetUnmatchedSupersessionsAsync; none before schema version 6.
+    internal async Task<IReadOnlyList<UsageAuthority.UnmatchedSupersession>> GetUnmatchedSupersessionsAsync(
+        ImportSourceKind source,
+        DateTimeOffset? since,
+        CancellationToken cancellationToken) =>
+        SchemaVersion < 6
+            ? []
+            : await UsageAuthority.ReadUnmatchedSupersessionsAsync(_connection!, _transaction, source, since, cancellationToken);
+
+    public async ValueTask DisposeAsync()
+```
+
+Edit 5 of 5 in `src/CopilotLedger.Storage/LedgerSnapshot.cs`, replace:
+
+```csharp
+    }
+
+    // file:///C:/…/ledger.db?immutable=1 (file:///home/… elsewhere), every byte but [A-Za-z0-9-._~/:] percent-encoded.
+    private static string ImmutableUri(string path)
+```
+
+with:
+
+```csharp
+    }
+
+    private async Task<bool> LinkExistsAsync(GenAiSpanLink link, CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = _connection!.CreateCommand();
+        command.Transaction = _transaction;
+        command.CommandText = "SELECT EXISTS (SELECT 1 FROM span_links WHERE trace_id = @trace AND span_id = @span);";
+        command.Parameters.AddWithValue("@trace", link.TraceId);
+        command.Parameters.AddWithValue("@span", link.SpanId);
+        return (long)(await command.ExecuteScalarAsync(cancellationToken))! == 1;
+    }
+
+    // file:///C:/…/ledger.db?immutable=1 (file:///home/… elsewhere), every byte but [A-Za-z0-9-._~/:] percent-encoded.
+    private static string ImmutableUri(string path)
+```
+
+Edit 1 of 3 in `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs`, replace:
+
+```csharp
+{
+    // Resolves each entry by the authority rules under one BEGIN IMMEDIATE transaction: inserts the Recorded ones with an
+    // alias and the tool links they own, aliases the others that a row accounts for, and writes checkpoint (when it isn't
+    // null) in the same transaction. Validates every entry and the checkpoint first (ArgumentException, nothing written).
+    // An exception, cancellation included, rolls the whole call back.
+    public async Task<ImportRecordResult> RecordImportedAsync(
+        IReadOnlyList<ImportedLedgerEntry> entries,
+```
+
+with:
+
+```csharp
+{
+    // Resolves each entry by the authority rules under one BEGIN IMMEDIATE transaction: inserts the Recorded ones with an
+    // alias and the tool links they own, aliases the others that a row accounts for, adds the new tool links of a record read
+    // again whose own row still counts, and writes checkpoint (when it isn't null) in the same transaction. Validates every
+    // entry and the checkpoint first (ArgumentException, nothing written). An exception, cancellation included, rolls the
+    // whole call back.
+    public async Task<ImportRecordResult> RecordImportedAsync(
+        IReadOnlyList<ImportedLedgerEntry> entries,
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs`, replace:
+
+```csharp
+                    cancellationToken);
+            }
+
+            resolutions.Add(resolution);
+```
+
+with:
+
+```csharp
+                    cancellationToken);
+            }
+            else if (resolution == ImportResolution.Duplicate &&
+                     entry.ToolLinks.Count > 0 &&
+                     await UsageAuthority.RecordedRowAsync(transaction, source, entry, cancellationToken) is long ownRowId)
+            {
+                // The record's own effective row, read again from its log: tool calls that completed since then get links.
+                foreach (GenAiSpanLink link in entry.ToolLinks)
+                {
+                    links += await InsertOwnedLinkAsync(transaction, link, ownRowId, now, cancellationToken);
+                }
+            }
+
+            resolutions.Add(resolution);
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs`, replace:
+
+```csharp
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        return await UsageAuthority.ReadCheckpointAsync(connection, null, source, logId, cancellationToken);
+    }
+
+    private static RowProvenance ImportProvenance(ImportedLedgerEntry entry, string? canonicalUsageId) =>
+```
+
+with:
+
+```csharp
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        return await UsageAuthority.ReadCheckpointAsync(connection, null, source, logId, cancellationToken);
+    }
+
+    // The source's imported rows that started at or after since (all when it's null) and that live rows superseded without
+    // sharing their canonical ID (UsageAuthority.ReadUnmatchedSupersessionsAsync).
+    internal async Task<IReadOnlyList<UsageAuthority.UnmatchedSupersession>> GetUnmatchedSupersessionsAsync(
+        ImportSourceKind source,
+        DateTimeOffset? since,
+        CancellationToken cancellationToken)
+    {
+        EnsureInitialized();
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        return await UsageAuthority.ReadUnmatchedSupersessionsAsync(connection, null, source, since, cancellationToken);
+    }
+
+    private static RowProvenance ImportProvenance(ImportedLedgerEntry entry, string? canonicalUsageId) =>
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Storage/UsageAuthority.cs`, replace:
+
+```csharp
+        bool ConversationHasLive,
+        bool ConversationHasUnidentifiedLive);
+
+    // The first rule that matches decides.
+```
+
+with:
+
+```csharp
+        bool ConversationHasLive,
+        bool ConversationHasUnidentifiedLive);
+
+    // Imported rows of one conversation, with the Git context they recorded, that live rows superseded without sharing
+    // their canonical ID: I2 and I3 retire them whether or not the live spans cover the same calls.
+    internal readonly record struct UnmatchedSupersession(
+        string ConversationId,
+        string? RepositoryRoot,
+        string? RepositorySlug,
+        long Count);
+
+    // The first rule that matches decides.
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Storage/UsageAuthority.cs`, replace:
+
+```csharp
+    }
+
+    internal static async Task UpsertCheckpointAsync(
+        SqliteTransaction transaction,
+```
+
+with:
+
+```csharp
+    }
+
+    // The row that recorded this very record of this log (a 'recorded' alias, and the same trace and span IDs), when it
+    // still counts; null otherwise, such as for another session's copy of the record.
+    internal static async Task<long?> RecordedRowAsync(
+        SqliteTransaction transaction,
+        string source,
+        ImportedLedgerEntry entry,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = transaction.Connection!.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT s.id
+              FROM import_record_aliases AS a
+              JOIN spans AS s ON s.id = a.span_row_id
+             WHERE a.source = @source AND a.record_key_sha256 = @key AND a.resolution = 'recorded'
+               AND s.accounting_state = 'effective' AND s.trace_id = @trace AND s.span_id = @span;
+            """;
+        command.Parameters.AddWithValue("@source", source);
+        command.Parameters.AddWithValue("@key", entry.RecordKeySha256);
+        command.Parameters.AddWithValue("@trace", entry.Span.TraceId);
+        command.Parameters.AddWithValue("@span", entry.Span.SpanId);
+        return await command.ExecuteScalarAsync(cancellationToken) is long id ? id : null;
+    }
+
+    // The source's imported rows that live rows superseded without sharing their canonical ID, from since on (all when it's
+    // null), by conversation and recorded Git context. A row superseded by the live span of its own call isn't one of them.
+    internal static async Task<IReadOnlyList<UnmatchedSupersession>> ReadUnmatchedSupersessionsAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        ImportSourceKind source,
+        DateTimeOffset? since,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT s.conversation_id, s.repo_root, s.repo_slug, COUNT(*)
+              FROM spans AS s
+             WHERE s.ingest_source = @ingest_source
+               AND s.accounting_state = 'superseded'
+               AND (@since IS NULL OR s.start_time_unix_ms >= @since)
+               AND NOT EXISTS (SELECT 1 FROM spans AS l
+                                WHERE l.id = s.superseded_by AND l.canonical_usage_id = s.canonical_usage_id)
+             GROUP BY s.conversation_id, s.repo_root, s.repo_slug
+             ORDER BY s.conversation_id, s.repo_root, s.repo_slug;
+            """;
+        command.Parameters.AddWithValue("@ingest_source", "import:" + ImportIds.SourceName(source));
+        command.Parameters.AddWithValue(
+            "@since",
+            since is DateTimeOffset from ? (object)from.ToUnixTimeMilliseconds() : DBNull.Value);
+        List<UnmatchedSupersession> rows = [];
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new UnmatchedSupersession(
+                reader.GetString(0),
+                reader.IsDBNull(1) ? null : reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.GetInt64(3)));
+        }
+
+        return rows;
+    }
+
+    internal static async Task UpsertCheckpointAsync(
+        SqliteTransaction transaction,
+```
+
+Edit 1 of 5 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+            Overlap-skipped                  0
+            Ambiguous-overlap                0
+            Malformed lines                  0
+            Unsupported usage shapes         0
+```
+
+with:
+
+```csharp
+            Overlap-skipped                  0
+            Ambiguous-overlap                0
+            Superseded, unmatched            0
+            Malformed lines                  0
+            Unsupported usage shapes         0
+```
+
+Edit 2 of 5 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+                  "recordsParsed": 1,
+                  "recordsOutOfScope": 0,
+                  "recorded": 1,
+                  "duplicate": 0,
+                  "overlapSkipped": 0,
+                  "ambiguousOverlap": 0,
+                  "malformedLines": 0,
+                  "unsupportedUsageShapes": 0,
+                  "costOutOfRange": 0,
+                  "journalPredecessors": 0,
+                  "skippedEvents": 0,
+                  "unpriced": 0,
+```
+
+with:
+
+```csharp
+                  "recordsParsed": 1,
+                  "recordsOutOfScope": 0,
+                  "recorded": 1,
+                  "duplicate": 0,
+                  "overlapSkipped": 0,
+                  "ambiguousOverlap": 0,
+                  "supersededUnmatched": 0,
+                  "malformedLines": 0,
+                  "unsupportedUsageShapes": 0,
+                  "costOutOfRange": 0,
+                  "journalPredecessors": 0,
+                  "skippedEvents": 0,
+                  "unpriced": 0,
+```
+
+Edit 3 of 5 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+                  "overlapSkipped": 0,
+                  "ambiguousOverlap": 0,
+                  "malformedLines": 0,
+                  "unsupportedUsageShapes": 0,
+```
+
+with:
+
+```csharp
+                  "overlapSkipped": 0,
+                  "ambiguousOverlap": 0,
+                  "supersededUnmatched": 0,
+                  "malformedLines": 0,
+                  "unsupportedUsageShapes": 0,
+```
+
+Edit 4 of 5 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+            Overlap-skipped                  1
+            Ambiguous-overlap                0
+            Malformed lines                  0
+            Unsupported usage shapes         0
+```
+
+with:
+
+```csharp
+            Overlap-skipped                  1
+            Ambiguous-overlap                0
+            Superseded, unmatched            0
+            Malformed lines                  0
+            Unsupported usage shapes         0
+```
+
+Edit 5 of 5 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+```
+
+with:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task IC14_RequestsSupersededWithoutAMatchAreAWarning()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        new CopilotSessionLogs("s-a").Usage("u1", S1).Usage("u2", S2).Write(harness.Context.CopilotHome);
+        await harness.RunAsync("import", "--all");
+        SqliteLedgerStore store = new(harness.Context.DatabasePath, harness.TimeProvider);
+        await store.InitializeAsync();
+        await store.RecordAsync([ImportEntries.Live("s-a", null)]);
+
+        CliRun text = await harness.RunAsync("import", "--all");
+        CliRun json = await harness.RunAsync("import", "--all", "--json");
+
+        Assert.Equal(2, text.ExitCode);
+        Assert.Contains("Superseded, unmatched              2\n", text.Out);
+        Assert.EndsWith("\nNothing new to record.\nCoverage is incomplete; see the warnings.\n", text.Out);
+        Assert.Equal(
+            "Warning: Copilot session s-a: 2 imported requests superseded by live spans that can't be matched to them; requests the daemon missed may not count\n",
+            text.Error);
+        Assert.Equal(2, json.ExitCode);
+        using JsonDocument document = JsonDocument.Parse(json.Out);
+        Assert.Equal(2, document.RootElement.GetProperty("sources")[0].GetProperty("supersededUnmatched").GetInt64());
+        Assert.Equal(
+            """{"source":"copilot","log":"s-a","code":"supersededUnmatched","event":"unknown","field":null,"version":null,"count":2,"line":null,"byteOffset":null}""",
+            JsonSerializer.Serialize(Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray())));
+    }
+
+    private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+```
+
+Edit 1 of 5 in `tests/CopilotLedger.Tests/Import/LedgerImporterTests.cs`, replace:
+
+```csharp
+    private const string S4 = "44444444-4444-4444-8444-444444444444";
+    private const string Thread = "019a1b2c-3d4e-7f50-8a6b-7c8d9e0f1a2b";
+
+    private static readonly DateTimeOffset Now = new(2026, 11, 23, 12, 0, 0, TimeSpan.Zero);
+```
+
+with:
+
+```csharp
+    private const string S4 = "44444444-4444-4444-8444-444444444444";
+    private const string Thread = "019a1b2c-3d4e-7f50-8a6b-7c8d9e0f1a2b";
+    private const string Fork = "019a1b2c-3d4e-7f50-8a6b-7c8d9e0f1a2c";
+
+    private static readonly DateTimeOffset Now = new(2026, 11, 23, 12, 0, 0, TimeSpan.Zero);
+```
+
+Edit 2 of 5 in `tests/CopilotLedger.Tests/Import/LedgerImporterTests.cs`, replace:
+
+```csharp
+    {
+        using TempDirectory temp = new();
+        string root = Path.Combine(temp.Path, "webapp");
+        string other = Path.Combine(temp.Path, "other");
+        new CopilotSessionLogs("s-root", context: CopilotSessionLogs.Context(root, root, "main", "contoso/webapp"))
+```
+
+with:
+
+```csharp
+    {
+        using TempDirectory temp = new();
+        string root = GitFixture.Create(temp.Path);
+        string nested = GitFixture.Create(Path.Combine(root, "vendor"));
+        string other = Path.Combine(temp.Path, "other");
+        new CopilotSessionLogs("s-root", context: CopilotSessionLogs.Context(root, root, "main", "contoso/webapp"))
+```
+
+Edit 3 of 5 in `tests/CopilotLedger.Tests/Import/LedgerImporterTests.cs`, replace:
+
+```csharp
+        new CopilotSessionLogs("s-cwd", context: CopilotSessionLogs.Context(Path.Combine(root, "src")))
+            .Usage("u2", S2)
+            .Write(CopilotHome(temp));
+        new CopilotSessionLogs("s-other", context: CopilotSessionLogs.Context(other, other, "main", "contoso/other"))
+```
+
+with:
+
+```csharp
+        new CopilotSessionLogs("s-cwd", context: CopilotSessionLogs.Context(Path.Combine(root, "src")))
+            .Usage("u2", S2)
+            .Write(CopilotHome(temp));
+        new CopilotSessionLogs("s-nested", context: CopilotSessionLogs.Context(Path.Combine(nested, "src")))
+            .Usage("u6", "66666666-6666-4666-8666-666666666666")
+            .Write(CopilotHome(temp));
+        new CopilotSessionLogs("s-gone", context: CopilotSessionLogs.Context(Path.Combine(root, "gone")))
+            .Usage("u7", "77777777-7777-4777-8777-777777777777")
+            .Write(CopilotHome(temp));
+        new CopilotSessionLogs("s-other", context: CopilotSessionLogs.Context(other, other, "main", "contoso/other"))
+```
+
+Edit 4 of 5 in `tests/CopilotLedger.Tests/Import/LedgerImporterTests.cs`, replace:
+
+```csharp
+            .Usage("u5", "55555555-5555-4555-8555-555555555555")
+            .Write(CopilotHome(temp));
+
+        ImportSourceReport report = Copilot(await RunAsync(temp, request => request with { RepositoryRoot = root }));
+
+        Assert.Equal((5, 2, 3), (report.RecordsParsed, report.RecordsOutOfScope, report.Recorded));
+        Assert.Equal(
+            ["null", "contoso/webapp", "contoso/webapp"],
+            await LedgerSql.RowsAsync(Database(temp), "SELECT COALESCE(repo_slug, 'null') FROM spans ORDER BY id;"));
+    }
+
+    [Fact]
+```
+
+with:
+
+```csharp
+            .Usage("u5", "55555555-5555-4555-8555-555555555555")
+            .Write(CopilotHome(temp));
+        new CodexRollouts(Thread, cwd: Path.Combine(root, "src"))
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_1", "turn-1")
+            .Write(CodexHome(temp));
+        new CodexRollouts(Fork, cwd: Path.Combine(nested, "src"))
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_2", "turn-1")
+            .Write(CodexHome(temp));
+
+        ImportReport report = await RunAsync(temp, request => request with { RepositoryRoot = root });
+
+        ImportSourceReport copilot = Copilot(report);
+        ImportSourceReport codex = Assert.Single(report.Sources, source => source.Source == ImportSourceKind.Codex);
+        Assert.Equal((7, 4, 3), (copilot.RecordsParsed, copilot.RecordsOutOfScope, copilot.Recorded));
+        Assert.Equal((2, 1, 1), (codex.RecordsParsed, codex.RecordsOutOfScope, codex.Recorded));
+        Assert.Equal(
+            ["null", "contoso/webapp", "contoso/webapp"],
+            await LedgerSql.RowsAsync(
+                Database(temp),
+                "SELECT COALESCE(repo_slug, 'null') FROM spans WHERE ingest_source = 'import:copilot' ORDER BY id;"));
+    }
+
+    [Fact]
+```
+
+Edit 5 of 5 in `tests/CopilotLedger.Tests/Import/LedgerImporterTests.cs`, replace:
+
+```csharp
+    }
+
+    private static string CopilotHome(TempDirectory temp) => Path.Combine(temp.Path, "copilot");
+
+    private static string CodexHome(TempDirectory temp) => Path.Combine(temp.Path, "codex");
+```
+
+with:
+
+```csharp
+    }
+
+    // A tool still running when its request was imported gets its link from the run that reads its completion; a dry run
+    // counts it the same way. Another session's copy of the request adds no link to the request's row.
+    [Fact]
+    public async Task IR18_AToolThatEndsAfterItsRequestWasImportedGetsItsLink()
+    {
+        using TempDirectory temp = new();
+        CopilotSessionLogs log = new CopilotSessionLogs("s-a").Usage("u1", S1, numToolCalls: 1).ToolStart("toolu-1", "bash");
+        log.Write(CopilotHome(temp), active: true);
+        ImportSourceReport first = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
+        log.ToolComplete("toolu-1", false, exitCode: 3).Write(CopilotHome(temp), active: true);
+
+        ImportSourceReport dry = Copilot(await RunAsync(temp, request => request with { IncludeActive = true, DryRun = true }));
+        ImportSourceReport second = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
+        ImportSourceReport third = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
+        new CopilotSessionLogs("s-copy")
+            .Usage("u1", S1, numToolCalls: 1)
+            .ToolStart("toolu-1", "bash")
+            .ToolComplete("toolu-1", false, exitCode: 3)
+            .Write(CopilotHome(temp));
+        ImportSourceReport copy = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
+
+        Assert.Equal((1, 0), (first.Recorded, first.ToolLinksRecorded));
+        Assert.Equal((0, 1, 1), (second.Recorded, second.Duplicates, second.ToolLinksRecorded));
+        Assert.Equal(second, dry);
+        Assert.Equal((1, 0), (third.SessionsSkippedUnchanged, third.ToolLinksRecorded));
+        Assert.Equal((1, 0), (copy.Duplicates, copy.ToolLinksRecorded));
+        Assert.True(second.Complete);
+        Assert.Equal(
+            ["1|bash|3|2"],
+            await LedgerSql.RowsAsync(
+                Database(temp),
+                "SELECT owner_span_row_id, tool_name, tool_exit_code, status_code FROM span_links;"));
+    }
+
+    // Imported rows that a live span superseded without sharing their service request ID limit coverage on every run whose
+    // scope holds them, and a dry run reports them the same way. Rows superseded by their own call's live span don't.
+    [Fact]
+    public async Task IR19_RowsSupersededWithoutAMatchAreReported()
+    {
+        using TempDirectory temp = new();
+        string root = Path.Combine(temp.Path, "webapp");
+        new CopilotSessionLogs("s-a", context: CopilotSessionLogs.Context(root, root, "main", "contoso/webapp"))
+            .Usage("u1", S1)
+            .Usage("u2", S2)
+            .Write(CopilotHome(temp));
+        new CopilotSessionLogs("s-b").Usage("u3", S3).Write(CopilotHome(temp));
+        await RunAsync(temp);
+        SqliteLedgerStore store = await StoreAsync(temp);
+        await store.RecordAsync([ImportEntries.Live("s-a", null), ImportEntries.Live("s-b", S3)]);
+
+        ImportReport report = await RunAsync(temp);
+        ImportReport dry = await RunAsync(temp, request => request with { DryRun = true });
+        ImportReport repo = await RunAsync(temp, request => request with { RepositoryRoot = root });
+        ImportReport otherRepo = await RunAsync(
+            temp,
+            request => request with { RepositoryRoot = Path.Combine(temp.Path, "other") });
+        ImportReport since = await RunAsync(
+            temp,
+            request => request with { Since = new DateTimeOffset(2026, 11, 21, 0, 0, 0, TimeSpan.Zero) });
+
+        ImportSourceReport copilot = Copilot(report);
+        Assert.Equal((2, 2), (copilot.SessionsSkippedUnchanged, copilot.SupersededUnmatched));
+        Assert.False(copilot.Complete);
+        Assert.Equal(
+            new ImportDiagnostic
+            {
+                Source = ImportSourceKind.Copilot,
+                LogId = "s-a",
+                Code = ImportDiagnosticCode.SupersededUnmatched,
+                Count = 2,
+            },
+            Assert.Single(report.Diagnostics));
+        Assert.Equal(report.Sources, dry.Sources);
+        Assert.Equal(report.Diagnostics, dry.Diagnostics);
+        Assert.Equal(2, Copilot(repo).SupersededUnmatched);
+        Assert.Equal((0, true), (Copilot(otherRepo).SupersededUnmatched, Copilot(otherRepo).Complete));
+        Assert.Equal((0, true), (Copilot(since).SupersededUnmatched, Copilot(since).Complete));
+        Assert.Equal(
+            ["s-a|superseded", "s-a|superseded", "s-b|superseded"],
+            await LedgerSql.RowsAsync(
+                Database(temp),
+                "SELECT conversation_id, accounting_state FROM spans WHERE ingest_source = 'import:copilot' ORDER BY id;"));
+    }
+
+    private static string CopilotHome(TempDirectory temp) => Path.Combine(temp.Path, "copilot");
+
+    private static string CodexHome(TempDirectory temp) => Path.Combine(temp.Path, "codex");
+```
+
+### Tests
+
+- **IR5** (changed): `RepositoryRoot` is a real repository with another repository nested under `vendor`. Of 7 Copilot records, 4 are out of scope: a working directory in the nested repository, one that no longer exists, another repository, and a resume into another repository; 3 are recorded. Of 2 Codex records, the one whose working directory is in the nested repository is out of scope.
+- **IR18**: a tool still running when its request was imported (`IncludeActive`) gets its link once its completion is appended: the next run reports 1 duplicate and 1 tool link, and a dry run before it reports the same; the run after skips the log; another session's copy of the request and tool call adds no link; `span_links` holds exactly `1|bash|3|2`.
+- **IR19**: after a live span without a service request ID supersedes session `s-a`'s 2 imported rows, and a live span with `s-b`'s service request ID supersedes `s-b`'s row, a rerun reports `SupersededUnmatched` 2 and one diagnostic for `s-a`, with incomplete coverage; a dry run reports the same; `RepositoryRoot` set to the recorded root still reports 2; another root, or a `Since` after the rows started, reports 0 and complete coverage; all three rows stay superseded.
+- **IC3**, **IC4**, and **IC6** (changed): the new row and field, 0. **IC14**: `Superseded, unmatched              2`, exit code 2, the exact warning, JSON `supersededUnmatched` 2, and the diagnostic `{"source":"copilot","log":"s-a","code":"supersededUnmatched","event":"unknown","field":null,"version":null,"count":2,"line":null,"byteOffset":null}`.
+- **GS2**: the guide's two import samples show the new row with 0.
+
+### Acceptance criteria
+
+- Tool calls that end after an import get links, never twice and never from a copy (IR18); unmatched supersession is reported, never reversed (IR19, IC14); `--repo` excludes nested repositories and unresolvable working directories (IR5).
+- `dotnet test CopilotLedger.slnx` passes **1263** tests (1260 + 3).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 16 specification: Daemon Import Rules and Failure-Log Privacy
+
+Review findings 1 and 13.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Cli/Daemon/DaemonFiles.cs` | `DaemonState.ImportRules` (0 when `daemon.json` lacks it) and `CurrentImportRules` = 1 |
+| `src/CopilotLedger.Cli/Daemon/DaemonHost.cs` | Writes `importRules` 1 |
+| `src/CopilotLedger.Cli/Import/ImportCommands.cs` | The import-rules check replaces the daemon-version warning |
+| `src/CopilotLedger.Cli/Daemon/IngestFailureLog.cs` | Only a `SqliteException` keeps its message |
+| `docs/cli.md` | Earlier daemons, exit code 1, and Troubleshooting |
+| `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs` | The stand-in daemon's `daemon.json` has `importRules` 1 |
+| `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs` | DM1 changed |
+| `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs` | IC9 and IC10 rewritten |
+| `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs` | IP1 changed; new: IP4 |
+
+### Rules
+
+1. **Import rules (finding 1).** This build's daemon writes `"importRules": 1` to `daemon.json`. Before the ledger is opened, while the daemon lock is held and `daemon.json` has no `importRules` of at least 1 (an earlier build, or a state that can't be read), `import` writes `Import stopped: the running daemon doesn't follow the import rules, so a request it records later could be charged twice. Restart it with <command> daemon stop and <command> daemon start, then run the import again.` to standard error and exits with 1, creating nothing. A dry run writes `Warning: the running daemon doesn't follow the import rules, so a request it records after an import could be charged twice. Restart it with <command> daemon stop and <command> daemon start before you import.` and continues. `<command>` is `gh ledger` for the extension, else `gh-ledger`. Both builds call themselves 0.4.1, so the version can't tell them apart, and the version warning is gone: a daemon of another version that has the rules is fine.
+2. **Failure-log privacy (finding 13), D21 narrowed.** `IngestFailureLog` keeps the message only of a `SqliteException`: SQLite's messages name tables, columns, and constraints but never a bound value, and the ledger binds every value. Every other exception, `IOException` and `UnauthorizedAccessException` included, is written as its type only, because an I/O message can name a path from the request, such as its working directory. SQLite reports a full disk as `database or disk is full`, so that cause still shows.
+
+### Code (copy exactly)
+
+Edit 1 of 2 in `docs/cli.md`, replace:
+
+````markdown
+| 0 | Every source's coverage is complete. |
+| 2 | The import finished, but some coverage is incomplete; the warnings say why. Everything that could be imported was. |
+| 1 | The options are invalid, or an error stopped the import. |
+
+Skipped active, unchanged, and out-of-scope logs don't make coverage incomplete. A folder or file of a session store that exists but can't be listed does, with a warning such as `Copilot session logs: 1 folder or file couldn't be listed`; a store that doesn't exist only has no logs. So do `Superseded, unmatched` requests: those that started in the `--since` period and, with `--repo`, recorded that repository's root, or its `owner/repo` slug when they recorded no root. When the only gap is sessions from before Copilot 1.0.103, the report's last line suggests `--since`, which leaves them out. With `--repo`, logs of other repositories are read again on every run, because they may hold requests of this one.
+
+Imported requests count in every report and MCP tool, as live ones do, with the branch their log recorded. Tool calls are imported only from the last 7 days, as long as the ledger keeps tool calls; an older request keeps only the number of tool calls it made. A tool call that ended after its request was imported, such as in a session imported with `--include-active`, is added when a later import reads the session again. Imported requests have no agent-invocation span, so `status --cache --turns` shows their `Growth` as `n/a`, and the input-growth ranking of `--bloat` leaves them out. `import` warns when the daemon runs another gh-ledger version: restart the daemon, so that the live spans it records supersede imported rows by this version's rules.
+
+### What import reads and keeps
+````
+
+with:
+
+````markdown
+| 0 | Every source's coverage is complete. |
+| 2 | The import finished, but some coverage is incomplete; the warnings say why. Everything that could be imported was. |
+| 1 | The options are invalid, a running daemon doesn't follow the import rules, or an error stopped the import. |
+
+Skipped active, unchanged, and out-of-scope logs don't make coverage incomplete. A folder or file of a session store that exists but can't be listed does, with a warning such as `Copilot session logs: 1 folder or file couldn't be listed`; a store that doesn't exist only has no logs. So do `Superseded, unmatched` requests: those that started in the `--since` period and, with `--repo`, recorded that repository's root, or its `owner/repo` slug when they recorded no root. When the only gap is sessions from before Copilot 1.0.103, the report's last line suggests `--since`, which leaves them out. With `--repo`, logs of other repositories are read again on every run, because they may hold requests of this one.
+
+Imported requests count in every report and MCP tool, as live ones do, with the branch their log recorded. Tool calls are imported only from the last 7 days, as long as the ledger keeps tool calls; an older request keeps only the number of tool calls it made. A tool call that ended after its request was imported, such as in a session imported with `--include-active`, is added when a later import reads the session again. Imported requests have no agent-invocation span, so `status --cache --turns` shows their `Growth` as `n/a`, and the input-growth ranking of `--bloat` leaves them out.
+
+A daemon started by an earlier gh-ledger doesn't follow the import rules of [Overlap with live spans](#overlap-with-live-spans): a live span it records after an import wouldn't supersede the imported row of the same request, which would then count twice. So while the daemon that's running doesn't say in `daemon.json` that it follows them, `import` stops with exit code 1, and `--dry-run` only warns. Restart the daemon first:
+
+```shell
+gh ledger daemon stop
+gh ledger daemon start
+```
+
+### What import reads and keeps
+````
+
+Edit 2 of 2 in `docs/cli.md`, replace:
+
+```markdown
+## Troubleshooting
+
+- **Nothing is recorded.** Run `gh ledger status`, address its warnings, and restart Copilot.
+- **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example because the disk is full or the database is damaged, and Copilot is told to retry. The warning repeats at most once a minute; fix the cause shown after it. Only database and file errors show their message; any other error shows only its type, because its message could quote the request.
+- **`gh ledger import` exits with code 2.** Some coverage is incomplete, and the warnings say why; everything else was imported. A session from before Copilot 1.0.103 is never imported, so leave it out with `--since`. A malformed line or an unsupported usage record is skipped on every run, and the rest of its log is imported.
+- **`gh ledger import` defers requests (`Ambiguous-overlap`).** Their session has live spans that can't be matched to them, such as spans an earlier gh-ledger recorded, so import leaves them out rather than risk charging a request twice. The live spans still count.
+```
+
+with:
+
+```markdown
+## Troubleshooting
+
+- **Nothing is recorded.** Run `gh ledger status`, address its warnings, and restart Copilot.
+- **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example because the disk is full or the database is damaged, and Copilot is told to retry. The warning repeats at most once a minute; fix the cause shown after it. Only database errors show their message, which never quotes a request's values; any other error shows only its type, because its message could quote the request or a path from it.
+- **`gh ledger import` exits with code 2.** Some coverage is incomplete, and the warnings say why; everything else was imported. A session from before Copilot 1.0.103 is never imported, so leave it out with `--since`. A malformed line or an unsupported usage record is skipped on every run, and the rest of its log is imported.
+- **`gh ledger import` defers requests (`Ambiguous-overlap`).** Their session has live spans that can't be matched to them, such as spans an earlier gh-ledger recorded, so import leaves them out rather than risk charging a request twice. The live spans still count.
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Cli/Daemon/DaemonFiles.cs`, replace:
+
+```csharp
+internal sealed record DaemonState
+{
+    public required int SchemaVersion { get; init; }
+    public required int ProcessId { get; init; }
+```
+
+with:
+
+```csharp
+internal sealed record DaemonState
+{
+    // The import rules this build's daemon applies to the live spans it records (UsageAuthority). gh ledger import needs
+    // them: a daemon whose daemon.json lacks importRules (an earlier build) could record a request twice.
+    public const int CurrentImportRules = 1;
+
+    public required int SchemaVersion { get; init; }
+    public required int ProcessId { get; init; }
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Cli/Daemon/DaemonFiles.cs`, replace:
+
+```csharp
+    public required string Version { get; init; }
+    public required string DatabasePath { get; init; }
+}
+
+internal static class DaemonFiles
+```
+
+with:
+
+```csharp
+    public required string Version { get; init; }
+    public required string DatabasePath { get; init; }
+    public int ImportRules { get; init; }            // 0 when daemon.json has no importRules
+}
+
+internal static class DaemonFiles
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Daemon/DaemonHost.cs`, replace:
+
+```csharp
+                Version = GhLedgerCli.Version,
+                DatabasePath = context.DatabasePath,
+            };
+            await DaemonFiles.WriteStateAsync(context, state, cancellationToken);
+```
+
+with:
+
+```csharp
+                Version = GhLedgerCli.Version,
+                DatabasePath = context.DatabasePath,
+                ImportRules = DaemonState.CurrentImportRules,
+            };
+            await DaemonFiles.WriteStateAsync(context, state, cancellationToken);
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Cli/Daemon/IngestFailureLog.cs`, replace:
+
+```csharp
+namespace CopilotLedger.Cli.Daemon;
+
+// Writes "Warning: could not record spans: <type>: <message>" for the first ingestion failure, then at most once a
+// minute, so a ledger that stays unavailable can't flood daemon.log. Only SQLite and file-system exceptions keep their
+// message; any other is written as "Warning: could not record spans: <type>", because its message can quote the request
+// (a JsonException's does). After the clock steps back, the next failure is written at once. A line that can't be
+// written is dropped.
+public sealed class IngestFailureLog(Action<string> write, TimeProvider timeProvider)
+{
+```
+
+with:
+
+```csharp
+namespace CopilotLedger.Cli.Daemon;
+
+// Writes "Warning: could not record spans: <type>: <message>" for the first ingestion failure, then at most once a
+// minute, so a ledger that stays unavailable can't flood daemon.log. Only a SqliteException keeps its message: SQLite's
+// messages name tables, columns, and constraints but never a bound value, and the ledger binds every value. Any other
+// exception is written as "Warning: could not record spans: <type>", because its message can quote the request (a
+// JsonException's does) or name a path from it (an IOException's can, such as the span's working directory). After the
+// clock steps back, the next failure is written at once. A line that can't be written is dropped.
+public sealed class IngestFailureLog(Action<string> write, TimeProvider timeProvider)
+{
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Cli/Daemon/IngestFailureLog.cs`, replace:
+
+```csharp
+        try
+        {
+            write(exception is SqliteException or IOException or UnauthorizedAccessException
+                ? $"Warning: could not record spans: {exception.GetType().Name}: {exception.Message}"
+                : $"Warning: could not record spans: {exception.GetType().Name}");
+```
+
+with:
+
+```csharp
+        try
+        {
+            write(exception is SqliteException
+                ? $"Warning: could not record spans: {exception.GetType().Name}: {exception.Message}"
+                : $"Warning: could not record spans: {exception.GetType().Name}");
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+using System.Text.Json;
+using CopilotLedger.Cli.Daemon;
+using CopilotLedger.Cli.Rates;
+using CopilotLedger.Cli.Reporting;
+```
+
+with:
+
+```csharp
+using System.Text.Json;
+using CopilotLedger.Cli.Daemon;
+using CopilotLedger.Cli.Install;
+using CopilotLedger.Cli.Rates;
+using CopilotLedger.Cli.Reporting;
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Cli/Import/ImportCommands.cs`, replace:
+
+```csharp
+        }
+
+        // A daemon of another version records live spans by its own rules, so a request it records later might not
+        // supersede an imported one.
+        if (DaemonFiles.IsHeld(context) &&
+            DaemonFiles.TryReadState(context)?.Version is string version &&
+            version != GhLedgerCli.Version)
+        {
+            context.Error.WriteLine(
+                $"Warning: the daemon runs gh-ledger {version}; restart it so live spans follow this version's import rules.");
+        }
+
+        ImportRequest request = new()
+```
+
+with:
+
+```csharp
+        }
+
+        // A daemon without the import rules (DaemonState.ImportRules) records live spans without superseding imported rows,
+        // so a request it records after the import could be charged twice. An import stops before it opens the ledger; a
+        // dry run, which writes nothing, warns.
+        if (DaemonFiles.IsHeld(context) &&
+            (DaemonFiles.TryReadState(context)?.ImportRules ?? 0) < DaemonState.CurrentImportRules)
+        {
+            string command = GhExtension.CommandName(context.Platform);
+            string restart = $"Restart it with {command} daemon stop and {command} daemon start";
+            if (!dryRun)
+            {
+                context.Error.WriteLine(
+                    $"Import stopped: the running daemon doesn't follow the import rules, so a request it records later could be charged twice. {restart}, then run the import again.");
+                return 1;
+            }
+
+            context.Error.WriteLine(
+                $"Warning: the running daemon doesn't follow the import rules, so a request it records after an import could be charged twice. {restart} before you import.");
+        }
+
+        ImportRequest request = new()
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs`, replace:
+
+```csharp
+            Path.Combine(temp.Path, "data", "ledger.db"),
+            root.GetProperty("databasePath").GetString());
+
+        CliRun start = await harness.RunAsync("daemon", "start");
+```
+
+with:
+
+```csharp
+            Path.Combine(temp.Path, "data", "ledger.db"),
+            root.GetProperty("databasePath").GetString());
+        Assert.Equal(1, root.GetProperty("importRules").GetInt32());
+
+        CliRun start = await harness.RunAsync("daemon", "start");
+```
+
+Edit 1 of 3 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    [Fact]
+    public void IC9_TheIngestFailureLogWritesOnlyTheTypeOfOtherExceptions()
+    {
+        List<string> lines = [];
+        ManualTimeProvider clock = new(Now);
+        IngestFailureLog log = new(lines.Add, clock);
+
+        log.Report(new JsonException(CopilotSessionLogs.Canary));
+        clock.Advance(TimeSpan.FromMinutes(1));
+        log.Report(new SqliteException("SQLite Error 5: 'database is locked'.", 5));
+        clock.Advance(TimeSpan.FromMinutes(1));
+        log.Report(new IOException("There is not enough space on the disk."));
+        clock.Advance(TimeSpan.FromMinutes(1));
+        log.Report(new ArgumentException(CopilotSessionLogs.Canary));
+
+        Assert.Equal(
+            [
+                "Warning: could not record spans: JsonException",
+                "Warning: could not record spans: SqliteException: SQLite Error 5: 'database is locked'.",
+                "Warning: could not record spans: IOException: There is not enough space on the disk.",
+                "Warning: could not record spans: ArgumentException",
+            ],
+```
+
+with:
+
+```csharp
+    }
+
+    // Only SQLite's own messages are kept, and they never quote a bound value; every other exception's message is dropped.
+    [Fact]
+    public async Task IC9_TheIngestFailureLogKeepsOnlySqliteMessages()
+    {
+        List<string> lines = [];
+        ManualTimeProvider clock = new(Now);
+        IngestFailureLog log = new(lines.Add, clock);
+        SqliteException constraint;
+        await using (SqliteConnection connection = new("Data Source=:memory:"))
+        {
+            await connection.OpenAsync();
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE t (v TEXT UNIQUE); INSERT INTO t (v) VALUES (@v); INSERT INTO t (v) VALUES (@v);";
+            command.Parameters.AddWithValue("@v", CopilotSessionLogs.Canary);
+            constraint = await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
+        }
+
+        foreach (Exception exception in new Exception[]
+                 {
+                     constraint,
+                     new IOException(CopilotSessionLogs.Canary),
+                     new UnauthorizedAccessException(CopilotSessionLogs.Canary),
+                     new JsonException(CopilotSessionLogs.Canary),
+                     new ArgumentException(CopilotSessionLogs.Canary),
+                 })
+        {
+            log.Report(exception);
+            clock.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        Assert.Equal(
+            [
+                "Warning: could not record spans: SqliteException: SQLite Error 19: 'UNIQUE constraint failed: t.v'.",
+                "Warning: could not record spans: IOException",
+                "Warning: could not record spans: UnauthorizedAccessException",
+                "Warning: could not record spans: JsonException",
+                "Warning: could not record spans: ArgumentException",
+            ],
+```
+
+Edit 2 of 3 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task IC10_ADaemonOfAnotherVersionIsReported()
+    {
+        using TempDirectory temp = new();
+```
+
+with:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task IC10_ADaemonWithoutTheImportRulesStopsAnImport()
+    {
+        using TempDirectory temp = new();
+```
+
+Edit 3 of 3 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+        string data = harness.Context.DataDirectory;
+        Directory.CreateDirectory(data);
+        await File.WriteAllTextAsync(
+            Path.Combine(data, "daemon.json"),
+            """{"schemaVersion":1,"processId":4242,"startedAt":"2026-11-23T11:00:00+00:00","endpoint":"http://localhost:4318","version":"0.4.0","databasePath":"ledger.db"}""");
+        CliRun run;
+        await using (FileStream held = new(Path.Combine(data, "daemon.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            run = await harness.RunAsync("import", "--all");
+        }
+
+        CliRun released = await harness.RunAsync("import", "--all");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Equal(
+            "Warning: the daemon runs gh-ledger 0.4.0; restart it so live spans follow this version's import rules.\n",
+            run.Error);
+        Assert.Equal("", released.Error);
+    }
+
+    [Fact]
+```
+
+with:
+
+```csharp
+        string data = harness.Context.DataDirectory;
+        Directory.CreateDirectory(data);
+        new CopilotSessionLogs("s-a").Usage("u1", S1).Write(harness.Context.CopilotHome);
+        const string State =
+            """{"schemaVersion":1,"processId":4242,"startedAt":"2026-11-23T11:00:00+00:00","endpoint":"http://localhost:4318","version":"0.4.1","databasePath":"ledger.db"}""";
+        await File.WriteAllTextAsync(Path.Combine(data, "daemon.json"), State);
+        CliRun refused;
+        CliRun dry;
+        CliRun capable;
+        bool createdBeforeCapable;
+        await using (FileStream held = new(Path.Combine(data, "daemon.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            refused = await harness.RunAsync("import", "--all");
+            dry = await harness.RunAsync("import", "--all", "--dry-run");
+            createdBeforeCapable = File.Exists(harness.Context.DatabasePath);
+            await File.WriteAllTextAsync(Path.Combine(data, "daemon.json"), State.Replace("}", ",\"importRules\":1}"));
+            capable = await harness.RunAsync("import", "--all");
+        }
+
+        CliRun released = await harness.RunAsync("import", "--all");
+
+        Assert.Equal((1, ""), (refused.ExitCode, refused.Out));
+        Assert.False(createdBeforeCapable);
+        Assert.Equal(
+            "Import stopped: the running daemon doesn't follow the import rules, so a request it records later could be charged twice. Restart it with gh-ledger daemon stop and gh-ledger daemon start, then run the import again.\n",
+            refused.Error);
+        Assert.Equal(0, dry.ExitCode);
+        Assert.Equal(
+            "Warning: the running daemon doesn't follow the import rules, so a request it records after an import could be charged twice. Restart it with gh-ledger daemon stop and gh-ledger daemon start before you import.\n",
+            dry.Error);
+        Assert.EndsWith("\nImporting would record 1 request: 0.15 AI credits ($0.00), API equivalent $0.00.\nDry run: nothing was written.\n", dry.Out);
+        Assert.Equal((0, ""), (capable.ExitCode, capable.Error));
+        Assert.EndsWith("\nRecorded 1 request: 0.15 AI credits ($0.00), API equivalent $0.00.\n", capable.Out);
+        Assert.Equal((0, ""), (released.ExitCode, released.Error));
+        Assert.EndsWith("\nNothing new to record.\n", released.Out);
+    }
+
+    [Fact]
+```
+
+Edit 1 of 3 in `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs`, replace:
+
+```csharp
+using System.Text;
+using System.Text.Json.Nodes;
+```
+
+with:
+
+```csharp
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json.Nodes;
+```
+
+Edit 2 of 3 in `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs`, replace:
+
+```csharp
+        }
+
+        Assert.Contains(stored, file => file.Name == "ledger.db");
+        string output = string.Concat(
+            claude.Out, claude.Error, dryRun.Out, dryRun.Error, text.Out, text.Error, json.Out, json.Error);
+```
+
+with:
+
+```csharp
+        }
+
+        Assert.Contains(stored, file => file.Name == "ledger.db");
+        string daemonLog = Path.Combine(harness.Context.DataDirectory, "daemon.log");
+        if (File.Exists(daemonLog))
+        {
+            stored.Add(("daemon.log", await File.ReadAllBytesAsync(daemonLog)));
+        }
+
+        string output = string.Concat(
+            claude.Out, claude.Error, dryRun.Out, dryRun.Error, text.Out, text.Error, json.Out, json.Error);
+```
+
+Edit 3 of 3 in `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs`, replace:
+
+```csharp
+            }
+
+            Assert.Equal(documented[table], filled);
+        }
+    }
+```
+
+with:
+
+```csharp
+            }
+
+            Assert.Equal(documented[table], filled);
+        }
+    }
+
+    // While the ledger can't record a canary-bearing live span, after an import, the daemon's log names the failure and keeps
+    // nothing of the span. The in-process daemon writes to DaemonOutput what it writes to daemon.log when it's started.
+    [Fact]
+    public async Task IP4_TheDaemonLogKeepsNoCanaryWhenItCantRecordASpan()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        WriteFixtures(temp, harness);
+        CliRun import = await harness.RunAsync("import", "--all", "--source", "copilot", "--source", "codex");
+        await harness.StartInProcessDaemonAsync();
+        await LedgerSql.ExecuteAsync(
+            harness.Context.DatabasePath,
+            "CREATE TRIGGER ip4_reject BEFORE INSERT ON spans BEGIN SELECT RAISE(ABORT, 'ip4 rejects spans'); END;");
+        string trace = OtlpFixtures.CopilotChatTraceJson
+            .Replace("0f8fad5b-d9cb-469f-a165-70867728950e", Canary("PROMPT"), StringComparison.Ordinal)
+            .Replace("\"stringValue\": \"stop\"", $"\"stringValue\": \"{Canary("RESPONSE")}\"", StringComparison.Ordinal);
+        HttpStatusCode status;
+        using (HttpClient client = harness.CreateDaemonClient())
+        using (ByteArrayContent content = new(Encoding.UTF8.GetBytes(trace)))
+        {
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            using HttpResponseMessage response = await client.PostAsync("/v1/traces", content);
+            status = response.StatusCode;
+        }
+
+        CliRun stop = await harness.RunAsync("daemon", "stop");
+        CliRun daemon = await harness.InProcessDaemon!;
+        string daemonLog = Path.Combine(harness.Context.DataDirectory, "daemon.log");
+        string log = harness.DaemonOutput + (File.Exists(daemonLog) ? await File.ReadAllTextAsync(daemonLog) : "");
+
+        Assert.Equal(2, import.ExitCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
+        Assert.Equal((0, 0), (stop.ExitCode, daemon.ExitCode));
+        Assert.Contains(" Warning: could not record spans: SqliteException: ", log);
+        Assert.Contains("ip4 rejects spans", log);
+        foreach (string canary in Canaries)
+        {
+            Assert.DoesNotContain(canary, log, StringComparison.Ordinal);
+        }
+    }
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs`, replace:
+
+```csharp
+                version = GhLedgerCli.Version,
+                databasePath = Harness.Context.DatabasePath,
+            }));
+        _ = FileRetry.ReadAllText(Path.Combine(data, "daemon.json"));
+```
+
+with:
+
+```csharp
+                version = GhLedgerCli.Version,
+                databasePath = Harness.Context.DatabasePath,
+                importRules = 1,
+            }));
+        _ = FileRetry.ReadAllText(Path.Combine(data, "daemon.json"));
+```
+
+### Tests
+
+- **DM1** (changed): `daemon.json` has `importRules` 1.
+- **IC9** (rewritten): a real `SqliteException`, a UNIQUE constraint failure with the canary bound twice, keeps SQLite's message `SQLite Error 19: 'UNIQUE constraint failed: t.v'.`; an `IOException`, `UnauthorizedAccessException`, `JsonException`, and `ArgumentException` carrying the canary write only their type.
+- **IC10** (rewritten): while the daemon lock is held and `daemon.json` has no `importRules`, `import --all` exits with 1, prints the exact message and nothing on standard output, and creates no ledger; `--dry-run` prints the exact warning and reports `Importing would record 1 request`; with `"importRules":1`, the import records it with an empty standard error; after the lock is released, standard error stays empty.
+- **IP1** (changed): also scans `daemon.log` when it exists. **IP4**: after an import of the canary fixtures, the in-process daemon can't record a trace with canaries in its conversation ID and finish reasons, because a trigger rejects inserts into `spans`: the response is 503, the daemon's log has ` Warning: could not record spans: SqliteException: ` with the trigger's message `ip4 rejects spans`, and no canary.
+- **GS2**: the guide's import samples still exit with 0 and an empty standard error, because the stand-in daemon has the import rules.
+
+### Acceptance criteria
+
+- An import can't run beside a daemon without the import rules (IC10, DM1); `daemon.log` never receives a request's content or paths (IC9, IP4).
+- `dotnet test CopilotLedger.slnx` passes **1264** tests (1263 + 1).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
 Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` or fixed times, `FakeCliPlatform` and `CliHarness` (with `CopilotHome` and `CodexHome` under the temporary root) for the CLI, and `McpTestHarness` for MCP. Session logs are synthetic, written by `CopilotSessionLogs` and `CodexRollouts`. No test starts a process, runs `git`, uses the network or Docker, or reads `~/.copilot`, `~/.codex`, `~/.claude`, or `~/.copilot-ledger`. Money is `decimal` or integer pico-USD, never `double`, and expected text is compared exactly, normalizing only the expected literal.
@@ -11715,6 +16249,10 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 10 | IC1 (6), IC2–IC11 | — | 1,231 |
 | 11 | IP1, IP2, IP3 | — | 1,234 |
 | 12 | GS2 (2 more cases) | GS1 (the new sample IDs) | 1,236 |
+| 13 | `UrlHelpers_ReturnExpectedValues` (4 more cases), BI8 (3), CU13, CU14 (3), CC7, CX13 (2), CX14 | — | 1,251 |
+| 14 | CS15, CX15, CX16, IR16, IR17, SN7 (2), IC12, IC13 | CS1, CX1 (unreadable entries), SN6, UA12, UA13 (`LogSha256`), IC4 (`unreadableStoreEntries`) | 1,260 |
+| 15 | IR18, IR19, IC14 | IR5 (nested repositories), IC3, IC4, IC6, and GS2's import samples (`Superseded, unmatched`) | 1,263 |
+| 16 | IP4 | DM1 (`importRules`), IC9, IC10 (rewritten), IP1 (`daemon.log`) | 1,264 |
 
 Exact values used across tasks:
 
@@ -11732,10 +16270,10 @@ Exact values used across tasks:
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 12, the orchestrator:
+After Task 16, the orchestrator:
 
-1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1236 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-7.md`, and the files the tasks list.
-2. Pushes `swigerb-sprint-8-ledger-import-backfill` and opens one pull request titled exactly "Sprint 8: `gh ledger import`: retroactive backfill from local session stores (Copilot, Claude, Codex)", whose body says `Closes #63`, lists the twelve task commits, and states the migration number (6), the deviations of "Deviations from issue #63", each with a one-line rationale, and that a version 6 ledger can't be opened by earlier gh-ledger versions.
+1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1264 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-7.md`, and the files the tasks list.
+2. Pushes `swigerb-sprint-8-ledger-import-backfill` and opens one pull request titled exactly "Sprint 8: `gh ledger import`: retroactive backfill from local session stores (Copilot, Claude, Codex)", whose body says `Closes #63`, lists the sixteen task commits, and states the migration number (6), the deviations of "Deviations from issue #63", each with a one-line rationale, and that a version 6 ledger can't be opened by earlier gh-ledger versions.
 3. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary.
 4. Optionally, with a temporary `COPILOT_LEDGER_HOME` and a synthetic session that a real Copilot CLI 1.0.103–1.0.114 wrote in a temporary `COPILOT_HOME` (never a copy of a user's session), runs `gh ledger import --all --dry-run` and then `gh ledger import --all`, and checks that the two reports agree and that a second run records nothing. Never point it at a real home directory.
 5. Asks `ledger-architect` to review the branch.
@@ -11753,5 +16291,6 @@ This sprint doesn't bump the version, tag, or release. When the sprint closes, `
 - **Agent-invocation grouping** (`agent_span_id`) for imported spans, so context-growth reports include them.
 - **Coverage notes in reports** (D26), such as "N imported, M superseded" in `status`, and an `ingestSource` breakdown over MCP (D13).
 - **#64, `gh ledger export`**, can label rows by `ingest_source` and leave out superseded rows; **#65, `gh ledger audit`**, can use `imported_tool_call_count` and imported tool links, labeling missing detailed tool coverage.
-- **Old daemons.** A daemon of an earlier version that keeps running after `import` upgrades the ledger (possible only off Windows) records live rows without the authority rules until it restarts; `import` warns, and a later migration could re-run the reconciliation.
+- **Old daemons.** `import` refuses while a daemon without the import rules runs (D29), but such a daemon started during an import, or still running after another command upgraded the ledger (possible only off Windows), records live rows without the rules until it restarts; a later migration could re-run the reconciliation.
+- **Unmatched supersession.** `Superseded, unmatched` rows keep coverage incomplete on every run whose scope holds them; a way to acknowledge them, or to learn which calls the live spans cover, could close that gap.
 - **Carried from Sprint 7:** the backfill's discoverability and batching, what the API rate card hash covers, what-if fidelity, re-billing requests recorded as `unknown_model`, more dated ids, longer cache lifetimes, MAI list prices, and the carry-overs from Sprint 6, as described in `.github/plans/archive/sprint-7.md`.
