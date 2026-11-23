@@ -17,6 +17,7 @@ public static class GenAiAttributeNames
     public const string LegacyCacheCreationInputTokens = "gen_ai.usage.cache_creation.input_tokens";
     public const string ServerAddress = "server.address";
     public const string ServerPort = "server.port";
+    public const string ServiceRequestId = "github.copilot.service_request_id";
     public const string GitRepository = "github.copilot.git.repository";
     public const string GitBranch = "github.copilot.git.branch";
     public const string GitCommitSha = "github.copilot.git.commit_sha";

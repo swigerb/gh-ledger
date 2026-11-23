@@ -561,6 +561,38 @@ public sealed class GenAiSpanNormalizerTests
         Assert.False(CacheMetrics.IsReported(unreported.CacheReadState, unreported.CacheWriteState));
     }
 
+    [Fact]
+    public void NZ15_ChatSpans_KeepTheirServiceRequestId()
+    {
+        NormalizedGenAiSpan span = Assert.Single(GenAiSpanNormalizer.Normalize(
+            Request(
+                CopilotResource,
+                Span(attributes:
+                [
+                    Str(GenAiAttributeNames.OperationName, "chat"),
+                    Str(GenAiAttributeNames.ProviderName, "github"),
+                    Str(GenAiAttributeNames.ServiceRequestId, "1F0E9C2A-7B3D-4E5F-8A9B-0C1D2E3F4A5B"),
+                ]))).InferenceSpans);
+
+        Assert.Equal("1F0E9C2A-7B3D-4E5F-8A9B-0C1D2E3F4A5B", span.ServiceRequestId);
+        Assert.Equal(BillingSource.Endpoint, span.BillingSource);
+    }
+
+    [Fact]
+    public void NZ16_AServiceRequestIdThatIsNotAStringIsIgnored()
+    {
+        NormalizedGenAiSpan span = Assert.Single(GenAiSpanNormalizer.Normalize(
+            Request(
+                CopilotResource,
+                Span(attributes:
+                [
+                    Str(GenAiAttributeNames.OperationName, "chat"),
+                    Int(GenAiAttributeNames.ServiceRequestId, 42),
+                ]))).InferenceSpans);
+
+        Assert.Null(span.ServiceRequestId);
+    }
+
     private static void AssertLink(
         GenAiSpanLink link,
         string? operationName,

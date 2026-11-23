@@ -547,6 +547,36 @@ public sealed class SqliteLedgerStoreTests
         Assert.Equal(1, await store.GetPromptCountAsync(new LedgerFilter { Agent = "(none)" }));
     }
 
+    [Fact]
+    public async Task S16_RecordAsync_StoresOtherProvider()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await InitializedStoreAsync(temp);
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            providerName: "openai",
+            requestModel: "gpt-6.1-sol",
+            inputTokens: 100_000,
+            outputTokens: 10_000) with
+        {
+            BillingSource = BillingSource.Provider,
+        };
+
+        Assert.Equal(1, await store.RecordAsync(
+            [new LedgerEntry(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), null)]));
+
+        await using SqliteConnection connection = new($"Data Source={DatabasePath(temp)}");
+        await connection.OpenAsync();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT billing_channel, pricing_status, cost_usd_pico, api_equivalent_status FROM spans;";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("unpriced", reader.GetString(0));
+        Assert.Equal("other_provider", reader.GetString(1));
+        Assert.Equal(0L, reader.GetInt64(2));
+        Assert.Equal("priced", reader.GetString(3));
+        Assert.False(await reader.ReadAsync());
+    }
+
     private static async Task<SqliteLedgerStore> SeededStoreAsync(TempDirectory temp)
     {
         SqliteLedgerStore store = await InitializedStoreAsync(temp);

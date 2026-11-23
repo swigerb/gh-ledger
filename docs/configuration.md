@@ -60,6 +60,7 @@ The built-in GitHub models have the vendors' API ids and dated snapshot ids as a
 | `unknown_model` | No model on the request, or neither its response model nor its request model is in the price list | Add the model, or an alias for it, under `githubAiCredits.models` or `foundryByok.models` |
 | `no_rate_for_date` | The model has no price for the request's date | Add a price window that covers the date |
 | `unrecognized_endpoint` | The endpoint isn't GitHub, Foundry, or local | Add its host to the matching `hostSuffixes` or `additionalHosts` list |
+| `other_provider` | An imported request that its provider billed directly, and that provider isn't Foundry BYOK or local, such as a Codex request to OpenAI | If the provider is local or Foundry, add its name to `localOffload.providerNames` or `foundryByok.providerNames` |
 | `invalid_usage` | Token counts are inconsistent, for example more cached tokens than input tokens | Report it; it usually means a telemetry exporter bug |
 
 ### Cache tokens

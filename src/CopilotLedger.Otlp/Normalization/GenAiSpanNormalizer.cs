@@ -210,6 +210,7 @@ public static class GenAiSpanNormalizer
                 CacheWriteInputTokens = cacheWrite,
                 CacheReadState = cacheReadState,
                 CacheWriteState = cacheWriteState,
+                ServiceRequestId = Text(attributes, GenAiAttributeNames.ServiceRequestId),
             };
         }
 

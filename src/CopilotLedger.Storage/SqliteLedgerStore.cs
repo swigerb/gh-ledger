@@ -1994,6 +1994,7 @@ public sealed class SqliteLedgerStore
         PricingStatus.UnrecognizedEndpoint => "unrecognized_endpoint",
         PricingStatus.InvalidUsage => "invalid_usage",
         PricingStatus.NotBillableOperation => "not_billable_operation",
+        PricingStatus.OtherProvider => "other_provider",
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
     };
 
