@@ -8,6 +8,7 @@ The samples come from one example: gh-ledger installed as the GitHub CLI extensi
 - [See what you spent](#see-what-you-spent)
 - [Find the most expensive prompts](#find-the-most-expensive-prompts)
 - [Compare agents](#compare-agents)
+- [Find context bloat](#find-context-bloat)
 - [Set a budget for a branch](#set-a-budget-for-a-branch)
 - [Catch a runaway loop](#catch-a-runaway-loop)
 - [Post a receipt on a pull request](#post-a-receipt-on-a-pull-request)
@@ -153,6 +154,83 @@ code-review      1         0      120.00       $1.20     $0.00        $0.00
 <!-- /sample -->
 
 `(none)` is Copilot's default agent, which reports no name. Subagents such as `explore`, and your custom agents, report their own names.
+
+## Find context bloat
+
+**Goal:** find the prompts whose context grows on every request, and see how much of it the prompt cache absorbs.
+
+Every model request sends the conversation so far, so an agent's input grows as it works. Input that the model's prompt cache already holds costs much less than uncached input. See how much of the input the cache served, by model:
+
+<!-- sample: cache -->
+```shell
+gh ledger status --cache
+```
+
+```text
+Cache efficiency by model in all repositories (last 30 days)
+
+Model            Spans  Cache reported      Input  Cache read  Cache write   Uncached   Output  Hit %
+claude-opus-5.5      7               7  2,900,000   1,450,000            0  1,450,000  127,000  50.0%
+mai-code-2           2               2  1,100,000     500,000            0    600,000   55,000  45.5%
+qwen3.8-27b          1               0    300,000         n/a          n/a        n/a    9,000    n/a
+gpt-6.1-sol          1               0    200,000         n/a          n/a        n/a   10,000    n/a
+
+2 of 11 spans reported no cache counters. Hit % and the cache columns leave them out; * marks a partial total.
+```
+<!-- /sample -->
+
+`Hit %` is the share of input read from the cache. This example's Foundry BYOK and local endpoints report no cache counters, so their rows show `n/a`: unknown, not a 0% hit rate. Add `--by branch`, `--by pr`, or `--by agent` to group the rows another way.
+
+Find the prompts that sent the most uncached input, and those whose input grew the most:
+
+<!-- sample: cache-bloat -->
+```shell
+gh ledger status --cache --bloat --limit 3
+```
+
+```text
+Context bloat in all repositories (last 30 days)
+
+Prompt chains by uncached input
+#  Started           Repository      Spans      Input  Uncached  Hit %  Trace
+1  2026-11-21 11:20  contoso/webapp      4  2,000,000   800,000  60.0%  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
+2  2026-11-21 09:05  contoso/webapp      2    700,000   450,000  35.7%  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00a1
+3  2026-11-03 10:30  contoso/webapp      1    300,000   300,000   0.0%  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00a7
+
+Prompt chains by input growth within one agent invocation and model
+#  Started           Repository      Agent   Model            Requests  First input  Peak input   Growth  Trace
+1  2026-11-21 11:20  contoso/webapp  (none)  claude-opus-5.5         4      357,500     642,500  285,000  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
+
+Prompt chains with requests that reported no cache counters, by estimated uncached input
+#  Started           Repository      Spans  Cache reported    Input  Est. uncached  Trace
+1  2026-11-21 15:40  contoso/webapp      1               0  300,000        300,000  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00d4
+2  2026-11-21 14:10  contoso/webapp      1               0  200,000        200,000  0f3c9a7e5d1b4f2a8c6e0d9b7a5c00c3
+
+Est. uncached is an estimate: it counts all input of a request without cache counters as uncached, as pricing does.
+```
+<!-- /sample -->
+
+The prompt that tripped the circuit breaker leads both lists. See each of its requests:
+
+<!-- sample: cache-turns -->
+```shell
+gh ledger status --cache --turns --trace 0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
+```
+
+```text
+Model requests in trace 0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2
+
+#  Started              Agent   Model              Input  Cache read  Cache write  Uncached  Output  Hit %   Growth
+1  2026-11-21 11:20:00  (none)  claude-opus-5.5  357,500     150,000            0   207,500  20,000  42.0%        -
+2  2026-11-21 11:21:30  (none)  claude-opus-5.5  452,500     250,000            0   202,500  20,000  55.2%  +95,000
+3  2026-11-21 11:23:00  (none)  claude-opus-5.5  547,500     350,000            0   197,500  20,000  63.9%  +95,000
+4  2026-11-21 11:24:30  (none)  claude-opus-5.5  642,500     450,000            0   192,500  20,000  70.0%  +95,000
+
+Growth is the change in input from the previous request by the same agent invocation and model; - marks its first request.
+```
+<!-- /sample -->
+
+Each request added 95,000 tokens of context. The cache served more of it each time, but every request still sent about 200,000 uncached tokens. Growth compares a request only with earlier requests of the same agent invocation and model, so a subagent's requests never mix with its parent's. To see every request of a Copilot session, use `--conversation <id>` instead of `--trace`, with the session ID that `--json` output shows as `conversationId`. For the columns and the JSON fields, see [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
 
 ## Set a budget for a branch
 

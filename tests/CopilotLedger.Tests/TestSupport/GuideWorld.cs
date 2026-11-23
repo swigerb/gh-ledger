@@ -197,10 +197,10 @@ public sealed class GuideWorld : IAsyncDisposable
         [
             (Chat("a1", "c1", "2026-11-21T14:05:00Z", "claude-opus-5.5", null, null, 400_000, 15_000, 250_000), "feature/search"),
             (Chat("a1", "c2", "2026-11-21T14:07:00Z", "mai-code-2", null, "explore", 300_000, 15_000), "feature/search"),
-            (Chat("b2", "c1", "2026-11-21T16:20:00Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
-            (Chat("b2", "c2", "2026-11-21T16:21:30Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
-            (Chat("b2", "c3", "2026-11-21T16:23:00Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
-            (Chat("b2", "c4", "2026-11-21T16:24:30Z", "claude-opus-5.5", null, null, 500_000, 20_000, 300_000), "feature/search"),
+            (Chat("b2", "c1", "2026-11-21T16:20:00Z", "claude-opus-5.5", null, null, 357_500, 20_000, 150_000), "feature/search"),
+            (Chat("b2", "c2", "2026-11-21T16:21:30Z", "claude-opus-5.5", null, null, 452_500, 20_000, 250_000), "feature/search"),
+            (Chat("b2", "c3", "2026-11-21T16:23:00Z", "claude-opus-5.5", null, null, 547_500, 20_000, 350_000), "feature/search"),
+            (Chat("b2", "c4", "2026-11-21T16:24:30Z", "claude-opus-5.5", null, null, 642_500, 20_000, 450_000), "feature/search"),
             (Chat("c3", "c1", "2026-11-21T19:10:00Z", "gpt-6.1-sol", "contoso.openai.azure.com", null, 200_000, 10_000), "feature/search"),
             (Chat("d4", "c1", "2026-11-21T20:40:00Z", "qwen3.8-27b", "127.0.0.1", null, 300_000, 9_000), "feature/search"),
             (Chat("e5", "c1", "2026-11-19T15:00:00Z", "claude-opus-5.5", null, "code-review", 200_000, 20_000), "fix/login-timeout"),
@@ -209,6 +209,24 @@ public sealed class GuideWorld : IAsyncDisposable
         ];
         await store.RecordAsync(
             spans.Select(item => new LedgerEntry(item.Span, rates.Calculate(item.Span), Context(item.Branch))).ToArray());
+
+        // Each prompt's span tree: the default agent's invoke_agent span (span ID ending a0), a subagent's invoke_agent
+        // span (e0) below it, and each request's chat span below its agent's. Links already recorded are kept.
+        List<GenAiSpanLink> links = [];
+        foreach (NormalizedGenAiSpan span in spans.Select(item => item.Span))
+        {
+            string root = span.SpanId[..14] + "a0";
+            links.Add(Link(span, root, null, null, "invoke_agent"));
+            if (span.AgentName is not null)
+            {
+                links.Add(Link(span, span.ParentSpanId!, root, span.AgentName, "invoke_agent"));
+            }
+
+            links.Add(Link(span, span.SpanId, span.ParentSpanId, span.AgentName, "chat"));
+        }
+
+        await store.RecordSpanLinksAsync(links);
+        await store.BackfillFromAgentSpansAsync(spans.Select(item => item.Span.TraceId));
         await new CircuitBreakerMonitor(store, new RecordingAlertSink()).EvaluateAsync(
             spans.Select(item => item.Span.TraceId));
         foreach (BreakerTrip trip in await store.GetOpenBreakerTripsAsync(BreakerTripFilter.All))
@@ -228,7 +246,8 @@ public sealed class GuideWorld : IAsyncDisposable
         Slug);
 
     // trace and span are the last characters of 32- and 16-character IDs. GitHub-hosted models report cache counters, and
-    // this example's Foundry BYOK and local endpoints (the spans with a serverAddress) don't.
+    // this example's Foundry BYOK and local endpoints (the spans with a serverAddress) don't. A request's parent is its
+    // agent's invoke_agent span: the default agent's ends in a0, and a subagent's in e0.
     private static NormalizedGenAiSpan Chat(
         string trace,
         string span,
@@ -240,6 +259,7 @@ public sealed class GuideWorld : IAsyncDisposable
         long outputTokens,
         long cacheReadInputTokens = 0) =>
         TestSpans.Chat(
+            parentSpanId: "5e8a1c3f7b9d" + trace.PadLeft(2, '0') + (agent is null ? "a0" : "e0"),
             startTime: Utc(start),
             requestModel: model,
             serverAddress: serverAddress,
@@ -254,4 +274,20 @@ public sealed class GuideWorld : IAsyncDisposable
             TraceId = "0f3c9a7e5d1b4f2a8c6e0d9b7a5c" + trace.PadLeft(4, '0'),
             SpanId = "5e8a1c3f7b9d" + trace.PadLeft(2, '0') + span,
         };
+
+    private static GenAiSpanLink Link(
+        NormalizedGenAiSpan chat,
+        string spanId,
+        string? parentSpanId,
+        string? agent,
+        string operation) => new()
+    {
+        TraceId = chat.TraceId,
+        SpanId = spanId,
+        ParentSpanId = parentSpanId,
+        OperationName = operation,
+        AgentName = agent,
+        ConversationId = chat.ConversationId,
+        StartTime = chat.StartTime,
+    };
 }

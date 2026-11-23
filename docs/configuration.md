@@ -49,6 +49,12 @@ The built-in prices are GitHub's rates for every text model on [Models and prici
 | `unrecognized_endpoint` | The endpoint isn't GitHub, Foundry, or local | Add its host to the matching `hostSuffixes` or `additionalHosts` list |
 | `invalid_usage` | Token counts are inconsistent, for example more cached tokens than input tokens | Report it; it usually means a telemetry exporter bug |
 
+### Cache tokens
+
+A request's input tokens include the tokens the model read from its prompt cache and the tokens it wrote to it. Copilot reports the cache-read and cache-write counts only when they aren't zero. Cache reads are priced at `cachedInputPer1M`, cache writes at `cacheWritePer1M`, and the rest of the input at `inputPer1M`. When a request reports neither count, as many Foundry BYOK and local endpoints do, all of its input is priced as uncached input.
+
+Cache-efficiency reports, such as `gh ledger status --cache`, don't treat such a request as a cache miss: its cache use is unknown, so hit ratios and observed cache totals leave it out, and a group of such requests shows `n/a` rather than `0.0%`. See [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
+
 ## Why Foundry BYOK is unpriced by default
 
 With bring-your-own-key (BYOK), Microsoft Foundry bills you directly, not GitHub. Azure prices depend on region, deployment type, and your agreement, so CopilotLedger can't know yours.
