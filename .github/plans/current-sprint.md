@@ -5,17 +5,17 @@
 | Architect | `ledger-architect` |
 | Builder | `ledger-builder` (MAI Code 2) |
 | Target | .NET 10 (`net10.0`), SDK 10.0.x, zero Docker |
-| Plan written | 2026-11-23, against merged Sprint 6 (`main` at `3aaf971`) |
-| Requirements | Issue [#61](https://github.com/swigerb/gh-ledger/issues/61), "Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings" |
+| Plan written | 2026-11-23, against merged Sprint 6 (`main` at `3aaf971`); Tasks 12 and 13 added the same day, after Task 5, for #67 |
+| Requirements | Issue [#61](https://github.com/swigerb/gh-ledger/issues/61), "Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings"; issue [#67](https://github.com/swigerb/gh-ledger/issues/67), "Claude spans from Copilot CLI 1.0.114 bill as UnknownModel (dated response model id)", added by the coordinating session |
 | Status | Current sprint. Sprint 6 is complete and archived at `.github/plans/archive/sprint-6.md`. |
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–11 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–13 are sequential, and each builds on the ones before it. Tasks 12 and 13 come from the coordinating session's scope addition of issue #67 (see "Starting point"); they were added after Task 5 was committed, and Tasks 1–11 didn't change.
 
-This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-6.md`, then each task as its own commit, `Sprint 7 Task N: <Title>`, on branch `swigerb-sprint-7-dual-lens-costing-engine`, and opens one pull request titled exactly "Sprint 7: Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings", with `Closes #61`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
+This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-6.md`, then each task as its own commit, `Sprint 7 Task N: <Title>`, on branch `swigerb-sprint-7-dual-lens-costing-engine`, and opens one pull request titled exactly "Sprint 7: Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings", with `Closes #61` and `Fixes #67`. The plan change that added Tasks 12 and 13 is its own commit, before Task 6. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
-All of this plan's code, tests, data, workflow changes, and docs are **copy exactly**. The architect built every task in a scratch repository made from `git archive 3aaf971`, outside this repository's worktree. Each task compiled with `TreatWarningsAsErrors` and passed the whole suite: 831, 864, 934, 939, 949, 955, 963, 968, 970, 982, and 986 tests after Tasks 1–11. The architect then applied this plan's blocks with a script, task by task and in order, to a fresh `git archive 3aaf971` with Windows line endings (as a `core.autocrlf=true` checkout has them), built and tested after each task, and got the same counts and, line endings aside, the same files. Copy each block character for character, including every comment line, `using` directive, blank line, line of JSON, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs.
+All of this plan's code, tests, data, workflow changes, and docs are **copy exactly**. The architect built every task in a scratch repository made from `git archive 3aaf971`, outside this repository's worktree. Each task compiled with `TreatWarningsAsErrors` and passed the whole suite: 831, 864, 934, 939, 949, 955, 963, 968, 970, 982, 986, 1005, and 1018 tests after Tasks 1–13. The architect then applied this plan's blocks with a script, task by task and in order, to a fresh `git archive 3aaf971` with Windows line endings (as a `core.autocrlf=true` checkout has them), built and tested after each task, and got the same counts and, line endings aside, the same files. Copy each block character for character, including every comment line, `using` directive, blank line, line of JSON, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs.
 
 Each task's specification lists its files, summarizes its contracts and algorithms for review, and then gives its code under "Code (copy exactly)". The summaries aren't code to write; the code section is. It has two kinds of blocks:
 
@@ -41,11 +41,14 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [ ] Task 9: API-Equivalent USD in Receipts (CopilotLedger.Cli, docs & tests). `export-pr` adds an `API-equivalent (retail)` line and column, in words rather than marks, and the three fields to its JSON data, within the 65,536-byte cap.
 - [ ] Task 10: What-If Pricing with --pricing (CopilotLedger.Cli, docs & tests). `status`, `branch`, `agents`, `top-prompts`, and `export-pr` take `--pricing <path>`, a complete rate card whose API list prices replace the recorded API-equivalent results for that report only, labeled in text and JSON; `rates validate --pricing <path>` checks such a file with the same messages.
 - [ ] Task 11: API-Equivalent USD over MCP (CopilotLedger.Mcp, docs & tests). `get_branch_ledger`, `get_agent_breakdown`, and `get_top_expensive_prompts` add the three fields, `orderBy` accepts `apiEquivalentUsd`, and no tool takes a file path.
+- [ ] Task 12: Resolve Dated Model Ids (CopilotLedger.Core, docs & tests). Fixes #67: a GitHub or Foundry BYOK request whose response model the channel doesn't have, such as Copilot CLI 1.0.114's `claude-haiku-4-5-20251001`, is priced as its request model, and the built-in GitHub models gain the vendor ids and dated snapshot ids that their API list prices already have as aliases.
+- [ ] Task 13: API-Equivalent Request-Model Fallback (CopilotLedger.Core, Storage, docs & tests). A request whose recorded model no section of the rates has is priced at API list prices as its request model, as #61 asks for Foundry BYOK requests, and a known model is never replaced. `ApiEquivalentRequest` gains `RequestModel`, which the backfill and what-if pricing read from `request_model`, so they agree with ingestion.
 
 ## Starting point
 
 - Sprint 6 is complete. Its Tasks 1–12 merged in PR #66, squash-merged as `3aaf971` from `c94d590`. On 2026-11-23, at `3aaf971`, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors and `dotnet test CopilotLedger.slnx` passes 804 tests (0 failed, 0 skipped), with SDK 10.0.115 (`global.json` asks for 10.0.100 with `rollForward: latestFeature`). Sprint 6's plan is archived at `.github/plans/archive/sprint-6.md`, with its amendments. The latest release is v0.4.1, at `15003fb` (Sprint 5).
 - Issue #61 is the requirements source. Its "Prescriptive Implementation Plan" and all 15 acceptance criteria are implemented here, with the deviations listed under "Design decisions"; its names are proposals. The coordinating session added these requirements: the migration is version 5, because Sprint 6 took version 4; every list price is re-verified on its vendor's page; spans priced without cache counters are disclosed as estimates; old binaries keep working with the release's rates; and budgets stay on billed credits.
+- **Scope addition: issue #67.** On 2026-11-23, after Tasks 1–5 were committed on the branch (plan `0dc9961`, then `6ca27c3`, `e6fa3d8`, `efae9bf`, `63ab811`, and `5cb4c78`, at 949 tests), the coordinating session added #67 to this sprint, because it's in the rate card and calculator that this sprint owns. Tasks 12 and 13 were appended for it; Tasks 1–11 didn't change. #67's six acceptance criteria are requirements too, and its out-of-scope item stays out: requests already recorded as `unknown_model` keep their billed columns.
 - Merged behavior this plan depends on (read from the code at `3aaf971`):
   - **Rate card.** The embedded `src/CopilotLedger.Core/Pricing/rates.json` has `schemaVersion` 1, `ratesVersion` `2026-11-20`, 34 `githubAiCredits` models, no `foundryByok` models, and `localOffload.baselineModel` `mai-code-2`. `RateCardReader.ReadRoot` rejects unknown keys and accepts only `schemaVersion` 1. `JsonRateCardCalculator` merges an overlay by model `id` (`MergeModels`), checks identities across the merge, and resolves the local baseline among the GitHub models.
   - **Pricing.** `Calculate` normalizes the response model, or else the request model, and returns `NotBillableOperation` for a non-inference operation and `InvalidUsage` for inconsistent token counts. It then classifies the endpoint in this order: local (loopback, a local host or provider, or a known local model without a host), Foundry BYOK (host suffix or provider), GitHub (no host, or a GitHub host suffix), and otherwise `UnrecognizedEndpoint`. `ModelId` is the canonical id of the card that matched, or else the normalized model. Rates have at most 6 decimal places and are at most 1,000,000, and `AiCreditMath.CostUsd` is `tokens × rate / 1,000,000` in `decimal`, so every cost is a whole number of pico-USD.
@@ -138,6 +141,13 @@ So 31 of the 34 GitHub models have a vendor list price. For 30 of them the per-t
 
 - **Code** (at `15003fb`, tag `v0.4.1`): `RatesUpdate.RunAsync` calls `JsonRateCardCalculator.Parse` on the downloaded text before it writes anything, and `RateCardReader.ValidateSchemaVersion` throws `schemaVersion: must be 1`, so the command prints `The downloaded rates are invalid: schemaVersion: must be 1` and exits 1, keeping `rates.downloaded.json`.
 - **Scratch run.** The architect built `git archive 15003fb` with a throwaway test (not part of this plan) that ran `rates update` through `FakeHttpHandler`. Given Task 3's card, it exited 1 with exactly that message on standard error and left an existing `rates.downloaded.json` byte for byte; given the derived `schemaVersion` 1 card that Task 4's workflow publishes as `rates.json`, it printed `Updated rates from 2026-11-20 to 2026-11-23.`, and `rates validate` and `status` then used it (`Rates:   2026-11-23 (downloaded)`). `jq` isn't installed on the architect's machine, so the derivation `jq '.schemaVersion = 1 | del(.apiEquivalent)'` was reproduced with `System.Text.Json.Nodes`, as `PublishedRates.SchemaVersion1` (Task 4) does.
+
+### Issue #67: dated model ids
+
+- **The report.** Issue #67, opened on 2026-11-23 from a Sprint 8 OpenTelemetry capture of the checksum-verified Copilot CLI 1.0.114 release: its Claude `chat` spans have `gen_ai.response.model` `claude-haiku-4-5-20251001` and `gen_ai.request.model` `claude-haiku-4.5`. Copilot CLI 1.0.103 reports `claude-haiku-4.5`, and OpenAI models aren't affected. The architect didn't run Copilot CLI, so these values come from the issue.
+- **The code**, at `3aaf971` and through Task 11: `Calculate` looks up the normalized response model, or the request model when there's none; `FindModel` needs an exact id or alias; and no `githubAiCredits` model has aliases. So #67's request is `UnknownModel`, with 0 AI credits. Task 3's AR4 asserts exactly that for the vendor ids, whose API-equivalent prices resolve through the `apiEquivalent` aliases.
+- **The ids.** Task 12's GitHub aliases are the 11 vendor ids and dated snapshot ids of Task 3's `apiEquivalent` section, read on the vendors' pages on 2026-11-23 (see "Vendor API list prices"). `claude-haiku-4-5-20251001` is also the id that #67 observed.
+- **gh-ledger 0.4.0 and 0.4.1** have the same `FindModel`, `rates update`, and `LoadBase`; `git diff v0.4.0 v0.4.1` changes none of them. The architect's throwaway test on `git archive 15003fb` found: with its built-in rates, #67's request is `UnknownModel` with 0 AI credits; after `rates update` takes the `schemaVersion` 1 `rates.json` derived from Task 12's card (`Updated rates from 2026-11-20 to 2026-11-23.`), it's `Priced` as `claude-haiku-4.5`, 4 AI credits, with or without its request model; and an unknown dated id with request model `claude-haiku-4.5` stays `UnknownModel`, because 0.4.1 doesn't try the request model.
 
 ### .NET, SQLite, and hashing (probed in the scratch build)
 
@@ -242,7 +252,19 @@ The summary adds `- **API-equivalent (retail):**` after the other spend lines: `
 
 ### Docs
 
-`docs/configuration.md` documents schema version 2, the `apiEquivalent` section and its overlay rules, the built-in prices and their policies, API-equivalent pricing and estimates, the backfill, `--pricing`, and the `rates.v2.json` asset. `docs/cli.md` documents the column, its marks and footnotes, the lens table, the JSON fields and their names, `--pricing`, the backfill, the receipt line, and the MCP fields. `docs/releasing.md` lists both rates assets. `docs/guide.md` explains the column and `--pricing`, and its `status`, `status-first`, `branch`, `agents`, `top-prompts`, `receipt`, and `mcp` samples change to match, checked by `GuideSamplesTests`. `README.md` lists the feature.
+`docs/configuration.md` documents schema version 2, the `apiEquivalent` section and its overlay rules, the built-in prices and their policies, API-equivalent pricing and estimates, the backfill, `--pricing`, and the `rates.v2.json` asset. `docs/cli.md` documents the column, its marks and footnotes, the lens table, the JSON fields and their names, `--pricing`, the backfill, the receipt line, and the MCP fields. `docs/releasing.md` lists both rates assets. `docs/guide.md` explains the column and `--pricing`, and its `status`, `status-first`, `branch`, `agents`, `top-prompts`, `receipt`, and `mcp` samples change to match, checked by `GuideSamplesTests`. `README.md` lists the feature. Task 12 adds "Which model prices a request" to `docs/configuration.md`, and Task 13 adds the API-equivalent fallback to its "API-equivalent prices".
+
+### Model resolution (Tasks 12 and 13; deviation D8)
+
+- **Billing (Task 12).** For a GitHub or Foundry BYOK request, CopilotLedger looks in the channel's models for the reported model (the response model, or the request model when there's none), and then for the request model. #67 says that "a response model that matches nowhere falls back to the request model"; this plan reads "nowhere" as "not in the channel's models", as the coordinating session proposed. If a response id that another section knows, such as an `apiEquivalent` alias missing from a user's GitHub model, blocked the fallback, a billable request would again be recorded with 0 AI credits, which is the bug. The matched model's canonical id becomes `ModelId`, and the API-equivalent lens prices `ModelId`, so both lenses price the same model.
+- **No match.** The status stays `UnknownModel` or `ByokUnpriced`, and `ModelId` stays the normalized reported model, as before, so reports show the name to add as an alias.
+- **Foundry BYOK** gets the same fallback. Foundry requests often report a deployment name as the request model, which `docs/configuration.md` already tells users to list as an alias, and a dated id as the response model.
+- **Local requests don't change.** A local request's model is only a name, and its savings never depend on it. Without an endpoint, the local-model match decides the channel, so trying the request model there could move a request that a GitHub model answered to the local channel.
+- **Aliases.** The GitHub models gain exactly the vendor ids and dated snapshot ids that Task 3 gives their API list prices (MR6), under the same policy: no moving aliases such as `grok-4.5-latest`. They also bill a dated id that comes without a usable request model, such as one with Copilot's `auto`. `ratesVersion` stays `2026-11-23`, because no release has this card yet, and the API rate card hash doesn't cover GitHub aliases.
+- **Overlays.** An overlay that added one of these ids as its own GitHub model, for example to work around #67, now repeats a built-in alias, so CopilotLedger rejects it with a `duplicate model identity in the merged rates` error that names the id (MR7), as for any other duplicate, and `docs/configuration.md` says to remove it. Letting the overlay's entry shadow the alias would change the merge rules for one case.
+- **Older versions.** The `rates.json` that releases publish for gh-ledger 0.4.1 and earlier keeps the GitHub aliases, so after `rates update` those versions bill the aliased ids too (MR5, and the scratch run in "Verified facts"), though not other dated ids.
+- **Deviation D8, the API-equivalent fallback (Task 13).** #61 asks that a Foundry BYOK request get its API-equivalent cost "from the request or response model ID when it matches". Through Task 12, the lens prices `ModelId`, which is the response model when the channel has neither model. Task 13 prices the request model instead when no section of the card has `ModelId` at all, for every request that isn't local. A model the card knows is never replaced, so a request that `mai-code-2` answered isn't priced as Claude Haiku 4.5 because it asked for it, and the credit lens's match always wins. `ApiEquivalentRequest` gains `RequestModel`, and the backfill and what-if pricing read the stored `request_model`, so all three give a request the same result.
+- **Out of scope (#67).** Requests already recorded as `unknown_model` keep their billed columns. Those recorded before schema version 5 get API-equivalent prices from the backfill, through the `apiEquivalent` aliases or Task 13's fallback.
 
 ### Deviations from issue #61
 
@@ -256,6 +278,8 @@ The summary adds `- **API-equivalent (retail):**` after the other spend lines: `
 | D5 | What-if streams the "recorded local baseline identity" | Local spans use the what-if card's own local retail baseline | Matches ingestion with that card; the recorded id is the billing card's |
 | D6 | Cell rules `Unpriced`, `$12.34*`, `$12.34`; an example footnote; a three-lens block | The same rules plus `~` for estimates, counting footnotes, and a lens table with `Local at API prices`; `$0.00` for an empty group | Discloses Sprint 6's cache-counter uncertainty; the issue's footnote and block are examples |
 | D7 | Point `RatesUpdate` at `rates.v2.json`; keep publishing v1 `rates.json` | Also fall back to `rates.json` on 404, refuse a later v1 card, and ignore a later v1 download in `LoadBase` | Keeps the first v2 release and old downloads from dropping the lens |
+| D8 | A BYOK span's API-equivalent cost comes "from the request or response model ID when it matches" | Every request that isn't local: its recorded model, or its request model when no section of the rates has the recorded one (Task 13) | One rule for every channel; a known model without a list price is never priced as another |
+| #67 | — | Scope addition, Tasks 12–13: billing tries the request model when the channel has no model for the response model, and the GitHub models gain the vendor ids as aliases | Added by the coordinating session; the rate card and calculator are this sprint's |
 
 ### Acceptance criteria traceability
 
@@ -269,13 +293,24 @@ The summary adds `- **API-equivalent (retail):**` after the other spend lines: `
 | A local span gets its cost from the baseline's entry; `localSavedUsd` unchanged (regression) | 2, 5, 8 | AP4, AS1, AS2, AE3 |
 | Migrating keeps every row and value; legacy rows have `api_equivalent_status IS NULL`; `--dry-run` writes nothing; without it, only `NULL` rows change and no credit, BYOK, or local column (before/after comparison) | 5, 6 | AS4, S1, SL1, SL8, SL10, SL11, AB1, AB2, RB1, RB2 |
 | `--pricing` changes only the retail comparison on all affected commands, labels the source, keeps recorded credit, BYOK, and savings values and warnings, writes nothing; an invalid file fails with the `rates validate` message | 7, 10 | WI1 (5), WI2, WI3, WI4, WF1, WF2 (4), WF3 (5), WF4, WF5 (D4) |
-| The backfill records its own version and hash without overwriting billing provenance; a retail-mapped model on an unrecognized endpoint gets a retail estimate | 2, 5, 6 | AB2, AP6, AS1 |
+| The backfill records its own version and hash without overwriting billing provenance; a retail-mapped model on an unrecognized endpoint gets a retail estimate | 2, 5, 6, 13 | AB2, AP6, AS1, RF1, AB4 |
 | `status`, `branch`, `agents`, and `top-prompts` show `API equiv USD` with the Unpriced, partial, and priced rules; JSON has `apiEquivalentUsd` and `apiEquivalentUnpricedSpans` | 8 | AE1, AE2, AE3, AE4, StatusText, RP4, RP6, RP7, RP15, GS2 |
 | MCP tools return the fields; `orderBy: apiEquivalentUsd` works; the schema rejects unknown arguments; no argument takes a path | 11 | MC1, MC2, MC5, MC6, MC8 (3 more `pricing` cases), MC15 |
 | An older binary given the version 2 card fails closed during `rates update`, keeps its file, and prints a clear message | 4 | Verified on v0.4.1 (see "Verified facts"); RU12 (the same path in new binaries); RU11, RU13, RU14 |
 | No `float`, `double`, or `REAL` for money; invariant culture, verified under `de-DE` | all | Review; AE5, CR6 |
 | `docs/configuration.md`, `docs/cli.md`, and `docs/guide.md` updated; `GuideSamplesTests` passes | 1–4, 6, 8–11 | GS1, GS2, GS6, GS7, RateOverlayTests (`rates-error-example`) |
 | Build and tests exit 0 with warnings as errors; hermetic, no network, no `git` | all | the whole suite |
+
+### Issue #67 acceptance criteria traceability
+
+| Issue #67 acceptance criterion | Tasks | Tests |
+|---|---|---|
+| A span with response model `claude-haiku-4-5-20251001` and request model `claude-haiku-4.5`, on the Copilot host, is `Priced` at Claude Haiku 4.5's GitHub rates, with non-zero, exact AI credits | 12 | MR1, IG12 |
+| A response model that matches nowhere falls back to the request model; with neither, the result is still `UnknownModel` | 12 | MR1, MR2, MR3 |
+| An unknown response model never overrides a request model that does match | 12 | MR1, MR3 |
+| Existing exact-id behavior is unchanged, and the API-equivalent lens prices the same canonical model | 12, 13 | MR1, MR3, IG12, AR4, RF2, RF3; every earlier test |
+| `docs/configuration.md` documents the model-resolution order | 12, 13 | Review: "Which model prices a request" and "API-equivalent prices" |
+| `dotnet build CopilotLedger.slnx` and `dotnet test CopilotLedger.slnx` pass | 12, 13 | the whole suite (1018 tests) |
 
 ## Task 1 specification: Rate-Card Schema Version 2
 
@@ -11599,6 +11634,1289 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 12 specification: Resolve Dated Model Ids
+
+This task fixes issue #67, which the coordinating session added to this sprint (see "Starting point" and "Model resolution (Tasks 12 and 13)"). It changes only how a model name finds its model; prices, statuses, and storage don't change.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs` | `Calculate` also normalizes the request model; GitHub and Foundry BYOK requests look their model up with a new `FindModel(models, model, requestModel)` overload |
+| `src/CopilotLedger.Core/Pricing/PricingStatus.cs` | `UnknownModel`'s comment |
+| `src/CopilotLedger.Core/Pricing/rates.json` | 11 aliases on 10 `githubAiCredits` models, and one more note |
+| `tests/CopilotLedger.Tests/Pricing/ModelResolutionTests.cs` | New: MR1–MR7 |
+| `tests/CopilotLedger.Tests/Pricing/BuiltInApiRatesTests.cs` | AR4: the vendor ids are now billed |
+| `tests/CopilotLedger.Tests/Otlp/LedgerIngestorTests.cs` | New IG12 |
+| `docs/configuration.md` | New "Which model prices a request"; the `byok_unpriced` and `unknown_model` rows; what the published `rates.json` does for gh-ledger 0.4.1 and earlier |
+
+### Contracts
+
+- `Calculate` keeps its signature. A GitHub or Foundry BYOK request is priced as the channel's model that its reported model names (the normalized response model, or the normalized request model when the response model is blank), by id or alias; when the channel has no such model, as the one that its normalized request model names. `ModelId` and `RateCardModelId` are that model's canonical id, and `ApiEquivalent` prices the same `ModelId`, so both lenses price the same model.
+- When the channel has neither model, nothing changes: `UnknownModel` (GitHub) or `ByokUnpriced` (Foundry BYOK), with `ModelId` the normalized reported model and no cost.
+- Local requests, `NotBillableOperation`, `InvalidUsage`, and `UnrecognizedEndpoint` don't change. A local request still matches local models only by its reported model.
+- The built-in GitHub models gain the aliases that their API list prices have (Task 3), and no others:
+
+| GitHub model | Aliases |
+|---|---|
+| `claude-opus-5.5` | `claude-opus-5-5` |
+| `claude-sonnet-5.5` | `claude-sonnet-5-5` |
+| `gpt-5.4-nano` | `gpt-5.4-nano-2026-03-17` |
+| `claude-haiku-4.5` | `claude-haiku-4-5`, `claude-haiku-4-5-20251001` |
+| `claude-haiku-5.5` | `claude-haiku-5-5` |
+| `claude-sonnet-4` | `claude-sonnet-4-20250514` |
+| `claude-sonnet-4.6` | `claude-sonnet-4-6` |
+| `claude-opus-4.8` | `claude-opus-4-8` |
+| `claude-fable-5.1` | `claude-fable-5-1` |
+| `claude-fable-5.2` | `claude-fable-5-2` |
+
+- `ratesVersion` stays `2026-11-23` and `schemaVersion` 2. The canonical API rate card hash covers only the `apiEquivalent` section, so it stays `634d783f8123f6aa8555220e830f7016b883083af08a043f29ca975a6b725045` (AR5).
+
+### Algorithm
+
+1. `model` = the normalized response model, or the normalized request model when the response model is blank; `requestModel` = the normalized request model (null when blank).
+2. The operation, token, and endpoint checks run as before, with `model`.
+3. Foundry BYOK: `card` = `FindModel(foundry, model)`, or else `FindModel(foundry, requestModel)` when `requestModel` isn't null. No card: `ByokUnpriced` with `ModelId` = `model`.
+4. GitHub: the same with the GitHub models. No card: `UnknownModel` with `ModelId` = `model`.
+5. Everything after the lookup (window, tier, price, `ApiEquivalent` for `card.ModelId`) is unchanged.
+
+### Code (copy exactly)
+
+Edit 1 of 4 in `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+
+```csharp
+        ArgumentNullException.ThrowIfNull(span);
+
+        string? model = NormalizeModel(
+            !string.IsNullOrWhiteSpace(span.ResponseModel)
+                ? span.ResponseModel
+                : span.RequestModel);
+
+        if (!GenAiOperationNames.IsInference(span.OperationName))
+```
+
+with:
+
+```csharp
+        ArgumentNullException.ThrowIfNull(span);
+
+        // The reported model is the response model, or the request model when there's no response model. A priced
+        // channel that has no model for it tries the request model too (see FindModel).
+        string? model = NormalizeModel(
+            !string.IsNullOrWhiteSpace(span.ResponseModel)
+                ? span.ResponseModel
+                : span.RequestModel);
+        string? requestModel = NormalizeModel(span.RequestModel);
+
+        if (!GenAiOperationNames.IsInference(span.OperationName))
+```
+
+Edit 2 of 4 in `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+
+```csharp
+            }
+
+            ModelRateCard? card = FindModel(_foundryModels, model);
+            if (card is null)
+            {
+```
+
+with:
+
+```csharp
+            }
+
+            ModelRateCard? card = FindModel(_foundryModels, model, requestModel);
+            if (card is null)
+            {
+```
+
+Edit 3 of 4 in `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+
+```csharp
+            }
+
+            ModelRateCard? card = FindModel(_githubModels, model);
+            if (card is null)
+            {
+```
+
+with:
+
+```csharp
+            }
+
+            ModelRateCard? card = FindModel(_githubModels, model, requestModel);
+            if (card is null)
+            {
+```
+
+Edit 4 of 4 in `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+
+```csharp
+            card.Aliases.Contains(model, StringComparer.Ordinal));
+
+    private static PricedSelection? Select(ModelRateCard card, DateTimeOffset instant, long inputTokens)
+    {
+```
+
+with:
+
+```csharp
+            card.Aliases.Contains(model, StringComparer.Ordinal));
+
+    // The model in models for a request: the one its reported model names, or else the one its request model names.
+    // So a response model that models doesn't have, such as a vendor's dated id, never hides a request model that it
+    // has, and one that it has is never replaced. Null when models has neither.
+    private static ModelRateCard? FindModel(IEnumerable<ModelRateCard> models, string model, string? requestModel) =>
+        FindModel(models, model) ?? (requestModel is null ? null : FindModel(models, requestModel));
+
+    private static PricedSelection? Select(ModelRateCard card, DateTimeOffset instant, long inputTokens)
+    {
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Pricing/PricingStatus.cs`, replace:
+
+```csharp
+    LocalOffload,           // Local: billed 0, savings priced at the baseline model
+    ByokUnpriced,           // FoundryByok endpoint, but no BYOK rate for the model
+    UnknownModel,           // no model on the span, or the model isn't in the channel's table
+    NoRateForDate,          // model known, but no window covers StartTime
+    UnrecognizedEndpoint,   // host isn't local, Foundry, or GitHub
+```
+
+with:
+
+```csharp
+    LocalOffload,           // Local: billed 0, savings priced at the baseline model
+    ByokUnpriced,           // FoundryByok endpoint, but no BYOK rate for the model
+    UnknownModel,           // no model on the span, or neither reported model is in the channel's table
+    NoRateForDate,          // model known, but no window covers StartTime
+    UnrecognizedEndpoint,   // host isn't local, Foundry, or GitHub
+```
+
+Edit 1 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+    "gemini-4-argon and gemini-3.8-flash have no published price after their promotions, so later requests are recorded as no_rate_for_date until a price is added.",
+    "Model ids are the ids Copilot reports. gpt-5.4-nano, claude-sonnet-4, claude-opus-4.8, claude-fable-5, claude-fable-5.1, claude-fable-5.2, gemini-4-neon, grok-4.5, and kimi-k3 are derived from the pricing page's display names. Claude Opus 4.8 (fast mode) is omitted because its id is unknown.",
+    "foundryByok.models is empty because Azure prices vary by region, deployment type, and agreement; add yours in ~/.copilot-ledger/rates.json (see docs/configuration.md).",
+    "Local spans bill 0 USD; savings price the same tokens at the GitHub rates of localOffload.baselineModel. localOffload.models maps local runtime ids to one canonical model.",
+```
+
+with:
+
+```json
+    "gemini-4-argon and gemini-3.8-flash have no published price after their promotions, so later requests are recorded as no_rate_for_date until a price is added.",
+    "Model ids are the ids Copilot reports. gpt-5.4-nano, claude-sonnet-4, claude-opus-4.8, claude-fable-5, claude-fable-5.1, claude-fable-5.2, gemini-4-neon, grok-4.5, and kimi-k3 are derived from the pricing page's display names. Claude Opus 4.8 (fast mode) is omitted because its id is unknown.",
+    "githubAiCredits aliases add the vendors' own API ids and dated snapshot ids, the same as apiEquivalent's, because Copilot can report them: Copilot CLI 1.0.114 reports claude-haiku-4.5's response model as claude-haiku-4-5-20251001.",
+    "foundryByok.models is empty because Azure prices vary by region, deployment type, and agreement; add yours in ~/.copilot-ledger/rates.json (see docs/configuration.md).",
+    "Local spans bill 0 USD; savings price the same tokens at the GitHub rates of localOffload.baselineModel. localOffload.models maps local runtime ids to one canonical model.",
+```
+
+Edit 2 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "claude-opus-5.5",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "claude-opus-5.5",
+        "aliases": ["claude-opus-5-5"],
+        "windows": [
+          {
+```
+
+Edit 3 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "claude-sonnet-5.5",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "claude-sonnet-5.5",
+        "aliases": ["claude-sonnet-5-5"],
+        "windows": [
+          {
+```
+
+Edit 4 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "gpt-5.4-nano",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "gpt-5.4-nano",
+        "aliases": ["gpt-5.4-nano-2026-03-17"],
+        "windows": [
+          {
+```
+
+Edit 5 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "claude-haiku-4.5",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "claude-haiku-4.5",
+        "aliases": ["claude-haiku-4-5", "claude-haiku-4-5-20251001"],
+        "windows": [
+          {
+```
+
+Edit 6 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "claude-haiku-5.5",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "claude-haiku-5.5",
+        "aliases": ["claude-haiku-5-5"],
+        "windows": [
+          {
+```
+
+Edit 7 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "claude-sonnet-4",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "claude-sonnet-4",
+        "aliases": ["claude-sonnet-4-20250514"],
+        "windows": [
+          {
+```
+
+Edit 8 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "claude-sonnet-4.6",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "claude-sonnet-4.6",
+        "aliases": ["claude-sonnet-4-6"],
+        "windows": [
+          {
+```
+
+Edit 9 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "claude-opus-4.8",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "claude-opus-4.8",
+        "aliases": ["claude-opus-4-8"],
+        "windows": [
+          {
+```
+
+Edit 10 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "claude-fable-5.1",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "claude-fable-5.1",
+        "aliases": ["claude-fable-5-1"],
+        "windows": [
+          {
+```
+
+Edit 11 of 11 in `src/CopilotLedger.Core/Pricing/rates.json`, replace:
+
+```json
+      {
+        "id": "claude-fable-5.2",
+        "aliases": [],
+        "windows": [
+          {
+```
+
+with:
+
+```json
+      {
+        "id": "claude-fable-5.2",
+        "aliases": ["claude-fable-5-2"],
+        "windows": [
+          {
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Otlp/LedgerIngestorTests.cs`, replace:
+
+```csharp
+    }
+
+    private static OtlpSpan IgSpan(string spanId, params OtlpAttribute[] attributes) =>
+        Span(
+```
+
+with:
+
+```csharp
+    }
+
+    // Issue #67: Copilot CLI 1.0.114 reports a Claude Haiku 4.5 request with Anthropic's dated id as its response
+    // model. The request is billed, so budgets and the circuit breaker count it.
+    [Fact]
+    public async Task IG12_DatedClaudeResponseModel_IsBilled()
+    {
+        using TempDirectory temp = new();
+        Harness harness = await Harness.CreateAsync(temp);
+        OtlpSpan span = IgSpan("0000000000000001",
+            Str("gen_ai.provider.name", "github"),
+            Str("server.address", "api.githubcopilot.com"),
+            Str("gen_ai.request.model", "claude-haiku-4.5"),
+            Str("gen_ai.response.model", "claude-haiku-4-5-20251001"),
+            Int("gen_ai.usage.input_tokens", 120_000),
+            Int("gen_ai.usage.cache_read.input_tokens", 100_000),
+            Int("gen_ai.usage.output_tokens", 2_000));
+
+        IngestResult result = await harness.Ingestor.IngestAsync(Request(CopilotResource, span));
+
+        AssertResult(result, 1, 0, null, 1, 1);
+        LedgerRollupRow model = Assert.Single(await harness.Store.GetRollupAsync(
+            LedgerGrouping.Model,
+            LedgerFilter.All));
+        AssertRollup(model, "claude-haiku-4.5", 1, 4m, 0.04m);
+        Assert.Equal(0, model.UnpricedSpanCount);
+        Assert.Equal(0.04m, model.ApiEquivalentUsd);
+    }
+
+    private static OtlpSpan IgSpan(string spanId, params OtlpAttribute[] attributes) =>
+        Span(
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Pricing/BuiltInApiRatesTests.cs`, replace:
+
+```csharp
+            outputTokens: 100));
+
+        Assert.Equal(PricingStatus.UnknownModel, result.Status);
+        Assert.Equal(ApiEquivalentStatus.Priced, result.ApiEquivalent.Status);
+        Assert.Equal(model, result.ApiEquivalent.RateCardModelId);
+```
+
+with:
+
+```csharp
+            outputTokens: 100));
+
+        Assert.Equal(PricingStatus.Priced, result.Status);
+        Assert.Equal(model, result.ModelId);
+        Assert.Equal(ApiEquivalentStatus.Priced, result.ApiEquivalent.Status);
+        Assert.Equal(model, result.ApiEquivalent.RateCardModelId);
+```
+
+New file `tests/CopilotLedger.Tests/Pricing/ModelResolutionTests.cs`:
+
+```csharp
+using System.Text.Json.Nodes;
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Tests.TestSupport;
+
+namespace CopilotLedger.Tests.Pricing;
+
+// Issue #67: which model prices a request that reports a response model and a request model. See "Which model prices a
+// request" in docs/configuration.md.
+public sealed class ModelResolutionTests
+{
+    private static readonly JsonRateCardCalculator Embedded = JsonRateCardCalculator.LoadEmbedded();
+
+    private static readonly JsonRateCardCalculator Retail =
+        JsonRateCardCalculator.Parse(RateFixtures.RetailTestRatesJson);
+
+    // response model, request model, the model that prices the request, its USD cost, and its AI credits. Each request
+    // is on the Copilot host, with 120,000 input tokens (100,000 of them cache reads) and 2,000 output tokens. Claude
+    // Haiku 4.5 costs $1.00 input, $0.10 cached input, and $5.00 output per 1M tokens: $0.02 + $0.01 + $0.01 = $0.04.
+    // Claude Sonnet 5.5 costs $2.00, $0.10, and $10.00: $0.04 + $0.01 + $0.02 = $0.07. Their API list prices are the
+    // same.
+    public static TheoryData<string?, string?, string, decimal, decimal> Resolved => new()
+    {
+        { "claude-haiku-4-5-20251001", "claude-haiku-4.5", "claude-haiku-4.5", 0.04m, 4m },
+        { "claude-haiku-4-5-20251001", null, "claude-haiku-4.5", 0.04m, 4m },
+        { "claude-haiku-4-5-20991231", "claude-haiku-4.5", "claude-haiku-4.5", 0.04m, 4m },
+        { null, "claude-haiku-4.5", "claude-haiku-4.5", 0.04m, 4m },
+        { "Claude Haiku 4.5", "auto", "claude-haiku-4.5", 0.04m, 4m },
+        { "claude-sonnet-5.5", "claude-haiku-4.5", "claude-sonnet-5.5", 0.07m, 7m },
+    };
+
+    [Theory]
+    [MemberData(nameof(Resolved))]
+    public void MR1_GitHubRequests_ArePricedAsTheFirstModelTheCardHas(
+        string? responseModel,
+        string? requestModel,
+        string model,
+        decimal usd,
+        decimal aiCredits)
+    {
+        CreditCalculationResult result = Embedded.Calculate(TestSpans.Chat(
+            serverAddress: "api.githubcopilot.com",
+            requestModel: requestModel,
+            responseModel: responseModel,
+            inputTokens: 120_000,
+            cacheReadInputTokens: 100_000,
+            outputTokens: 2_000));
+
+        Assert.Equal(BillingChannel.GitHubAiCredits, result.Channel);
+        Assert.Equal(PricingStatus.Priced, result.Status);
+        Assert.Equal(model, result.ModelId);
+        Assert.Equal(model, result.RateCardModelId);
+        Assert.Equal("default", result.TierName);
+        Assert.Equal(usd, result.UsdCost);
+        Assert.Equal(aiCredits, result.AiCredits);
+        Assert.Equal(ApiEquivalentStatus.Priced, result.ApiEquivalent.Status);
+        Assert.Equal(model, result.ApiEquivalent.RateCardModelId);
+        Assert.Equal(usd, result.ApiEquivalent.UsdCost);
+    }
+
+    // When the card has neither model, the request is unknown_model, recorded as its response model, or else its
+    // request model, and nothing is billed.
+    [Theory]
+    [InlineData("claude-haiku-4-5-20991231", "claude-unknown", "claude-haiku-4-5-20991231")]
+    [InlineData("claude-haiku-4-5-20991231", null, "claude-haiku-4-5-20991231")]
+    [InlineData(null, "claude-unknown", "claude-unknown")]
+    [InlineData(null, null, null)]
+    public void MR2_NeitherModelKnown_IsUnknownModel(string? responseModel, string? requestModel, string? model)
+    {
+        CreditCalculationResult result = Embedded.Calculate(TestSpans.Chat(
+            serverAddress: "api.githubcopilot.com",
+            requestModel: requestModel,
+            responseModel: responseModel,
+            inputTokens: 120_000,
+            cacheReadInputTokens: 100_000,
+            outputTokens: 2_000));
+
+        Assert.Equal(BillingChannel.GitHubAiCredits, result.Channel);
+        Assert.Equal(PricingStatus.UnknownModel, result.Status);
+        Assert.Equal(model, result.ModelId);
+        Assert.Null(result.RateCardModelId);
+        Assert.Null(result.Breakdown);
+        Assert.Equal(0m, result.UsdCost);
+        Assert.Equal(0m, result.AiCredits);
+        Assert.Equal(ApiEquivalentStatus.Unpriced, result.ApiEquivalent.Status);
+        Assert.Null(result.ApiEquivalent.UsdCost);
+    }
+
+    // Foundry BYOK tries the request model too: Foundry requests often report a deployment name as the request model
+    // and a dated id as the response model. 100,000 input and 10,000 output tokens cost $0.175 + $0.14 at the fixture's
+    // BYOK prices, and $0.20 + $0.10 at its API list prices.
+    [Theory]
+    [InlineData("gpt-6.1-sol-2026-10-01", "contoso-gpt61-prod", "gpt-6.1-sol")]
+    [InlineData("contoso-gpt61-prod", "gpt-6.1-sol-2026-10-01", "gpt-6.1-sol")]
+    [InlineData("gpt-6.1-sol-2026-10-01", "contoso-unknown", null)]
+    public void MR3_FoundryByokRequests_TryTheRequestModelToo(string responseModel, string requestModel, string? model)
+    {
+        CreditCalculationResult result = Retail.Calculate(TestSpans.Chat(
+            serverAddress: "contoso.openai.azure.com",
+            requestModel: requestModel,
+            responseModel: responseModel,
+            inputTokens: 100_000,
+            outputTokens: 10_000));
+
+        Assert.Equal(BillingChannel.FoundryByok, result.Channel);
+        Assert.Equal(0m, result.AiCredits);
+        if (model is null)
+        {
+            Assert.Equal(PricingStatus.ByokUnpriced, result.Status);
+            Assert.Equal(responseModel, result.ModelId);
+            Assert.Equal(0m, result.UsdCost);
+            Assert.Equal(ApiEquivalentStatus.Unpriced, result.ApiEquivalent.Status);
+            return;
+        }
+
+        Assert.Equal(PricingStatus.Priced, result.Status);
+        Assert.Equal(model, result.ModelId);
+        Assert.Equal(0.315m, result.UsdCost);
+        Assert.Equal(model, result.ApiEquivalent.RateCardModelId);
+        Assert.Equal(0.3m, result.ApiEquivalent.UsdCost);
+    }
+
+    // A local request matches local models by its response model, or by its request model when there's no response
+    // model. Its savings don't depend on the model: 400,000 input and 12,000 output tokens at MAI Code 2's GitHub rates.
+    [Theory]
+    [InlineData(null, "qwen3.8-27b")]
+    [InlineData("qwen-unknown", "qwen-unknown")]
+    public void MR4_LocalRequests_DontTryTheRequestModel(string? responseModel, string model)
+    {
+        CreditCalculationResult result = Embedded.Calculate(TestSpans.Chat(
+            providerName: "ollama",
+            requestModel: "qwen3.8:27b",
+            responseModel: responseModel,
+            inputTokens: 400_000,
+            outputTokens: 12_000));
+
+        Assert.Equal(BillingChannel.Local, result.Channel);
+        Assert.Equal(PricingStatus.LocalOffload, result.Status);
+        Assert.Equal(model, result.ModelId);
+        Assert.Equal("mai-code-2", result.RateCardModelId);
+        Assert.Equal(0.23m, result.EstimatedCloudSavedUsd);
+    }
+
+    // The rates.json that releases publish for gh-ledger 0.4.1 and earlier keeps the GitHub aliases, so after a rates
+    // update those versions price a dated response model too, although they never try the request model.
+    [Fact]
+    public void MR5_SchemaVersion1Rates_KeepTheVendorIds()
+    {
+        CreditCalculationResult result = JsonRateCardCalculator.Parse(PublishedRates.SchemaVersion1("2026-11-23"))
+            .Calculate(TestSpans.Chat(
+                serverAddress: "api.githubcopilot.com",
+                responseModel: "claude-haiku-4-5-20251001",
+                inputTokens: 120_000,
+                cacheReadInputTokens: 100_000,
+                outputTokens: 2_000));
+
+        Assert.Equal(PricingStatus.Priced, result.Status);
+        Assert.Equal("claude-haiku-4.5", result.ModelId);
+        Assert.Equal(4m, result.AiCredits);
+    }
+
+    // The GitHub models have the aliases of their API list prices: the vendors' API ids and dated snapshot ids.
+    [Fact]
+    public void MR6_GitHubModelsHaveTheVendorIdsOfTheirListPrices()
+    {
+        JsonNode card = JsonNode.Parse(PublishedRates.Embedded())!;
+        Dictionary<string, string[]> github = Aliases(card["githubAiCredits"]!);
+        Dictionary<string, string[]> retail = Aliases(card["apiEquivalent"]!);
+
+        Assert.All(retail, model => Assert.Equal(model.Value, github[model.Key]));
+        Assert.All(github.Keys.Except(retail.Keys), id => Assert.Empty(github[id]));
+        Assert.Equal(11, github.Values.Sum(aliases => aliases.Length));
+    }
+
+    // An overlay that added a vendor id as a GitHub model, as a workaround for #67, now repeats a built-in alias.
+    [Fact]
+    public void MR7_AnOverlayModelNamedAsABuiltInAlias_IsInvalid()
+    {
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => JsonRateCardCalculator.Parse(
+            PublishedRates.Embedded(),
+            """
+            { "schemaVersion": 1, "githubAiCredits": { "models": [ { "id": "claude-haiku-4-5-20251001", "windows": [ { "tiers": [ { "name": "default", "inputPer1M": 1, "outputPer1M": 5 } ] } ] } ] } }
+            """));
+
+        Assert.Equal(
+            "overlay: githubAiCredits.models[0].id: duplicate model identity in the merged rates: claude-haiku-4-5-20251001 (built-in model claude-haiku-4.5)",
+            error.Message);
+    }
+
+    private static Dictionary<string, string[]> Aliases(JsonNode section) =>
+        section["models"]!.AsArray().ToDictionary(
+            model => model!["id"]!.GetValue<string>(),
+            model => model!["aliases"]!.AsArray().Select(alias => alias!.GetValue<string>()).ToArray(),
+            StringComparer.Ordinal);
+}
+```
+
+Edit 1 of 3 in `docs/configuration.md`, replace:
+
+```markdown
+- GitHub hasn't published the prices that follow the promotions for Gemini 4 Argon (ending 2026-12-01) and Gemini 3.8 Flash (ending after 2026-12-31). Later requests for them are recorded with status `no_rate_for_date` until you add a price window or a CopilotLedger update adds the price.
+
+### Pricing statuses
+
+| Status | Meaning | Fix |
+```
+
+with:
+
+```markdown
+- GitHub hasn't published the prices that follow the promotions for Gemini 4 Argon (ending 2026-12-01) and Gemini 3.8 Flash (ending after 2026-12-31). Later requests for them are recorded with status `no_rate_for_date` until you add a price window or a CopilotLedger update adds the price.
+
+### Which model prices a request
+
+A request can report two model names: the model that answered it (`gen_ai.response.model`) and the model it asked for (`gen_ai.request.model`). They're usually the same, but Copilot CLI 1.0.114, for example, reports a Claude Haiku 4.5 request with Anthropic's dated id, `claude-haiku-4-5-20251001`, as the response model and `claude-haiku-4.5` as the request model.
+
+A model name matches a model's `id` or one of its `aliases`, case-insensitively and with spaces treated as `-`. A GitHub or Foundry BYOK request is priced as the first of these that the channel's models have:
+
+1. The response model.
+2. The request model.
+
+The request is recorded with that model's `id`, and its API-equivalent cost is for the same model. So a response model that the channel has is used even when the request asked for another model, and one that the channel doesn't have never hides a request model that it has. When the channel has neither, the request is unpriced, as `unknown_model` on GitHub or `byok_unpriced` on Foundry BYOK, and it's recorded with its response model, or with its request model when it reports no response model. A local request matches local models only by its response model, or by its request model when it reports no response model; either way, its savings don't depend on the model.
+
+The built-in GitHub models have the vendors' API ids and dated snapshot ids as aliases, the same ones as their API list prices. If your overlay adds one of these names as a GitHub model or alias, for example to price `claude-haiku-4-5-20251001` before CopilotLedger did, remove it: a name that a built-in model of the same section already uses makes the overlay invalid.
+
+### Pricing statuses
+
+| Status | Meaning | Fix |
+```
+
+Edit 2 of 3 in `docs/configuration.md`, replace:
+
+```markdown
+| `priced` | Priced from a rate card | — |
+| `local_offload` | Local model: $0.00 billed, savings estimated | — |
+| `byok_unpriced` | Foundry BYOK endpoint, but no price for the model | Add the model under `foundryByok.models` |
+| `unknown_model` | No model on the request, or the model isn't in the price list | Add the model, or an alias for it, under `githubAiCredits.models` or `foundryByok.models` |
+| `no_rate_for_date` | The model has no price for the request's date | Add a price window that covers the date |
+| `unrecognized_endpoint` | The endpoint isn't GitHub, Foundry, or local | Add its host to the matching `hostSuffixes` or `additionalHosts` list |
+```
+
+with:
+
+```markdown
+| `priced` | Priced from a rate card | — |
+| `local_offload` | Local model: $0.00 billed, savings estimated | — |
+| `byok_unpriced` | Foundry BYOK endpoint, but no price for its response model or its request model | Add the model under `foundryByok.models` |
+| `unknown_model` | No model on the request, or neither its response model nor its request model is in the price list | Add the model, or an alias for it, under `githubAiCredits.models` or `foundryByok.models` |
+| `no_rate_for_date` | The model has no price for the request's date | Add a price window that covers the date |
+| `unrecognized_endpoint` | The endpoint isn't GitHub, Foundry, or local | Add its host to the matching `hostSuffixes` or `additionalHosts` list |
+```
+
+Edit 3 of 3 in `docs/configuration.md`, replace:
+
+```markdown
+## Newer rates between releases: `gh ledger rates update`
+
+Each gh-ledger release attaches the rates it was built with as `rates.v2.json`. It also attaches them as `rates.json`, with `schemaVersion` 1 and without API list prices, for gh-ledger 0.4.1 and earlier, which read only `schemaVersion` 1. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.v2.json`, through your system proxy, and checks it with the same rules as the built-in rates. If the latest release has no `rates.v2.json`, it downloads that release's `rates.json` instead.
+
+Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. A newer download with `schemaVersion` 1 isn't saved either, because it has no API list prices, and `rates update` reports an error. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
+```
+
+with:
+
+```markdown
+## Newer rates between releases: `gh ledger rates update`
+
+Each gh-ledger release attaches the rates it was built with as `rates.v2.json`. It also attaches them as `rates.json`, with `schemaVersion` 1 and without API list prices, for gh-ledger 0.4.1 and earlier, which read only `schemaVersion` 1. Its GitHub models keep their aliases, so after `gh ledger rates update`, those versions also price a request whose response model is a vendor's id, such as `claude-haiku-4-5-20251001`, although they never try the request model. `gh ledger rates update` downloads the latest release's copy from `https://github.com/swigerb/gh-ledger/releases/latest/download/rates.v2.json`, through your system proxy, and checks it with the same rules as the built-in rates. If the latest release has no `rates.v2.json`, it downloads that release's `rates.json` instead.
+
+Rates versions are dates. When the download is newer than the rates in use, `rates update` saves it as `rates.downloaded.json`; when it's the same or older, nothing changes. A newer download with `schemaVersion` 1 isn't saved either, because it has no API list prices, and `rates update` reports an error. If your overlay doesn't merge with the newer rates, nothing is saved, and the error names the problem in your overlay.
+```
+
+### Tests
+
+Requests on the Copilot host have 120,000 input tokens (100,000 of them cache reads) and 2,000 output tokens: $0.04 (4 AI credits) at Claude Haiku 4.5's GitHub rates and list prices, and $0.07 (7 AI credits) at Claude Sonnet 5.5's.
+
+- **MR1** (6, built-in card), each `Priced` at the model's GitHub rates and list prices, with `ModelId`, `RateCardModelId`, and `ApiEquivalent.RateCardModelId` the same: response `claude-haiku-4-5-20251001` with request `claude-haiku-4.5` (#67's request), or with no request model; the unknown `claude-haiku-4-5-20991231` with request `claude-haiku-4.5`; no response model with request `claude-haiku-4.5`; `Claude Haiku 4.5` with request `auto`; and `claude-sonnet-5.5` with request `claude-haiku-4.5`, which stays Claude Sonnet 5.5.
+- **MR2** (4): neither model known: `UnknownModel`, `ModelId` the response model or else the request model (`null` without either), no breakdown, $0 and 0 AI credits, and `Unpriced` at API prices.
+- **MR3** (3, `RetailTestRatesJson`, Foundry host): response `gpt-6.1-sol-2026-10-01` with the deployment alias `contoso-gpt61-prod` as request, and the reverse, are both `Priced` as `gpt-6.1-sol` ($0.315 BYOK, $0.3 at API prices); with request `contoso-unknown`, `ByokUnpriced` with `ModelId` `gpt-6.1-sol-2026-10-01`.
+- **MR4** (2): an `ollama` request with request model `qwen3.8:27b` is recorded as `qwen3.8-27b`, or as `qwen-unknown` when that's its response model, with savings of $0.23 at `mai-code-2` either way.
+- **MR5**: `PublishedRates.SchemaVersion1("2026-11-23")`, the `rates.json` that the Release workflow derives for older versions, prices response model `claude-haiku-4-5-20251001` alone as `claude-haiku-4.5`, 4 AI credits.
+- **MR6**: in the embedded card, every `apiEquivalent` model's aliases equal those of the GitHub model with its id, the three GitHub models without a list price have none, and there are 11 GitHub aliases in all.
+- **MR7**: an overlay that adds the GitHub model `claude-haiku-4-5-20251001` fails with `overlay: githubAiCredits.models[0].id: duplicate model identity in the merged rates: claude-haiku-4-5-20251001 (built-in model claude-haiku-4.5)`.
+- **IG12**: an OTLP `chat` span with `server.address` `api.githubcopilot.com`, request model `claude-haiku-4.5`, and response model `claude-haiku-4-5-20251001` is recorded and rolls up as `claude-haiku-4.5`: 1 span, 4 AI credits, $0.04, none unpriced, and $0.04 at API prices.
+- **AR4** (6, changed): the vendor ids and snapshots are now `Priced` in the credit lens too, with `ModelId` the canonical id; before this task, the test asserted `UnknownModel`.
+
+### Acceptance criteria
+
+- #67's request, response model `claude-haiku-4-5-20251001` and request model `claude-haiku-4.5` on the Copilot host, is `Priced` at Claude Haiku 4.5's GitHub rates with exactly 4 AI credits, and is recorded so (MR1, IG12).
+- A response model that the channel doesn't have falls back to the request model; with neither, the result is still `UnknownModel` (MR1, MR2, MR3).
+- An unknown response model never overrides a request model that the channel has, and a known one is never replaced (MR1, MR3).
+- Exact ids price as before (every earlier test passes), and the API-equivalent lens prices the same canonical model (MR1, MR3, IG12).
+- `docs/configuration.md` documents the order in "Which model prices a request".
+- `dotnet test CopilotLedger.slnx` passes **1005** tests (986 + 19).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 13 specification: API-Equivalent Request-Model Fallback
+
+This task completes #61's rule that a Foundry BYOK request gets its API-equivalent cost "from the request or response model ID when it matches" (deviation D8 extends it to every request that isn't local). Billed results don't change.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Pricing/ApiEquivalentRequest.cs` | New `RequestModel` |
+| `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs` | `CalculateApiEquivalent` falls back to `RequestModel`; new `IsKnown`; `Result` passes the span's request model |
+| `src/CopilotLedger.Storage/SqliteLedgerStore.cs` | `BackfillApiEquivalentAsync` and `RepriceAsync` read `request_model` |
+| `tests/CopilotLedger.Tests/Pricing/RequestModelFallbackTests.cs` | New: RF1–RF3 |
+| `tests/CopilotLedger.Tests/Storage/ApiEquivalentBackfillTests.cs` | New AB4 |
+| `tests/CopilotLedger.Tests/Storage/WhatIfPricingTests.cs` | New WI5 |
+| `docs/configuration.md` | The API-equivalent model rule |
+
+### Contracts
+
+- `ApiEquivalentRequest.RequestModel` (`string?`, optional): the request model as the span reported it; the calculator normalizes it. A caller that leaves it `null` gets the behavior of Tasks 2–12.
+- `CalculateApiEquivalent`: a request that isn't local is priced as the API-equivalent model that `ModelId` names, by id or alias. When `ModelId` is `null`, or no section of the card (GitHub, Foundry BYOK, local models, or API list prices) has it as an id or alias, the model that `RequestModel` names is priced instead. A local request is still priced as the local retail baseline.
+- So a model that the card knows is never replaced: a request that `mai-code-2` answered stays `Unpriced` whatever its request model, and a request the credit lens matched is priced as the same canonical model.
+- Ingestion passes `span.RequestModel`, and the backfill and what-if pricing pass the row's `request_model`, so all three give a span the same result. The ledger's schema doesn't change.
+
+### Algorithm
+
+1. The `NotApplicable` checks are unchanged.
+2. `model` = normalized `ModelId`; `requestModel` = normalized `RequestModel`.
+3. When `requestModel` isn't null and `model` is null or unknown to every section of the card (`IsKnown`), `model` = `requestModel`.
+4. The card is the local retail baseline for a local request, and otherwise the API-equivalent model that `model` names; pricing is unchanged.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Pricing/ApiEquivalentRequest.cs`, replace:
+
+```csharp
+    public required BillingChannel Channel { get; init; }    // Local requests are priced as the card's local retail baseline
+    public string? ModelId { get; init; }                    // CreditCalculationResult.ModelId; null when the request named no model
+    public required DateTimeOffset StartTime { get; init; }
+    public required long InputTokens { get; init; }
+```
+
+with:
+
+```csharp
+    public required BillingChannel Channel { get; init; }    // Local requests are priced as the card's local retail baseline
+    public string? ModelId { get; init; }                    // CreditCalculationResult.ModelId; null when the request named no model
+    public string? RequestModel { get; init; }               // as reported; priced when the card lacks ModelId
+    public required DateTimeOffset StartTime { get; init; }
+    public required long InputTokens { get; init; }
+```
+
+Edit 1 of 4 in `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+
+```csharp
+    }
+
+    // Prices one request at this card's API list prices (apiEquivalent), whatever its billing channel priced: a local
+    // request as the local retail baseline, and any other request as its ModelId. Pure and thread-safe. Throws only
+    // ArgumentNullException; an unknown model or date is Unpriced, and a non-inference operation or inconsistent token
+    // counts are NotApplicable.
+    public ApiEquivalentCost CalculateApiEquivalent(ApiEquivalentRequest request)
+    {
+```
+
+with:
+
+```csharp
+    }
+
+    // Prices one request at this card's API list prices (apiEquivalent), whatever its billing channel priced: a local
+    // request as the local retail baseline, and any other request as its ModelId, or as its RequestModel when no section
+    // of this card has ModelId. So a response model that the card doesn't know, such as a dated id that a Foundry BYOK
+    // endpoint reports, never hides a request model with a list price, and a model that the card knows without a list
+    // price, such as mai-code-2, is never priced as another. Pure and thread-safe. Throws only ArgumentNullException; an
+    // unknown model or date is Unpriced, and a non-inference operation or inconsistent token counts are NotApplicable.
+    public ApiEquivalentCost CalculateApiEquivalent(ApiEquivalentRequest request)
+    {
+```
+
+Edit 2 of 4 in `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+
+```csharp
+        }
+
+        string? model = NormalizeModel(request.ModelId);
+        ModelRateCard? card = request.Channel == BillingChannel.Local
+            ? _retailLocalBaseline
+```
+
+with:
+
+```csharp
+        }
+
+        string? model = NormalizeModel(request.ModelId);
+        string? requestModel = NormalizeModel(request.RequestModel);
+        if (requestModel is not null && (model is null || !IsKnown(model)))
+        {
+            model = requestModel;
+        }
+
+        ModelRateCard? card = request.Channel == BillingChannel.Local
+            ? _retailLocalBaseline
+```
+
+Edit 3 of 4 in `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+
+```csharp
+    }
+
+    private static JsonRateCardCalculator Create(string baseJson, string? overlayJson, string? overlayName)
+    {
+```
+
+with:
+
+```csharp
+    }
+
+    // Whether any section of this card has model as an id or alias.
+    private bool IsKnown(string model) =>
+        FindModel(_githubModels, model) is not null ||
+        FindModel(_foundryModels, model) is not null ||
+        FindModel(_retailModels, model) is not null ||
+        _localModels.Any(item => item.Matches(model));
+
+    private static JsonRateCardCalculator Create(string baseJson, string? overlayJson, string? overlayName)
+    {
+```
+
+Edit 4 of 4 in `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`, replace:
+
+```csharp
+                Channel = channel,
+                ModelId = modelId,
+                StartTime = span.StartTime,
+                InputTokens = span.InputTokens,
+```
+
+with:
+
+```csharp
+                Channel = channel,
+                ModelId = modelId,
+                RequestModel = span.RequestModel,
+                StartTime = span.StartTime,
+                InputTokens = span.InputTokens,
+```
+
+Edit 1 of 5 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+            query.CommandText = """
+                SELECT id, operation_name, billing_channel, model_id, start_time_unix_ms,
+                       input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens
+                FROM spans
+                WHERE api_equivalent_status IS NULL
+```
+
+with:
+
+```csharp
+            query.CommandText = """
+                SELECT id, operation_name, billing_channel, model_id, start_time_unix_ms,
+                       input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, request_model
+                FROM spans
+                WHERE api_equivalent_status IS NULL
+```
+
+Edit 2 of 5 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                    Channel = ToBillingChannel(reader.GetString(2)),
+                    ModelId = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(4)),
+                    InputTokens = reader.GetInt64(5),
+```
+
+with:
+
+```csharp
+                    Channel = ToBillingChannel(reader.GetString(2)),
+                    ModelId = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    RequestModel = reader.IsDBNull(9) ? null : reader.GetString(9),
+                    StartTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(4)),
+                    InputTokens = reader.GetInt64(5),
+```
+
+Edit 3 of 5 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                   billing_channel                               AS what_if_channel,
+                   model_id                                      AS what_if_model,
+                   start_time_unix_ms                            AS what_if_start,
+                   input_tokens                                  AS what_if_input,
+```
+
+with:
+
+```csharp
+                   billing_channel                               AS what_if_channel,
+                   model_id                                      AS what_if_model,
+                   request_model                                 AS what_if_request_model,
+                   start_time_unix_ms                            AS what_if_start,
+                   input_tokens                                  AS what_if_input,
+```
+
+Edit 4 of 5 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+        {
+            int model = reader.GetOrdinal("what_if_model");
+            ApiEquivalentCost cost = whatIf.CalculateApiEquivalent(new ApiEquivalentRequest
+            {
+```
+
+with:
+
+```csharp
+        {
+            int model = reader.GetOrdinal("what_if_model");
+            int requestModel = reader.GetOrdinal("what_if_request_model");
+            ApiEquivalentCost cost = whatIf.CalculateApiEquivalent(new ApiEquivalentRequest
+            {
+```
+
+Edit 5 of 5 in `src/CopilotLedger.Storage/SqliteLedgerStore.cs`, replace:
+
+```csharp
+                Channel = ToBillingChannel(reader.GetString(reader.GetOrdinal("what_if_channel"))),
+                ModelId = reader.IsDBNull(model) ? null : reader.GetString(model),
+                StartTime = DateTimeOffset.FromUnixTimeMilliseconds(
+                    reader.GetInt64(reader.GetOrdinal("what_if_start"))),
+```
+
+with:
+
+```csharp
+                Channel = ToBillingChannel(reader.GetString(reader.GetOrdinal("what_if_channel"))),
+                ModelId = reader.IsDBNull(model) ? null : reader.GetString(model),
+                RequestModel = reader.IsDBNull(requestModel) ? null : reader.GetString(requestModel),
+                StartTime = DateTimeOffset.FromUnixTimeMilliseconds(
+                    reader.GetInt64(reader.GetOrdinal("what_if_start"))),
+```
+
+New file `tests/CopilotLedger.Tests/Pricing/RequestModelFallbackTests.cs`:
+
+```csharp
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Tests.TestSupport;
+
+namespace CopilotLedger.Tests.Pricing;
+
+// The API-equivalent lens prices a request as its recorded model, or as its request model when no section of the card has
+// the recorded model, as #61 asks for Foundry BYOK requests. See "API-equivalent prices" in docs/configuration.md.
+public sealed class RequestModelFallbackTests
+{
+    private static readonly JsonRateCardCalculator Embedded = JsonRateCardCalculator.LoadEmbedded();
+
+    private static readonly JsonRateCardCalculator Retail =
+        JsonRateCardCalculator.Parse(RateFixtures.RetailTestRatesJson);
+
+    // host, response model, request model, then the billing result and the API-equivalent model and cost. The fixture's
+    // GitHub models are test-retail and test-baseline, and its only Foundry BYOK model is gpt-6.1-sol, so its billing
+    // channels have neither model. 1,000 input and 100 output tokens cost $0.003 + $0.0015 at test-retail's list prices and
+    // $0.002 + $0.0008 at test-no-cache's.
+    public static TheoryData<string, string, string, BillingChannel, PricingStatus, string, decimal> FallsBack => new()
+    {
+        { "llm.example.com", "test-retail-preview", "test-retail", BillingChannel.Unpriced, PricingStatus.UnrecognizedEndpoint, "test-retail", 0.0045m },
+        { "api.githubcopilot.com", "test-no-cache-preview", "test-no-cache", BillingChannel.GitHubAiCredits, PricingStatus.UnknownModel, "test-no-cache", 0.0028m },
+        { "contoso.openai.azure.com", "test-no-cache-preview", "test-no-cache", BillingChannel.FoundryByok, PricingStatus.ByokUnpriced, "test-no-cache", 0.0028m },
+    };
+
+    [Theory]
+    [MemberData(nameof(FallsBack))]
+    public void RF1_AnUnknownResponseModel_IsPricedAsTheRequestModel(
+        string host,
+        string responseModel,
+        string requestModel,
+        BillingChannel channel,
+        PricingStatus status,
+        string retailModel,
+        decimal usd)
+    {
+        CreditCalculationResult result = Retail.Calculate(TestSpans.Chat(
+            serverAddress: host,
+            requestModel: requestModel,
+            responseModel: responseModel,
+            inputTokens: 1_000,
+            outputTokens: 100));
+
+        Assert.Equal(channel, result.Channel);
+        Assert.Equal(status, result.Status);
+        Assert.Equal(responseModel, result.ModelId);
+        Assert.Equal(0m, result.UsdCost);
+        Assert.Equal(0m, result.AiCredits);
+        Assert.Equal(ApiEquivalentStatus.Priced, result.ApiEquivalent.Status);
+        Assert.Equal(retailModel, result.ApiEquivalent.RateCardModelId);
+        Assert.Equal(usd, result.ApiEquivalent.UsdCost);
+    }
+
+    // A response model that the card knows without a list price is never priced as the request model: MAI Code 2 is a
+    // GitHub model, and qwen3.8:27b a local one.
+    [Theory]
+    [InlineData("llm.example.com", "mai-code-2", BillingChannel.Unpriced, PricingStatus.UnrecognizedEndpoint)]
+    [InlineData("api.githubcopilot.com", "mai-code-2", BillingChannel.GitHubAiCredits, PricingStatus.Priced)]
+    [InlineData("llm.example.com", "qwen3.8:27b", BillingChannel.Unpriced, PricingStatus.UnrecognizedEndpoint)]
+    public void RF2_AKnownResponseModel_IsNeverReplaced(
+        string host,
+        string responseModel,
+        BillingChannel channel,
+        PricingStatus status)
+    {
+        CreditCalculationResult result = Embedded.Calculate(TestSpans.Chat(
+            serverAddress: host,
+            requestModel: "claude-haiku-4.5",
+            responseModel: responseModel,
+            inputTokens: 1_000,
+            outputTokens: 100));
+
+        Assert.Equal(channel, result.Channel);
+        Assert.Equal(status, result.Status);
+        Assert.Equal(responseModel, result.ModelId);
+        Assert.Equal(ApiEquivalentStatus.Unpriced, result.ApiEquivalent.Status);
+        Assert.Null(result.ApiEquivalent.RateCardModelId);
+        Assert.Null(result.ApiEquivalent.UsdCost);
+    }
+
+    // The recorded facts that backfill and what-if pricing pass: channel, ModelId, RequestModel, then the API-equivalent
+    // model and cost. test-baseline's list prices are $0.80 input and $3.20 output per 1M tokens: $0.0008 + $0.00032.
+    public static TheoryData<BillingChannel, string?, string?, string?, decimal?> Recorded => new()
+    {
+        { BillingChannel.Unpriced, "test-retail-preview", "test-retail", "test-retail", 0.0045m },
+        { BillingChannel.Unpriced, "test-retail-preview", null, null, null },
+        { BillingChannel.Unpriced, null, "test-retail", "test-retail", 0.0045m },
+        { BillingChannel.GitHubAiCredits, "test-baseline", "test-retail", "test-baseline", 0.00112m },
+        { BillingChannel.Local, "test-retail-preview", "test-retail", "test-baseline", 0.00112m },
+    };
+
+    [Theory]
+    [MemberData(nameof(Recorded))]
+    public void RF3_RecordedRequests_FallBackTheSameWay(
+        BillingChannel channel,
+        string? modelId,
+        string? requestModel,
+        string? retailModel,
+        decimal? usd)
+    {
+        ApiEquivalentCost cost = Retail.CalculateApiEquivalent(new ApiEquivalentRequest
+        {
+            OperationName = "chat",
+            Channel = channel,
+            ModelId = modelId,
+            RequestModel = requestModel,
+            StartTime = new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero),
+            InputTokens = 1_000,
+            OutputTokens = 100,
+            CacheReadInputTokens = 0,
+            CacheWriteInputTokens = 0,
+        });
+
+        Assert.Equal(usd is null ? ApiEquivalentStatus.Unpriced : ApiEquivalentStatus.Priced, cost.Status);
+        Assert.Equal(retailModel, cost.RateCardModelId);
+        Assert.Equal(usd, cost.UsdCost);
+    }
+}
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Storage/ApiEquivalentBackfillTests.cs`, replace:
+
+```csharp
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Storage;
+using CopilotLedger.Tests.TestSupport;
+```
+
+with:
+
+```csharp
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Storage;
+using CopilotLedger.Tests.TestSupport;
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Storage/ApiEquivalentBackfillTests.cs`, replace:
+
+```csharp
+    }
+
+    private static void AssertBackfill(
+        ApiEquivalentBackfill backfill,
+```
+
+with:
+
+```csharp
+    }
+
+    // A span whose response model no section of the rates has is priced as its request model, as ingestion prices it.
+    [Fact]
+    public async Task AB4_Backfill_FallsBackToTheRequestModelAsIngestionDoes()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            serverAddress: "llm.example.com",
+            requestModel: "test-retail",
+            responseModel: "test-retail-preview",
+            inputTokens: 1_000,
+            outputTokens: 100);
+        await store.RecordAsync([new LedgerEntry(span, Retail.Calculate(span), null)]);
+        await using SqliteConnection connection = await OpenAsync(temp);
+        string[] ingested = await RowsAsync(connection, $"SELECT model_id, {ApiColumns} FROM spans;");
+        await ExecuteAsync(connection, $"UPDATE spans SET ({ApiColumns}) = (NULL, NULL, NULL, NULL, NULL);");
+
+        ApiEquivalentBackfill backfill = await store.BackfillApiEquivalentAsync(Retail, dryRun: false);
+
+        AssertBackfill(backfill, 1, 1, 0.0045m, 0, 0, 0, 1);
+        Assert.Equal(
+            [$"test-retail-preview|4500000000|priced|test-retail|retail-fixture|{Retail.ApiRateCardSha256}"],
+            ingested);
+        Assert.Equal(ingested, await RowsAsync(connection, $"SELECT model_id, {ApiColumns} FROM spans;"));
+    }
+
+    private static void AssertBackfill(
+        ApiEquivalentBackfill backfill,
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Storage/WhatIfPricingTests.cs`, replace:
+
+```csharp
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Storage;
+using CopilotLedger.Tests.TestSupport;
+```
+
+with:
+
+```csharp
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Storage;
+using CopilotLedger.Tests.TestSupport;
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Storage/WhatIfPricingTests.cs`, replace:
+
+```csharp
+    }
+
+    private static string Recorded(PromptChainRow row) =>
+        string.Join(
+```
+
+with:
+
+```csharp
+    }
+
+    // What-if pricing falls back to the request model as ingestion does, so the recording card still gives back the
+    // recorded rollup.
+    [Fact]
+    public async Task WI5_TheRequestModelFallback_MatchesIngestion()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await StoreAsync(temp);
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            serverAddress: "llm.example.com",
+            requestModel: "test-retail",
+            responseModel: "test-retail-preview",
+            inputTokens: 1_000,
+            outputTokens: 100);
+        await store.RecordAsync([new LedgerEntry(span, Retail.Calculate(span), null)]);
+
+        IReadOnlyList<LedgerRollupRow> recorded = await store.GetRollupAsync(LedgerGrouping.Model, LedgerFilter.All);
+        IReadOnlyList<LedgerRollupRow> whatIf =
+            await store.GetRollupAsync(LedgerGrouping.Model, LedgerFilter.All, Retail);
+
+        Assert.Equal(recorded, whatIf);
+        LedgerRollupRow preview = Assert.Single(whatIf, row => row.Model == "test-retail-preview");
+        Assert.Equal(0.0045m, preview.ApiEquivalentUsd);
+        Assert.Equal(0, preview.ApiEquivalentUnpricedSpanCount);
+    }
+
+    private static string Recorded(PromptChainRow row) =>
+        string.Join(
+```
+
+Edit 1 of 1 in `docs/configuration.md`, replace:
+
+```markdown
+Besides what each request is billed, CopilotLedger records what the same request would cost at its model's API list prices, from the `apiEquivalent` section of the rates (see [API list prices](#api-list-prices)). This API-equivalent cost is a comparison. It's never added to billed spend, and budgets and the circuit breaker ignore it.
+
+- A request is priced as the model it's recorded with: a GitHub or Foundry BYOK model's id once its aliases are resolved, or else the model name the request reported. A local request is priced as the local baseline instead. Nothing else depends on the billing channel, so a request to an unrecognized endpoint still gets an API-equivalent cost when its model has a list price.
+- A request whose model has no API list price, or no price for the request's date, is unpriced in this view. It has no API-equivalent cost, never $0.00.
+- A request with inconsistent token counts (`invalid_usage`) gets no API-equivalent cost either.
+```
+
+with:
+
+```markdown
+Besides what each request is billed, CopilotLedger records what the same request would cost at its model's API list prices, from the `apiEquivalent` section of the rates (see [API list prices](#api-list-prices)). This API-equivalent cost is a comparison. It's never added to billed spend, and budgets and the circuit breaker ignore it.
+
+- A request is priced as the model it's recorded with: a GitHub or Foundry BYOK model's id once its aliases are resolved, or else the model name the request reported (see [Which model prices a request](#which-model-prices-a-request)). When no section of the rates has that name, the request model is priced instead, so a Foundry BYOK request that reports a dated response model, such as `gpt-6.1-sol-2026-10-01`, is priced as its request model, `gpt-6.1-sol`. A name that the rates have is never replaced: a request that MAI Code 2 answered is unpriced in this view, whatever model it asked for. A local request is priced as the local baseline instead. Nothing else depends on the billing channel, so a request to an unrecognized endpoint still gets an API-equivalent cost when its model has a list price.
+- A request whose model has no API list price, or no price for the request's date, is unpriced in this view. It has no API-equivalent cost, never $0.00.
+- A request with inconsistent token counts (`invalid_usage`) gets no API-equivalent cost either.
+```
+
+### Tests
+
+1,000 input and 100 output tokens cost $0.0045 at `test-retail`'s list prices, $0.0028 at `test-no-cache`'s, and $0.00112 at `test-baseline`'s (`RetailTestRatesJson`).
+
+- **RF1** (3, `RetailTestRatesJson`): response model `test-retail-preview` with request `test-retail` on an unrecognized endpoint (`UnrecognizedEndpoint`), and `test-no-cache-preview` with request `test-no-cache` on the Copilot host (`UnknownModel`) and on a Foundry host (`ByokUnpriced`): each keeps its billing result and `ModelId` (the response model) and is `Priced` at API prices as the request model.
+- **RF2** (3, built-in card, request model `claude-haiku-4.5`): response `mai-code-2` on an unrecognized endpoint and on the Copilot host (billed as `mai-code-2`), and the local model id `qwen3.8:27b` on an unrecognized endpoint, are `Unpriced` at API prices.
+- **RF3** (5): `CalculateApiEquivalent` with recorded facts: `ModelId` `test-retail-preview` with `RequestModel` `test-retail` ($0.0045) or none (`Unpriced`); no `ModelId` with `RequestModel` `test-retail` ($0.0045); `ModelId` `test-baseline` with `RequestModel` `test-retail` stays `test-baseline` ($0.00112); a local request stays the local baseline ($0.00112).
+- **AB4**: RF1's unrecognized-endpoint request, recorded and then reset to no result, gets back exactly the `model_id` and five `api_*` values ingestion gave it (`test-retail`, 4,500,000,000 pico-USD).
+- **WI5**: with the same request recorded beside `Entries()`, what-if pricing with the recording card gives back the recorded `Model` rollup, with $0.0045 for `test-retail-preview`.
+
+### Acceptance criteria
+
+- A request whose recorded model no section of the rates has is priced at API prices as its request model, on Foundry BYOK, GitHub, and unrecognized endpoints (RF1, RF3), and a known model is never replaced (RF2, RF3).
+- Backfill and what-if pricing give the same result as ingestion (AB4, WI5); billed columns don't change (RF1, AB4).
+- `docs/configuration.md` documents the rule under "API-equivalent prices".
+- `dotnet test CopilotLedger.slnx` passes **1018** tests (1005 + 13).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
 Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` or fixed start times for time, `FakeCliPlatform`, `CliHarness`, and `FakeHttpHandler` for the CLI, and `McpTestHarness` or in-process pipes for MCP. No test starts a process, runs `git`, uses the network or Docker, or reads `~/.copilot-ledger`. Money is `decimal` (`TheoryData<…, decimal>` or `decimal` arguments, never `[InlineData(double)]`), and expected text is compared exactly, with `ReplaceLineEndings("\n")` only on the expected literal.
@@ -11617,6 +12935,8 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 9 | EP11, EP12 | EP1, EP2, EP3, EP5, EP10; GS6 (guide text) | 970 |
 | 10 | WF1, WF2 (4), WF3 (5), WF4, WF5 | — | 982 |
 | 11 | MC8 (3 more cases), MC15 | MC1, MC2, MC3, MC4, MC5, MC6, MC9; GS7 (guide text) | 986 |
+| 12 | MR1 (6), MR2 (4), MR3 (3), MR4 (2), MR5, MR6, MR7, IG12 | AR4 (6; the vendor ids are now billed) | 1005 |
+| 13 | RF1 (3), RF2 (3), RF3 (5), AB4, WI5 | — | 1018 |
 
 Exact `decimal` values used across tasks, all at `RateFixtures.RetailTestRatesJson`'s fictional prices unless noted:
 
@@ -11631,13 +12951,19 @@ Exact `decimal` values used across tasks, all at `RateFixtures.RetailTestRatesJs
 | `2.86` | `claude-opus-5.5` at the built-in list price, `LedgerSeeds`' first request | StatusText, RP4, RB2, EP1 |
 | `0.3` | `gpt-6.1-sol` at the built-in or fixture list price, 100,000 input and 10,000 output | AS2, AB2, RB2, WI2 |
 | `0.7` | `claude-sonnet-5.5` at the built-in list price, 100,000 input and 50,000 output | MC2, MC3, MC5, MC6 |
+| `0.04` | `claude-haiku-4.5` at its built-in GitHub rates and list prices, 120,000 input (100,000 cache reads) and 2,000 output: 4 AI credits | MR1, MR5, IG12 |
+| `0.07` | `claude-sonnet-5.5` for the same tokens: 7 AI credits | MR1 |
+| `0.315` | The fixture's Foundry BYOK `gpt-6.1-sol`, 100,000 input and 10,000 output | MR3 |
+| `0.0045` | `test-retail`, 1,000 input and 100 output, default tier | RF1, RF3, AB4, WI5 |
+| `0.0028` | `test-no-cache`, 1,000 input and 100 output | RF1 |
+| `0.00112` | `test-baseline`'s list prices, 1,000 input and 100 output | RF3 |
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 11, the orchestrator:
+After Task 13, the orchestrator:
 
-1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (986 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-6.md`, and the files the tasks list.
-2. Pushes `swigerb-sprint-7-dual-lens-costing-engine` and opens one pull request titled exactly "Sprint 7: Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings", whose body says `Closes #61`, lists the eleven task commits, and states the migration renumbering and deviations D1–D7 from "Design decisions", each with a one-line rationale.
+1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1018 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-6.md`, and the files the tasks list.
+2. Pushes `swigerb-sprint-7-dual-lens-costing-engine` and opens one pull request titled exactly "Sprint 7: Dual-lens costing engine: API-equivalent USD vs. Copilot AI Credits vs. local offload savings", whose body says `Closes #61` and `Fixes #67`, lists the thirteen task commits, and states the migration renumbering, deviations D1–D8, and the scope addition of #67 (Tasks 12 and 13) from "Design decisions", each with a one-line rationale.
 3. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary.
 4. Asks `ledger-architect` to review the branch.
 
@@ -11650,6 +12976,8 @@ This sprint doesn't bump the version, tag, or release. The first release after i
 - **#65, `gh ledger audit`.** Waste estimates can use `ApiEquivalentUsd` per prompt chain, keeping estimated and unpriced spans apart as reports do.
 - **Re-pricing unpriced rows.** The backfill fills only rows without a result, as the issue asks, so requests recorded as `unpriced` (all local requests and MAI models, with the built-in card) stay so after a later card prices them. A `--include-unpriced` option, or an overlay that sets `apiEquivalent.localBaselineModel` before requests are recorded, could change that; until then, `--pricing` compares them.
 - **List prices for the MAI models**, when Microsoft publishes them, and a price for GPT-5.6 Sol after 2026-11-30.
+- **Re-billing requests recorded as `unknown_model`** (out of #67's scope). Claude requests that Copilot CLI 1.0.114 sent before this fix keep 0 AI credits in the ledger, so budgets and the circuit breaker never counted them. A command that prices them again would need its own design, because billed columns are never rewritten today.
+- **More dated ids.** Copilot may report other vendors' dated ids. The request-model fallback bills them when the request model is known, and a rates update can add aliases, which reach gh-ledger 0.4.1 and earlier too.
 - **Longer cache lifetimes.** Anthropic's 1-hour and OpenAI's longer cache writes cost more; the ledger doesn't know which lifetime a request used.
 - **A `--pricing` sample in the guide.** `GuideSamplesTests` would need `GuideWorld` to provide a pricing file; the guide describes the option instead.
 - **Carried from Sprint 6:** user turns (`github.copilot.turn_id`), agent definitions (`gen_ai.agent.id`), MCP tools for turns and bloat, a fresh capture of cache attributes, the optional follow-ups of Sprint 6's review, and Sprint 5's carry-overs, as described in `.github/plans/archive/sprint-6.md`.
