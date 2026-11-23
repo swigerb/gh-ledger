@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace CopilotLedger.Core.Git;
 
 public sealed class FileSystemGitContextResolver : IGitContextResolver
@@ -67,10 +69,11 @@ public sealed class FileSystemGitContextResolver : IGitContextResolver
                 }
 
                 string? remoteUrl = null;
+                int? pullRequestNumber = null;
                 string configPath = Path.Combine(commonDirectory, "config");
                 if (File.Exists(configPath))
                 {
-                    remoteUrl = ReadOriginUrl(configPath);
+                    (remoteUrl, pullRequestNumber) = ReadConfig(configPath, branch);
                 }
 
                 return new GitWorkspaceContext(
@@ -79,7 +82,10 @@ public sealed class FileSystemGitContextResolver : IGitContextResolver
                     branch,
                     commit,
                     remoteUrl,
-                    remoteUrl is null ? null : GitRemoteUrl.GetRepositorySlug(remoteUrl));
+                    remoteUrl is null ? null : GitRemoteUrl.GetRepositorySlug(remoteUrl))
+                {
+                    PullRequestNumber = pullRequestNumber,
+                };
             }
 
             if (_ceilingDirectory is not null &&
@@ -218,15 +224,21 @@ public sealed class FileSystemGitContextResolver : IGitContextResolver
         return null;
     }
 
-    private static string? ReadOriginUrl(string configPath)
+    // Returns remote.origin.url, read as before: the first url line in an origin section, sanitized. When branch isn't null,
+    // also returns n from the last merge value in a [branch "<branch>"] section when that value is refs/pull/<n>/head.
+    private static (string? OriginUrl, int? PullRequestNumber) ReadConfig(string configPath, string? branch)
     {
         string? contents = ReadAllLines(configPath);
         if (contents is null)
         {
-            return null;
+            return (null, null);
         }
 
         bool originSection = false;
+        bool branchSection = false;
+        bool originRead = false;
+        string? originUrl = null;
+        int? pullRequestNumber = null;
         foreach (string rawLine in contents.Split('\n'))
         {
             string line = rawLine.Trim().TrimEnd('\r');
@@ -240,25 +252,54 @@ public sealed class FileSystemGitContextResolver : IGitContextResolver
                 originSection =
                     name.Equals("remote", StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(subsection, "origin", StringComparison.Ordinal);
-                continue;
-            }
-
-            if (!originSection)
-            {
+                branchSection =
+                    branch is not null &&
+                    name.Equals("branch", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(subsection, branch, StringComparison.Ordinal);
                 continue;
             }
 
             int equals = line.IndexOf('=');
-            if (equals < 0 || !line[..equals].Trim().Equals("url", StringComparison.OrdinalIgnoreCase))
+            if (equals < 0)
             {
                 continue;
             }
 
-            string? value = ReadConfigValue(line[(equals + 1)..]);
-            return value is null ? null : GitRemoteUrl.Sanitize(value);
+            string key = line[..equals].Trim();
+            if (originSection && !originRead && key.Equals("url", StringComparison.OrdinalIgnoreCase))
+            {
+                originRead = true;
+                string? value = ReadConfigValue(line[(equals + 1)..]);
+                originUrl = value is null ? null : GitRemoteUrl.Sanitize(value);
+            }
+            else if (branchSection && key.Equals("merge", StringComparison.OrdinalIgnoreCase))
+            {
+                pullRequestNumber = ParsePullRequestRef(ReadConfigValue(line[(equals + 1)..]));
+            }
         }
 
-        return null;
+        return (originUrl, pullRequestNumber);
+    }
+
+    // n for "refs/pull/<n>/head", where n is 1 to int.MaxValue written without a sign or leading zeros; otherwise null.
+    private static int? ParsePullRequestRef(string? value)
+    {
+        const string Prefix = "refs/pull/";
+        const string Suffix = "/head";
+        if (value is null ||
+            value.Length <= Prefix.Length + Suffix.Length ||
+            !value.StartsWith(Prefix, StringComparison.Ordinal) ||
+            !value.EndsWith(Suffix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string digits = value[Prefix.Length..^Suffix.Length];
+        return digits[0] != '0' &&
+               digits.All(char.IsAsciiDigit) &&
+               int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out int number)
+            ? number
+            : null;
     }
 
     private static bool TryReadSection(string line, out string name, out string? subsection)

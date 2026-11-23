@@ -26,4 +26,16 @@ public sealed class GitWorkspaceContextTests
 
         Assert.Equal(expected, context.IsDetachedHead);
     }
+
+    [Fact]
+    public void PullRequestNumber_DefaultsToNullAndTakesPartInEquality()
+    {
+        GitWorkspaceContext context = new("/repo", "/repo/.git", "feature/x", null, null, null);
+        GitWorkspaceContext pullRequest = context with { PullRequestNumber = 42 };
+
+        Assert.Null(context.PullRequestNumber);
+        Assert.Equal(42, pullRequest.PullRequestNumber);
+        Assert.NotEqual(context, pullRequest);
+        Assert.Equal(pullRequest, context with { PullRequestNumber = 42 });
+    }
 }

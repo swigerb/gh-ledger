@@ -1,3 +1,4 @@
+using System.Globalization;
 using CopilotLedger.Core.Git;
 
 namespace CopilotLedger.Tests.TestSupport;
@@ -9,8 +10,9 @@ public static class GitFixture
 
     // Creates <root>/repo with .git/HEAD "ref: refs/heads/feature/ledger\n", .git/refs/heads/feature/ledger Sha1 + "\n",
     // .git/config "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n", and an empty <root>/repo/src.
-    // Returns <root>/repo.
-    public static string Create(string root)
+    // With pullRequest, the config also has "[branch \"feature/ledger\"]\n\tremote = origin\n\tmerge = refs/pull/<n>/head\n",
+    // as gh pr checkout writes it. Returns <root>/repo.
+    public static string Create(string root, int? pullRequest = null)
     {
         string repo = Path.Combine(root, "repo");
         string git = Path.Combine(repo, ".git");
@@ -23,7 +25,10 @@ public static class GitFixture
         File.WriteAllText(branch, Sha1 + "\n");
         File.WriteAllText(
             Path.Combine(git, "config"),
-            "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n");
+            "[remote \"origin\"]\n\turl = https://github.com/swigerb/copilot-ledger.git\n" +
+            (pullRequest is null
+                ? string.Empty
+                : $"[branch \"feature/ledger\"]\n\tremote = origin\n\tmerge = refs/pull/{pullRequest.Value.ToString(CultureInfo.InvariantCulture)}/head\n"));
 
         // Reading the files back waits out a brief antivirus lock, so the resolver sees them when the test runs.
         _ = FileRetry.ReadAllText(Path.Combine(git, "HEAD"));
