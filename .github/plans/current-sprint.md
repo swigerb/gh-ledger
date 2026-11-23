@@ -11,7 +11,7 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–11 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–12 are sequential, and each builds on the ones before it. Task 12 comes from the architect's review of Tasks 1–11.
 
 This sprint ships as one pull request. The orchestrator commits this plan first, then each task as its own commit, `Sprint 6 Task N: <Title>`, on branch `swigerb-prompt-cache-efficiency-per-turn-tokens`, and opens one pull request, "Sprint 6: Prompt-cache efficiency & per-turn token breakdown", with `Closes #62`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
@@ -41,6 +41,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 9: status --cache --turns and --bloat (CopilotLedger.Cli & tests). The per-request breakdown of one trace or conversation, and the context-bloat rankings, as tables and JSON, with their option rules.
 - [x] Task 10: MCP get_cache_efficiency (CopilotLedger.Storage, Cli, Mcp, docs & tests). A fifth MCP tool, read-only. `get_branch_ledger` and `get_agent_breakdown` add `uncachedInputTokens`, `cacheReportedSpans`, and `cacheHitRatio`. The `--since` grammar moves to a shared `LedgerPeriod`.
 - [x] Task 11: Docs and the Context-Bloat Walkthrough (docs & tests). `docs/cli.md` documents prompt-cache efficiency, `docs/configuration.md` explains how requests without cache counters are priced and reported, and `docs/guide.md` gains a tested "Find context bloat" walkthrough.
+- [ ] Task 12: Document Unreported Cache Misses (docs). Review fix: `docs/cli.md` and `docs/configuration.md` explain that a cache miss that writes nothing to the cache sends no cache counters, so it's left out of `Hit %`, which is then too high for a model whose provider reports cache reads but never cache writes (the bias D1 leaves).
 
 ## Starting point
 
@@ -8791,6 +8792,70 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 12 specification: Document Unreported Cache Misses
+
+`ledger-architect` added this task on 2026-11-23, after reviewing Tasks 1–11 (finding R1 of the review). It changes two docs, and no code, test, or output.
+
+D1 treats a request that sends neither cache counter as unknown, and its acceptance names the bias that leaves: a cache miss that writes nothing to the cache sends no counter either, so it's left out of `Hit %` instead of counting as a miss. For a model whose provider reports cache reads but never cache writes, every miss is left out, so the model's `Hit %` covers only its requests that read from the cache and is higher than its real hit ratio. `Cache reported` and the footnote show how many requests were left out, but not that they may be misses, and Task 11's docs name only Foundry BYOK and local endpoints as requests without counters. This task says so where the docs explain `Hit %` and unknown cache use.
+
+### Files
+
+| File | Change |
+|---|---|
+| `docs/cli.md` | "Prompt-cache efficiency" gains a bullet after the `Cache reported` bullet: a miss without a cache write sends no counters, so `Hit %` can be too high, and the sign of it |
+| `docs/configuration.md` | "Cache tokens" gains one sentence with the same point |
+
+### Facts (retrieved 2026-11-23)
+
+- OpenAI's [Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching) guide: GPT-5.6 and later bill cache writes and report them as `cache_write_tokens`, while earlier models support only implicit caching, with no cache-write charge, and report cache reads as `cached_tokens`. So a model can report cache reads without ever reporting a nonzero cache write, and Copilot leaves out a zero counter (see "Verified facts"). The recorded Copilot CLI capture `CopilotTraces.TraceBA` shows a cache write for `gpt-6-luna`, so some GPT models do report writes through Copilot.
+- Assumption (not verified): which models Copilot reports with cache reads but no cache writes. The docs describe the behavior and its sign, and name no model.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+```markdown
+- `Cache reported` counts the requests with known cache use. `Hit %` is cache reads divided by input over those requests, rounded to one decimal place. It shows `n/a` when no request in the row reported cache counters; a real zero shows as `0.0%`. The cache columns are totals over the same requests, so they show `n/a` too, and `*` marks a total that leaves some of the row's requests out. A footnote counts the requests left out.
+- `--by pr` groups requests by pull request when the branch's Git config tracks `refs/pull/<n>/head`, as `gh pr checkout` sets up for some pull requests from forks. Other requests show as `(no PR) <branch>`. gh-ledger reads only the local Git config and never asks GitHub.
+```
+
+with:
+
+```markdown
+- `Cache reported` counts the requests with known cache use. `Hit %` is cache reads divided by input over those requests, rounded to one decimal place. It shows `n/a` when no request in the row reported cache counters; a real zero shows as `0.0%`. The cache columns are totals over the same requests, so they show `n/a` too, and `*` marks a total that leaves some of the row's requests out. A footnote counts the requests left out.
+- A request that missed the cache and wrote nothing to it also sends neither count, so it's left out as unknown, not counted as a miss. For a model whose provider reports cache reads but never cache writes, as some providers with automatic prompt caching do, every miss is like that: its `Hit %` covers only the requests that read from the cache, so it's higher than the model's real hit ratio. When a model's `Cache reported` is less than its `Spans`, its `Hit %` is probably too high.
+- `--by pr` groups requests by pull request when the branch's Git config tracks `refs/pull/<n>/head`, as `gh pr checkout` sets up for some pull requests from forks. Other requests show as `(no PR) <branch>`. gh-ledger reads only the local Git config and never asks GitHub.
+```
+
+Edit 1 of 1 in `docs/configuration.md`, replace:
+
+```markdown
+Cache-efficiency reports, such as `gh ledger status --cache`, don't treat such a request as a cache miss: its cache use is unknown, so hit ratios and observed cache totals leave it out, and a group of such requests shows `n/a` rather than `0.0%`. See [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
+```
+
+with:
+
+```markdown
+Cache-efficiency reports, such as `gh ledger status --cache`, don't treat such a request as a cache miss: its cache use is unknown, so hit ratios and observed cache totals leave it out, and a group of such requests shows `n/a` rather than `0.0%`. A cache miss that writes nothing to the cache also reports neither count, so it's left out too, and a hit ratio can be higher than the real one. See [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
+```
+
+### Tests
+
+No test is added or changed, because only prose changes. `GuideSamplesTests` reads only `docs/guide.md`, which doesn't change, and `RateOverlayTests` reads only the `rates-error-example` blocks of `docs/configuration.md`, which don't change.
+
+### Acceptance criteria
+
+- `docs/cli.md` says that a cache miss without a cache write sends no counters and is left out as unknown, that a model whose provider reports cache reads but never cache writes then shows a `Hit %` higher than its real hit ratio, and that `Cache reported` less than `Spans` is the sign. `docs/configuration.md` says that such a miss is left out and that a hit ratio can be too high.
+- No other file changes.
+- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes **804** tests, as after Task 11, with 0 failed and 0 skipped.
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
 Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` for time, `FakeCliPlatform` and `CliHarness` for the CLI, and `McpTestHarness` or in-process pipes for MCP. No test starts a process, runs `git`, uses the network or Docker, or reads `~/.copilot-ledger`. Money and ratios are `decimal` (`TheoryData<…, decimal>` or `decimal` arguments, never `[InlineData(double)]`), and expected text is compared exactly, with `ReplaceLineEndings("\n")` only on the expected literal.
@@ -8808,6 +8873,7 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 9 | CR7, CR8, CR9, CR10, CR11 (14) | — | 786 |
 | 10 | MC8 (13 more cases), MC13, MC14 | MC1, MC2, MC4, MC6, MC11; GS7 (guide text) | 801 |
 | 11 | GS2 (3 more cases: `cache`, `cache-bloat`, `cache-turns`) | GS1 (guide text) | 804 |
+| 12 | — (docs only) | — | 804 |
 
 Each task's "Tests" subsection lists what its tests check, and its code gives every assertion. Decimal test vectors used across tasks, all exact `decimal` quotients in the invariant culture:
 
@@ -8832,10 +8898,10 @@ Percentages round half away from zero to one decimal place: `0.537037…` → `5
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 11, the orchestrator:
+After Task 12, the orchestrator:
 
 1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (804 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-5.md`, and the files the tasks list.
-2. Pushes `swigerb-prompt-cache-efficiency-per-turn-tokens` and opens one pull request, "Sprint 6: Prompt-cache efficiency & per-turn token breakdown", whose body says `Closes #62`, lists the eleven task commits, and states deviations D1–D5 from "Design decisions", each with a one-line rationale, and the bias that D1 leaves (see "Cache usage is per span").
+2. Pushes `swigerb-prompt-cache-efficiency-per-turn-tokens` and opens one pull request, "Sprint 6: Prompt-cache efficiency & per-turn token breakdown", whose body says `Closes #62`, lists the twelve task commits, and states deviations D1–D5 from "Design decisions", each with a one-line rationale, and the bias that D1 leaves (see "Cache usage is per span").
 3. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary.
 4. Optionally, with a real Copilot CLI session sending telemetry to a daemon whose `COPILOT_LEDGER_HOME` is a temporary directory, runs `gh ledger status --cache --turns --conversation <session id>` and checks that requests show `reported` states and that a first request shows a cache write with `0` cache reads. That re-checks D1's assumption on the installed Copilot CLI, which this sprint couldn't capture again.
 5. Asks `ledger-architect` to review the branch.
@@ -8853,4 +8919,5 @@ This sprint doesn't bump the version, tag, or release. When the sprint closes, `
 - **Agent definitions.** `gen_ai.agent.id`, which the reference calls a stable agent-definition identifier, could group the same agent across invocations, alongside `agent_span_id` for instances.
 - **MCP tools for turns and bloat**, for example `get_turn_breakdown` and `get_context_bloat`, if agents need them; this sprint exposes them only in the CLI.
 - **A fresh capture of cache attributes** from Copilot CLI, the GitHub Copilot app, and VS Code, to re-check that a zero counter is always left out (D1's assumption).
+- **Optional follow-ups from the 2026-11-23 review.** (1) The `status --cache` footnote ends with "`*` marks a partial total" even when no row has a `*`. (2) Migration 4 upgrades legacy states once, so a pre-v4 daemon that keeps running after a newer command migrates the ledger (possible only off Windows, against the guide's upgrade steps) records rows as `legacy_unknown`, even with nonzero counters, and without `agent_span_id`, until it restarts; a later migration can repeat the two state `UPDATE`s. (3) `GetContextBloatAsync` computes input growth after the period filter, while `GetTurnBreakdownAsync` computes deltas before its filter, so a sequence that starts before `--since` grows from its first request inside the period. (4) The `(@trace IS NULL OR …)` and `(@conversation IS NULL OR …)` conditions of `GetTurnBreakdownAsync` keep SQLite from seeking `ix_spans_trace` or `ix_spans_conversation_start`; a full scan of a 160,000-span test ledger took 29 ms, so it isn't urgent. (5) `get_cache_efficiency`'s description could carry Task 12's caveat for agents. (6) A subagent's requests get a conversation ID only from their own spans or their own `invoke_agent` span, because the backfill doesn't cross nested agents; the Final step's live check can confirm that `--turns --conversation` lists them.
 - **Carried from Sprint 5:** `gh ledger` in every message, workflow dependency lockfiles, the guide on macOS and Linux, reconciliation with `nano_aiu`, breaker state in `status`, MCP registration in `install`, `COPILOT_LEDGER_HOME` in sign-in items, headless Linux, a tool gate, webhooks, smarter retry churn, signed receipts and a pre-push hook, `export-pr --since`, upgrading without stopping everything by hand, build provenance, Arm64 smoke tests, checking for newer rates automatically, receipts for fork pull requests, and the Sprint 2 carry-overs, as described in `.github/plans/archive/sprint-5.md`.
