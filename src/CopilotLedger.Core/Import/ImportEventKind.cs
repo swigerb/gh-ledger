@@ -15,4 +15,5 @@ public enum ImportEventKind
     SessionMeta,
     TurnContext,
     TokenUsageRecord,
+    AssistantMessage,
 }

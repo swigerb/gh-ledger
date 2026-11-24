@@ -44,6 +44,8 @@ public sealed class CopilotSessionLogs
 
     public string SessionId { get; }
 
+    public string LastId => Guid(_sequence);
+
     // The time of the last event; each event is one second after the one before.
     public DateTimeOffset Time => _time;
 
@@ -51,7 +53,12 @@ public sealed class CopilotSessionLogs
 
     // {"type": type, "data": data, "agentId": agentId (when given), "id": …, "timestamp": …, "parentId": …}, one second
     // after the event before, or at the given time.
-    public CopilotSessionLogs Event(string type, JsonObject data, string? agentId = null, DateTimeOffset? at = null)
+    public CopilotSessionLogs Event(
+        string type,
+        JsonObject data,
+        string? agentId = null,
+        DateTimeOffset? at = null,
+        string? parentId = null)
     {
         _time = at ?? (_lines.Count == 0 ? _time : _time.AddSeconds(1));
         JsonObject line = new() { ["type"] = type, ["data"] = data };
@@ -62,7 +69,7 @@ public sealed class CopilotSessionLogs
 
         line["id"] = Guid(++_sequence);
         line["timestamp"] = Stamp(_time);
-        line["parentId"] = _sequence == 1 ? null : Guid(_sequence - 1);
+        line["parentId"] = parentId ?? (_sequence == 1 ? null : Guid(_sequence - 1));
         _lines.Add(line.ToJsonString());
         return this;
     }
@@ -77,6 +84,29 @@ public sealed class CopilotSessionLogs
     // A user message: content that's never read.
     public CopilotSessionLogs UserMessage() =>
         Event("user.message", new JsonObject { ["content"] = Canary, ["transformedContent"] = Canary });
+
+    public CopilotSessionLogs AssistantMessage(string apiCallId, string? parentId = null) =>
+        Event(
+            "assistant.message",
+            new JsonObject
+            {
+                ["messageId"] = "<id>",
+                ["apiCallId"] = apiCallId,
+                ["content"] = Canary,
+                ["reasoningText"] = Canary,
+                ["reasoningOpaque"] = Canary,
+                ["encryptedContent"] = Canary,
+                ["toolRequests"] =
+                    new JsonArray(
+                        new JsonObject
+                        {
+                            ["toolCallId"] = "<id>",
+                            ["name"] = Canary,
+                            ["arguments"] = new JsonObject { ["command"] = Canary },
+                        }),
+                ["reasoningBlocks"] = new JsonArray(Canary),
+            },
+            parentId: parentId);
 
     // A session.start or session.resume context.
     public static JsonObject Context(
@@ -273,7 +303,8 @@ public sealed class CopilotSessionLogs
         string toolCallId,
         string toolName,
         string? agentId = null,
-        string? parentToolCallId = null)
+        string? parentToolCallId = null,
+        string? parentId = null)
     {
         JsonObject data = new()
         {
@@ -287,10 +318,15 @@ public sealed class CopilotSessionLogs
             data["parentToolCallId"] = parentToolCallId;
         }
 
-        return Event("tool.execution_start", data, agentId);
+        return Event("tool.execution_start", data, agentId, parentId: parentId);
     }
 
-    public CopilotSessionLogs ToolComplete(string toolCallId, bool success, long? exitCode = null, string? agentId = null)
+    public CopilotSessionLogs ToolComplete(
+        string toolCallId,
+        bool success,
+        long? exitCode = null,
+        string? agentId = null,
+        string? parentId = null)
     {
         JsonObject data = new()
         {
@@ -308,7 +344,7 @@ public sealed class CopilotSessionLogs
             data["shellExecution"] = new JsonObject { ["exitCode"] = code };
         }
 
-        return Event("tool.execution_complete", data, agentId);
+        return Event("tool.execution_complete", data, agentId, parentId: parentId);
     }
 
     // The log's bytes: each line followed by "\n".

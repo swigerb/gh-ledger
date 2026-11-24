@@ -22,6 +22,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         "subagent.started",
         "tool.execution_start",
         "tool.execution_complete",
+        "assistant.message",
         "journal.link",
     ];
 
@@ -34,6 +35,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ImportEventKind.SubagentStarted,
         ImportEventKind.ToolExecutionStart,
         ImportEventKind.ToolExecutionComplete,
+        ImportEventKind.AssistantMessage,
         ImportEventKind.JournalLink,
     ];
 
@@ -71,6 +73,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ("data.usage.serviceRequestId", 64),
         ("data.usage.copilotUsage.totalNanoAiu", 0),
         ("data.usage.accounting.usageId", 2048),
+        ("data.usage.apiCallId", 2048),
         ("data.usage.parentToolCallId", 2048),
         ("data.usage.duration", 0),
         ("data.usage.numToolCalls", 0),
@@ -98,7 +101,14 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ("data.agentName", 256),
         ("data.toolCallId", 2048));
 
+    private static readonly PathTree AssistantMessagePaths = new(
+        ("id", 2048),
+        ("parentId", 2048),
+        ("data.apiCallId", 2048));
+
     private static readonly PathTree ToolStartPaths = new(
+        ("id", 2048),
+        ("parentId", 2048),
         ("timestamp", 64),
         ("agentId", 2048),
         ("data.toolCallId", 2048),
@@ -106,6 +116,8 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ("data.parentToolCallId", 2048));
 
     private static readonly PathTree ToolCompletePaths = new(
+        ("id", 2048),
+        ("parentId", 2048),
         ("data.toolCallId", 2048),
         ("data.success", 0),
         ("data.shellExecution.exitCode", 0));
@@ -219,6 +231,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         private readonly ImportDiagnosticBag _diagnostics = new(ImportSourceKind.Copilot, location.LogId);
         private readonly List<ImportedUsageRecord> _records = [];
         private readonly List<ImportedToolCall> _toolCalls = [];
+        private readonly List<PendingTool> _completedTools = [];
         private (SessionLogStatus Status, ImportEventKind Kind, string? Version, long Line, long Offset)? _stop;
         private bool _started;
         private bool _journal;
@@ -239,6 +252,9 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         private readonly Dictionary<string, string> _latestRecordByContext = new(StringComparer.Ordinal);
         private readonly Dictionary<string, PendingTool> _pendingTools = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _latestByokProviderByModel = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _usageKeyByApiCallId = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, (ImportEventKind Kind, string? ParentId, string? ApiCallId)> _chain =
+            new(StringComparer.Ordinal);
 
         internal bool OnLine(ReadOnlySpan<byte> line, long number, long offset)
         {
@@ -276,6 +292,10 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                     break;
                 case ImportEventKind.ToolExecutionComplete:
                     ToolComplete(JsonFields.Read(line, ToolCompletePaths));
+                    break;
+                case ImportEventKind.AssistantMessage:
+                    AssistantMessage(JsonFields.Read(line, AssistantMessagePaths));
+                    _skipped++;
                     break;
                 case ImportEventKind.JournalLink:
                     if (!_journal)
@@ -318,6 +338,35 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                     0);
             }
 
+            long toolCallsFallback = 0;
+            foreach (PendingTool call in _completedTools)
+            {
+                string? owner = ResolveOwner(call.ParentId);
+                if (owner is null)
+                {
+                    owner = call.FallbackOwner;
+                    if (owner is not null)
+                    {
+                        toolCallsFallback++;
+                    }
+                }
+
+                if (owner is not null)
+                {
+                    _toolCalls.Add(new ImportedToolCall
+                    {
+                        SessionId = location.LogId,
+                        OwnerRecordKey = owner,
+                        ToolCallId = call.ToolCallId,
+                        ToolName = call.ToolName,
+                        AgentName = call.AgentName,
+                        StartTime = call.StartTime,
+                        Success = call.Success,
+                        ExitCode = call.ExitCode,
+                    });
+                }
+            }
+
             return new SessionLogReadResult
             {
                 Status = SessionLogStatus.Read,
@@ -329,6 +378,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 UnsupportedUsageShapes = _unsupported,
                 MalformedLines = _malformed,
                 SkippedEvents = _skipped,
+                ToolCallsFallback = toolCallsFallback,
                 ContentSha256 = contentSha256,
             };
         }
@@ -478,6 +528,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 LineNumber = number,
             });
             _latestRecordByContext[contextKey] = usageId!;
+            _usageKeyByApiCallId.TryAdd(fields.String("data.usage.apiCallId") ?? usageId!, usageId!);
             if (byok == true && providerType is not null)
             {
                 _latestByokProviderByModel[model!] = providerType.ToLowerInvariant();
@@ -618,6 +669,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         // A tool call belongs to the latest usage record of its agent, whose response asked for it.
         private void ToolStart(JsonFields fields)
         {
+            Chain(fields, ImportEventKind.ToolExecutionStart);
             string? toolCallId = fields.String("data.toolCallId");
             string? toolName = fields.String("data.toolName");
             if (fields.Duplicate is not null || toolCallId is null || toolName is null || Time(fields) is not DateTimeOffset start)
@@ -630,34 +682,69 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             string contextKey = ContextKey(agentId, parentToolCallId);
             _pendingTools[toolCallId] = new PendingTool(
                 _latestRecordByContext.GetValueOrDefault(contextKey),
+                fields.String("parentId"),
+                toolCallId,
                 toolName,
                 AgentName(agentId, parentToolCallId),
-                start);
+                start,
+                false,
+                null);
         }
 
         private void ToolComplete(JsonFields fields)
         {
+            Chain(fields, ImportEventKind.ToolExecutionComplete);
             string? toolCallId = fields.String("data.toolCallId");
             if (fields.Duplicate is not null ||
                 toolCallId is null ||
                 fields.Boolean("data.success") is not bool success ||
-                !_pendingTools.Remove(toolCallId, out PendingTool? pending) ||
-                pending.Owner is null)
+                !_pendingTools.Remove(toolCallId, out PendingTool? pending))
             {
                 return;
             }
 
-            _toolCalls.Add(new ImportedToolCall
+            _completedTools.Add(pending with
             {
-                SessionId = location.LogId,
-                OwnerRecordKey = pending.Owner,
-                ToolCallId = toolCallId,
-                ToolName = pending.ToolName,
-                AgentName = pending.AgentName,
-                StartTime = pending.StartTime,
                 Success = success,
                 ExitCode = fields.Integer("data.shellExecution.exitCode"),
             });
+        }
+
+        private void AssistantMessage(JsonFields fields) =>
+            Chain(fields, ImportEventKind.AssistantMessage, fields.String("data.apiCallId"));
+
+        private void Chain(JsonFields fields, ImportEventKind kind, string? apiCallId = null)
+        {
+            string? id = fields.String("id");
+            if (fields.Duplicate is null && id is not null)
+            {
+                _chain.TryAdd(id, (kind, fields.String("parentId"), apiCallId));
+            }
+        }
+
+        private string? ResolveOwner(string? id)
+        {
+            int hops = 0;
+            while (id is not null && hops < 100)
+            {
+                hops++;
+                if (!_chain.TryGetValue(id, out var entry))
+                {
+                    return null;
+                }
+
+                if (entry.Kind == ImportEventKind.AssistantMessage)
+                {
+                    return entry.ApiCallId is not null
+                        && _usageKeyByApiCallId.TryGetValue(entry.ApiCallId, out string? owner)
+                        ? owner
+                        : null;
+                }
+
+                id = entry.ParentId;
+            }
+
+            return null;
         }
 
         // The context key and agent name of a sub-agent's event: by envelope agentId, else (Copilot 1.0.103's records) by the
@@ -756,6 +843,14 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             HeadCommitSha = SessionLogs.CommitSha(fields.String("data.context.headCommit")),
         };
 
-        private sealed record PendingTool(string? Owner, string ToolName, string? AgentName, DateTimeOffset StartTime);
+        private sealed record PendingTool(
+            string? FallbackOwner,
+            string? ParentId,
+            string ToolCallId,
+            string ToolName,
+            string? AgentName,
+            DateTimeOffset StartTime,
+            bool Success,
+            long? ExitCode);
     }
 }
