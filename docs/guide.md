@@ -872,6 +872,8 @@ gh ledger import --all
 
 It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs).
 
+If you upgraded from gh-ledger 0.5.0 and need to go back, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy you made in place of your data directory, and start the daemon. 0.5.0 can't open the ledger this version upgraded, and the copy doesn't have what gh-ledger recorded after you made it.
+
 To remove gh-ledger, undo `install`:
 
 <!-- sample: uninstall -->

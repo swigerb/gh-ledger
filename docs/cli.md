@@ -62,6 +62,8 @@ It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTele
 
 **Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 7, for `gh ledger import`, the first time its daemon or any command opens it. Opening a format 7 ledger also adds an index that import uses to match its requests with live ones, when it's missing; on a large ledger that can take a moment once, and it doesn't change the format. Format 7 keeps each request's list price beside the amount it was charged. After upgrading, run `gh ledger import --all` once so that requests imported before, and live requests whose session logs report their charge, are repaired (see [Repairs](#repairs)). That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
 
+**Upgrading from 0.5.0.** gh-ledger 0.5.0 uses ledger format 6, and this version upgrades it to format 7 the first time it opens it, and 0.5.0 can't open it after that. Follow the steps below in order: close the Copilot sessions and apps that use the MCP server and stop the daemon, copy your data directory, upgrade, start the daemon, and run `gh ledger import --all` once. To go back, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy in place of your data directory, and start the daemon.
+
 To upgrade, close the Copilot sessions and apps that use the MCP server, and stop the daemon:
 
 ```shell
@@ -87,6 +89,8 @@ Then upgrade the extension, and start the daemon:
 gh extension upgrade ledger
 gh ledger daemon start
 ```
+
+Then run `gh ledger import --all` once; see [Repairs](#repairs).
 
 If `gh ledger daemon start` then says that the daemon did not start, run `gh ledger rates validate`. A new release can build in a model name that your rates overlay also lists, such as `claude-haiku-4-5-20251001`, which gh-ledger 0.5.0 builds in and earlier versions priced only through an overlay. Such an overlay is invalid, and the daemon doesn't start until you remove the entry that the message names; see [Which model prices a request](configuration.md#which-model-prices-a-request).
 
