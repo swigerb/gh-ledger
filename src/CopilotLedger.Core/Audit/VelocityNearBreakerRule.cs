@@ -3,8 +3,11 @@ using CopilotLedger.Core.Pricing;
 
 namespace CopilotLedger.Core.Audit;
 
-// velocity_near_breaker: a prompt chain (trace) whose spend came close to the circuit breaker's credit velocity rule without
-// tripping it. It uses the breaker's own window, ordering, and stored settings.
+// velocity_near_breaker: a prompt chain (trace) whose spend in the circuit breaker's credit velocity window reached
+// NearBreakerFraction of its threshold, unless the breaker recorded a credit_velocity trip for it. Only the daemon trips
+// the breaker, and only on live spans, so an imported chain, or one recorded before the breaker or under other settings,
+// can be above the threshold: breakerFraction is then above 1. It uses the breaker's own window, ordering, and stored
+// settings.
 internal sealed class VelocityNearBreakerRule : IAuditRule
 {
     public string Id => AuditRuleIds.VelocityNearBreaker;
@@ -19,6 +22,11 @@ internal sealed class VelocityNearBreakerRule : IAuditRule
             .GroupBy(span => span.TraceId, StringComparer.Ordinal)
             .OrderBy(group => group.Key, StringComparer.Ordinal))
         {
+            if (input.VelocityTrippedTraces.Contains(trace.Key))
+            {
+                continue;
+            }
+
             AuditSpan first = AuditMath.ByStart(trace)[0];
             List<AuditSpan> events =
             [
@@ -27,11 +35,6 @@ internal sealed class VelocityNearBreakerRule : IAuditRule
                     .OrderBy(span => span.EndTime)
                     .ThenBy(span => span.SpanId, StringComparer.Ordinal),
             ];
-            CostEvent[] costs = [.. events.Select(span => new CostEvent(span.SpanId, span.EndTime, span.CostUsd))];
-            if (BreakerRules.FindVelocityTrip(costs, threshold, window) is not null)
-            {
-                continue;
-            }
 
             // The breaker's window: the events ending after end_j - window. The peak is the first window with the most spend.
             decimal sum = 0m;

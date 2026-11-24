@@ -66,8 +66,23 @@ public sealed class VelocityRuleTests
             "custom settings",
             "info [windowCostUsd=0.85 usd, windowAiCredits=85 ai_credits, breakerVelocityAiCredits=100 ai_credits, breakerFraction=0.85 ratio, windowMinutes=10 minutes] null velocity_near_breaker"
         },
+        { "tripped under other settings", "none" },
+        {
+            "imported trips",
+            "info [windowCostUsd=1.51 usd, windowAiCredits=151 ai_credits, breakerVelocityAiCredits=150 ai_credits, breakerFraction=1.0066666666666666666666666667 ratio, windowMinutes=5 minutes] null velocity_near_breaker"
+        },
+        {
+            "trips without a record",
+            "info [windowCostUsd=1.51 usd, windowAiCredits=151 ai_credits, breakerVelocityAiCredits=150 ai_credits, breakerFraction=1.0066666666666666666666666667 ratio, windowMinutes=5 minutes] null velocity_near_breaker"
+        },
+        {
+            "another chain's trip",
+            "info [windowCostUsd=1.51 usd, windowAiCredits=151 ai_credits, breakerVelocityAiCredits=150 ai_credits, breakerFraction=1.0066666666666666666666666667 ratio, windowMinutes=5 minutes] null velocity_near_breaker"
+        },
     };
 
+    // A recorded credit_velocity trip leaves a chain to the breaker, even one below the threshold under today's settings. Without
+    // one, a chain above the threshold is reported too: an imported chain, which the daemon never sees, or a live one.
     [Theory]
     [MemberData(nameof(NearBreakerCases))]
     public void AR6_VelocityNearBreaker_BelowAtAndExact(string name, string expected)
@@ -77,12 +92,17 @@ public sealed class VelocityRuleTests
             "below" => AuditFixtures.Input(Spend(7, 30, 0.17m)),
             "at" => AuditFixtures.Input(Spend(4, 60, 0.30m)),
             "exact" => AuditFixtures.Input(Spend(5, 50, 0.25m)),
-            "trips" => AuditFixtures.Input(Spend(4, 60, 0.3775m)),
+            "trips" => Tripped(AuditFixtures.Input(Spend(4, 60, 0.3775m)), AuditFixtures.TraceId),
             "apart" => AuditFixtures.Input(Spend(2, 360, 0.70m)),
             "custom settings" => AuditFixtures.Input(Spend(5, 120, 0.17m)) with
             {
                 Breaker = new BreakerSettings { VelocityCredits = 100m, VelocityWindowMinutes = 10 },
             },
+            "tripped under other settings" => Tripped(AuditFixtures.Input(Spend(4, 60, 0.30m)), AuditFixtures.TraceId),
+            "imported trips" => AuditFixtures.Input(
+                Spend(4, 60, 0.3775m).Select(span => span with { IngestSource = "import:copilot" })),
+            "trips without a record" => AuditFixtures.Input(Spend(4, 60, 0.3775m)),
+            "another chain's trip" => Tripped(AuditFixtures.Input(Spend(4, 60, 0.3775m)), "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1"),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
 
@@ -121,6 +141,10 @@ public sealed class VelocityRuleTests
             "high [requests=20 requests, outputTokens=2400 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0.546 premium_model_trivial_turn"
         },
         { "without pricing", "none" },
+        {
+            "economy model pricier",
+            "warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0 premium_model_trivial_turn"
+        },
     };
 
     [Theory]
@@ -147,6 +171,7 @@ public sealed class VelocityRuleTests
             "day boundary" => AuditFixtures.Input(Trivial(10, TimeSpan.FromMinutes(14 * 60 + 50))),
             "high" => AuditFixtures.Input(Trivial(20)),
             "without pricing" => AuditFixtures.Input(Trivial(10)) with { Pricing = null },
+            "economy model pricier" => AuditFixtures.Input(Trivial(10)) with { EconomyModel = "claude-fable-5" },
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
 
@@ -223,6 +248,10 @@ public sealed class VelocityRuleTests
 
     // count requests of one trace ending everySeconds apart, each billed cost.
     private static AuditSpan[] Spend(int count, int everySeconds, decimal cost) => Burst(count, everySeconds * 1_000, cost);
+
+    // input with a recorded credit_velocity trip of trace.
+    private static AuditInput Tripped(AuditInput input, string trace) =>
+        input with { VelocityTrippedTraces = new HashSet<string>(StringComparer.Ordinal) { trace } };
 
     // count short, tool-free claude-opus-5.5 requests 2 minutes apart from Start + offset: 30,000 input tokens (24,000 read
     // from the cache) and 120 output tokens, billed $0.0312 each.

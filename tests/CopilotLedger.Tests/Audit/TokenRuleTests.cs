@@ -128,6 +128,11 @@ public sealed class TokenRuleTests
             "warning [requests=5 requests, inputTokens=200000 tokens, cacheReadInputTokens=0 tokens, uncachedInputTokens=200000 tokens, cacheHitRatio=0 ratio] 0 cache_miss_streak",
             0, 0
         },
+        {
+            "cached above input",
+            "warning [requests=5 requests, inputTokens=200000 tokens, cacheReadInputTokens=0 tokens, uncachedInputTokens=200000 tokens, cacheHitRatio=0 ratio] 0 cache_miss_streak",
+            0, 0
+        },
     };
 
     [Theory]
@@ -172,6 +177,7 @@ public sealed class TokenRuleTests
                 ? span with { PricingStatus = PricingStatus.NoRateForDate, CostUsd = 0m, AiCredits = 0m }
                 : span)],
             "no cached rate" => [.. Misses(5).Select(span => span with { Model = "claude-sonnet-5.5" })],
+            "cached above input" => [.. Misses(5).Select(span => span with { Model = "claude-sonnet-5.5" })],
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         });
         if (name == "no cached rate")
@@ -180,6 +186,16 @@ public sealed class TokenRuleTests
             {
                 Pricing = JsonRateCardCalculator.Parse(
                     RateFixtures.ByokTestRatesJson.Replace("\"cachedInputPer1M\": 0.10", "\"cachedInputPer1M\": null", StringComparison.Ordinal)),
+            };
+        }
+
+        // A card may price cached input above input; the difference is never negative.
+        if (name == "cached above input")
+        {
+            audit = audit with
+            {
+                Pricing = JsonRateCardCalculator.Parse(
+                    RateFixtures.ByokTestRatesJson.Replace("\"cachedInputPer1M\": 0.10", "\"cachedInputPer1M\": 3.00", StringComparison.Ordinal)),
             };
         }
 

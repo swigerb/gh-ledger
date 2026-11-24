@@ -1,8 +1,8 @@
 namespace CopilotLedger.Core.Audit;
 
-// failed_tool_retry: one agent invocation retrying a failing tool call, below the circuit breaker's churn threshold. The
-// failure test is the breaker's (AuditToolOutcomes.Classify); a call of another tool, a success, or an unknown outcome ends
-// the streak.
+// failed_tool_retry: one agent invocation retrying a failing tool call, from 3 failures in a row, or one less than the
+// circuit breaker's churn threshold when that's lower, but at least 2. The failure test is the breaker's
+// (AuditToolOutcomes.Classify); a call of another tool, a success, or an unknown outcome ends the streak.
 internal sealed class FailedToolRetryRule : IAuditRule
 {
     public string Id => AuditRuleIds.FailedToolRetry;

@@ -177,7 +177,8 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
         SqliteLedgerStore.ReadBreakerSettingsAsync(_connection, _transaction, cancellationToken);
 
     // What an audit of the filter reads: its spans and tool calls, the coverage of GetCoverageAsync with export's tool history,
-    // and the breaker settings; AuditInput's defaults for the rest. Throws ArgumentNullException for a null filter.
+    // the breaker settings, and the selected prompt chains' recorded credit_velocity trips, reset or not; AuditInput's
+    // defaults for the rest. Throws ArgumentNullException for a null filter.
     public async Task<AuditInput> GetAuditInputAsync(
         LedgerFilter filter,
         DateTimeOffset generatedAt,
@@ -200,6 +201,7 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
         };
         ExportCoverageRow coverage = await GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
         BreakerSettings breaker = await GetBreakerSettingsAsync(cancellationToken);
+        IReadOnlyList<BreakerTrip> trips = await GetBreakerTripsAsync(filter, cancellationToken);
         return new AuditInput
         {
             Spans = spans,
@@ -218,6 +220,9 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
                 LedgerIncompleteImportLogs = coverage.LedgerIncompleteImportLogs,
             },
             Breaker = breaker,
+            VelocityTrippedTraces = new HashSet<string>(
+                trips.Where(trip => trip.Rule == BreakerRule.CreditVelocity).Select(trip => trip.TraceId),
+                StringComparer.Ordinal),
         };
     }
 

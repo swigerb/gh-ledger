@@ -441,12 +441,12 @@ gh ledger audit [--repo <key>] [--branch <name>] [--pr <n>] [--since <period>] [
 |---|---|---|---|---|
 | `turn_velocity` | One agent invocation sending many requests within 5 minutes | 30 requests | 60 requests | The billed cost of the busiest 5 minutes, less the typical (lower median) 5-minute cost of the conversation |
 | `tool_loop` | One agent invocation calling the same tool again and again with the same outcome | 8 calls in a row | 16 calls | The billed cost of the invocation's requests between the first call and the last |
-| `failed_tool_retry` | One agent invocation retrying a failing tool call | 3 failures in a row, always below the breaker's `--churn-failures` | One less than `--churn-failures` | As `tool_loop` |
+| `failed_tool_retry` | One agent invocation retrying a failing tool call | 3 failures in a row, or one less than `--churn-failures` when that's lower, but at least 2 | One less than `--churn-failures` | As `tool_loop` |
 | `context_bloat` | A request of at least 50,000 input tokens with at least 200 times as much input as output, or no output | Info only | | None |
 | `context_growth` | One agent invocation's requests to one model whose input grew at least 4 times over 10 or more requests | Info only | | None |
 | `cache_miss_streak` | Requests in a row, of one agent invocation and model, each with at least 20,000 input tokens and less than 10% of them read from the prompt cache | 5 requests | 10 requests | What the uncached input cost above the cached input price |
 | `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
-| `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity without tripping it | Info only | | None |
+| `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity, unless the breaker recorded a trip for it. Only the daemon trips the breaker, and only on live spans, so an imported chain, or one recorded before the breaker or under other settings, can be reported above 100% | Info only | | None |
 <!-- /audit-rules -->
 
 - **One lens.** Estimated impacts are billed USD: GitHub AI credits at $0.01 each, and Foundry BYOK. Repriced impacts use the rates in use, your overlay included. A local request's impact is $0. An impact that would include a request without a billed price is unknown (`-` in the table, `null` in JSON), never $0. Findings can overlap, so their impacts aren't added together, and there's no total.

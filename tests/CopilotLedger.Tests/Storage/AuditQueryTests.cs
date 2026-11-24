@@ -426,4 +426,25 @@ public sealed class AuditQueryTests
             (coverage.ToolHistoryStart, coverage.ImportedToolCallsWithoutDetail, coverage.ImportedRequestsWithoutToolData,
                 coverage.SpansBeforeToolHistory, coverage.InsufficientToolHistory, Assert.Single(input.Spans).ToolCallCount));
     }
+
+    // The input holds the selected prompt chains' recorded credit_velocity trips, reset or not, read in its snapshot. In
+    // ExportSeeds, A's trip counts once reset; C's retry_churn trip is selected but doesn't count; E's trip has no selected
+    // request; and the main branch selects none of A's requests.
+    [Theory]
+    [InlineData(null, 2, ExportSeeds.A)]
+    [InlineData("main", 1, null)]
+    public async Task AQ13_TheInput_HoldsTheSelectedChainsRecordedVelocityTrips(string? branch, int selectedTrips, string? trace)
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        await store.ResetBreakerTripsAsync(BreakerTripFilter.All);
+
+        await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();
+        LedgerFilter filter = new() { Branch = branch };
+        AuditInput input = await snapshot.GetAuditInputAsync(filter, ExportSeeds.GeneratedAt);
+
+        string[] expected = trace is null ? [] : [trace];
+        Assert.Equal(expected, input.VelocityTrippedTraces.Order(StringComparer.Ordinal));
+        Assert.Equal(selectedTrips, (await snapshot.GetBreakerTripsAsync(filter)).Count);
+    }
 }
