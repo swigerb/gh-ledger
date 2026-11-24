@@ -211,7 +211,7 @@ public static class ReceiptMarkdown
         return pad ? $"{fence} {content} {fence}" : $"{fence}{content}{fence}";
     }
 
-    private static string ChannelId(BillingChannel channel) => channel switch
+    internal static string ChannelId(BillingChannel channel) => channel switch
     {
         BillingChannel.GitHubAiCredits => "github_ai_credits",
         BillingChannel.FoundryByok => "foundry_byok",

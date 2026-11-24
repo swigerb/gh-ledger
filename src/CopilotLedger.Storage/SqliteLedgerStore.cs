@@ -36,17 +36,21 @@ public sealed partial class SqliteLedgerStore
         RETURNING id;
         """;
 
-    // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
-    // Only effective rows count: an imported row that a live row superseded is kept for diagnosis and never reported.
-    private const string FilterSql = """
+    // The conditions of a LedgerFilter on a span row, whatever its accounting state, with parameters from AddFilterParameters.
+    // A null filter property matches every span.
+    private const string SpanFilterSql = """
         (@from IS NULL OR start_time_unix_ms >= @from)
           AND (@to IS NULL OR start_time_unix_ms < @to)
           AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
           AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
           AND (@pull_request IS NULL OR pull_request_number = @pull_request)
           AND (@agent IS NULL OR COALESCE(agent_name, '(none)') = @agent)
-          AND accounting_state = 'effective'
+          AND (@conversation_id IS NULL OR conversation_id = @conversation_id)
         """;
+
+    // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
+    // Only effective rows count: an imported row that a live row superseded is kept for diagnosis and never reported.
+    private const string FilterSql = SpanFilterSql + "\n  AND accounting_state = 'effective'";
 
     // An execute_tool link counts unless an imported row that was superseded owns it (its live twin's links count instead).
     private const string EffectiveLinkSql = """
@@ -64,6 +68,16 @@ public sealed partial class SqliteLedgerStore
     private const string SequenceSql = """
         trace_id, agent_span_id, COALESCE(repo_slug, repo_root, '(none)'), COALESCE(branch_name, '(none)'),
                                  COALESCE(conversation_id, '(none)'), COALESCE(model_id, '(none)')
+        """;
+
+    // Budgets with their key's all-time effective spend, in ReadBranchBudgetsAsync's column order, from branch_budgets AS b.
+    private const string BranchBudgetSelectSql = """
+        SELECT b.repository, b.branch, b.budget_usd_pico, b.set_at_unix_ms, b.alerted_at_unix_ms, b.notified_at_unix_ms,
+               (SELECT COALESCE(SUM(s.cost_usd_pico), 0) FROM spans AS s
+                 WHERE COALESCE(s.repo_slug, s.repo_root, '(none)') = b.repository
+                   AND COALESCE(s.branch_name, '(none)') = b.branch
+                   AND s.accounting_state = 'effective') AS spent_usd_pico
+        FROM branch_budgets AS b
         """;
 
     private readonly TimeProvider _timeProvider;
@@ -347,6 +361,18 @@ public sealed partial class SqliteLedgerStore
 
         // One read transaction, so both queries see the same spans.
         await using SqliteTransaction snapshot = connection.BeginTransaction(deferred: true);
+        return await ReadRollupAsync(snapshot, grouping, filter, whatIf, cancellationToken);
+    }
+
+    // GetRollupAsync's queries, in a read transaction that the caller owns.
+    internal static async Task<IReadOnlyList<LedgerRollupRow>> ReadRollupAsync(
+        SqliteTransaction snapshot,
+        LedgerGrouping grouping,
+        LedgerFilter filter,
+        JsonRateCardCalculator? whatIf,
+        CancellationToken cancellationToken)
+    {
+        SqliteConnection connection = snapshot.Connection!;
         (string keyColumns, string keyAliases) = RollupKey(grouping);
         Dictionary<string, RetailTotals>? repriced = whatIf is null
             ? null
@@ -431,6 +457,18 @@ public sealed partial class SqliteLedgerStore
         CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        return await ReadCacheEfficiencyAsync(connection, null, grouping, filter, cancellationToken);
+    }
+
+    // GetCacheEfficiencyAsync's query on connection, in transaction when it isn't null.
+    internal static async Task<IReadOnlyList<CacheEfficiencyRow>> ReadCacheEfficiencyAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        LedgerGrouping grouping,
+        LedgerFilter filter,
+        CancellationToken cancellationToken)
+    {
         (string keyColumns, string keyAliases) = grouping switch
         {
             LedgerGrouping.Repository =>
@@ -458,8 +496,8 @@ public sealed partial class SqliteLedgerStore
             _ => throw new ArgumentOutOfRangeException(nameof(grouping), grouping, null),
         };
 
-        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = $"""
             SELECT {keyColumns},
                    COUNT(*)                                                                AS span_count,
@@ -942,13 +980,8 @@ public sealed partial class SqliteLedgerStore
         EnsureInitialized();
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT b.repository, b.branch, b.budget_usd_pico, b.set_at_unix_ms, b.alerted_at_unix_ms, b.notified_at_unix_ms,
-                   (SELECT COALESCE(SUM(s.cost_usd_pico), 0) FROM spans AS s
-                     WHERE COALESCE(s.repo_slug, s.repo_root, '(none)') = b.repository
-                       AND COALESCE(s.branch_name, '(none)') = b.branch
-                       AND s.accounting_state = 'effective') AS spent_usd_pico
-            FROM branch_budgets AS b
+        command.CommandText = $"""
+            {BranchBudgetSelectSql}
             WHERE (@repository IS NULL OR b.repository = @repository) AND (@branch IS NULL OR b.branch = @branch) ORDER BY b.repository, b.branch;
             """;
         command.Parameters.AddWithValue("@repository", OrDbNull(repository));
@@ -1213,6 +1246,18 @@ public sealed partial class SqliteLedgerStore
 
         // One read transaction, so every query sees the same spans.
         await using SqliteTransaction snapshot = connection.BeginTransaction(deferred: true);
+        return await ReadTopPromptChainsAsync(snapshot, filter, limit, whatIf, cancellationToken);
+    }
+
+    // GetTopPromptChainsAsync's queries, in a read transaction that the caller owns.
+    internal static async Task<IReadOnlyList<PromptChainRow>> ReadTopPromptChainsAsync(
+        SqliteTransaction snapshot,
+        LedgerFilter filter,
+        int limit,
+        JsonRateCardCalculator? whatIf,
+        CancellationToken cancellationToken)
+    {
+        SqliteConnection connection = snapshot.Connection!;
         List<PromptChainData> data = [];
         await using (SqliteCommand query = connection.CreateCommand())
         {
@@ -1383,7 +1428,18 @@ public sealed partial class SqliteLedgerStore
     {
         EnsureInitialized();
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        return await ReadPromptCountAsync(connection, null, filter, cancellationToken);
+    }
+
+    // GetPromptCountAsync's query on connection, in transaction when it isn't null.
+    internal static async Task<long> ReadPromptCountAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        LedgerFilter filter,
+        CancellationToken cancellationToken)
+    {
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = $"""
             SELECT COUNT(DISTINCT trace_id)
             FROM spans
@@ -1407,7 +1463,19 @@ public sealed partial class SqliteLedgerStore
         ArgumentNullException.ThrowIfNull(selector);
         ArgumentNullException.ThrowIfNull(filter);
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        return await ReadTurnBreakdownAsync(connection, null, selector, filter, cancellationToken);
+    }
+
+    // GetTurnBreakdownAsync's query on connection, in transaction when it isn't null.
+    internal static async Task<IReadOnlyList<TurnTokenRow>> ReadTurnBreakdownAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        TurnSelector selector,
+        LedgerFilter filter,
+        CancellationToken cancellationToken)
+    {
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = $"""
             WITH selected AS (
                 SELECT *,
@@ -1583,6 +1651,32 @@ public sealed partial class SqliteLedgerStore
         };
     }
 
+    // A read snapshot for gh ledger export: one connection and one deferred transaction that every query of the export shares.
+    // Its first read starts the snapshot, so rows recorded afterward never appear in it. Throws InvalidOperationException if
+    // InitializeAsync hasn't run.
+    public async Task<LedgerExportSnapshot> OpenExportSnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+        SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        try
+        {
+            SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
+            await using (SqliteCommand pin = connection.CreateCommand())
+            {
+                pin.Transaction = transaction;
+                pin.CommandText = "SELECT COUNT(*) FROM sqlite_schema;";
+                await pin.ExecuteScalarAsync(cancellationToken);
+            }
+
+            return new LedgerExportSnapshot(connection, transaction);
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
+    }
+
     private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
     {
         SqliteConnection connection = new(_connectionString);
@@ -1632,6 +1726,7 @@ public sealed partial class SqliteLedgerStore
         command.Parameters.AddWithValue("@branch", OrDbNull(filter.Branch));
         command.Parameters.AddWithValue("@pull_request", OrDbNull(filter.PullRequestNumber));
         command.Parameters.AddWithValue("@agent", OrDbNull(filter.Agent));
+        command.Parameters.AddWithValue("@conversation_id", OrDbNull(filter.ConversationId));
     }
 
     private static async Task<IReadOnlyList<BreakerTrip>> ReadTripsAsync(

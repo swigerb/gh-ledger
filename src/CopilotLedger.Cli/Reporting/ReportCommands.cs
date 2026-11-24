@@ -1182,40 +1182,7 @@ internal static class ReportCommands
         writer.WriteStartArray("rows");
         for (int index = 0; index < rows.Count; index++)
         {
-            PromptChainRow row = rows[index];
-            writer.WriteStartObject();
-            writer.WriteNumber("rank", index + 1);
-            writer.WriteString("traceId", row.TraceId);
-            if (row.ConversationId is null)
-            {
-                writer.WriteNull("conversationId");
-            }
-            else
-            {
-                writer.WriteString("conversationId", row.ConversationId);
-            }
-
-            LedgerFormat.WriteTime(writer, "startTime", row.StartTime);
-            LedgerFormat.WriteTime(writer, "endTime", row.EndTime);
-            writer.WriteString("repository", row.Repository);
-            writer.WriteString("branch", row.Branch);
-            writer.WriteStartArray("agents");
-            foreach (string agent in row.Agents)
-            {
-                writer.WriteStringValue(agent);
-            }
-
-            writer.WriteEndArray();
-            writer.WriteStartArray("models");
-            foreach (string model in row.Models)
-            {
-                writer.WriteStringValue(model);
-            }
-
-            writer.WriteEndArray();
-            LedgerFormat.WriteTotals(writer, row);
-            LedgerFormat.WriteApiEquivalent(writer, row);
-            writer.WriteEndObject();
+            LedgerFormat.WritePromptChain(writer, rows[index], index + 1);
         }
 
         writer.WriteEndArray();
@@ -1262,19 +1229,7 @@ internal static class ReportCommands
                     break;
             }
 
-            writer.WriteNumber("spans", row.SpanCount);
-            writer.WriteNumber("cacheReportedSpans", row.CacheReportedSpanCount);
-            writer.WriteNumber("cacheUnreportedSpans", row.CacheUnreportedSpanCount);
-            writer.WriteNumber("inputTokens", row.InputTokens);
-            writer.WriteNumber("outputTokens", row.OutputTokens);
-            writer.WriteNumber("maxInputTokens", row.MaxInputTokens);
-            LedgerFormat.WriteDecimal(writer, "averageInputTokensPerTurn", row.AverageInputTokensPerTurn);
-            writer.WriteNumber("reportedInputTokens", row.ReportedInputTokens);
-            writer.WriteNumber("reportedCacheReadInputTokens", row.ReportedCacheReadInputTokens);
-            writer.WriteNumber("reportedCacheWriteInputTokens", row.ReportedCacheWriteInputTokens);
-            LedgerFormat.WriteNullable(writer, "uncachedInputTokens", row.UncachedInputTokens);
-            writer.WriteNumber("estimatedUncachedInputTokens", row.EstimatedUncachedInputTokens);
-            LedgerFormat.WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
+            LedgerFormat.WriteCacheFields(writer, row);
             writer.WriteEndObject();
         }
 
@@ -1404,7 +1359,7 @@ internal static class ReportCommands
         writer.WriteEndArray();
     }
 
-    private static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
+    internal static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
         new()
         {
             SpanCount = rows.Sum(row => row.SpanCount),
@@ -1475,7 +1430,7 @@ internal static class ReportCommands
                     ? "+" + LedgerFormat.Count(delta)
                     : LedgerFormat.Count(delta);
 
-    private static string StateName(CacheCounterState state) => state switch
+    internal static string StateName(CacheCounterState state) => state switch
     {
         CacheCounterState.Reported => "reported",
         CacheCounterState.Absent => "absent",

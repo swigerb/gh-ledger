@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text;
 using Microsoft.Win32;
 
@@ -66,6 +68,13 @@ public sealed class SystemCliPlatform : ICliPlatform
 
     public bool FileExists(string path) => File.Exists(path);
 
+    public void MoveFile(string source, string destination, bool overwrite) => File.Move(source, destination, overwrite);
+
+    public void DeleteFile(string path) => File.Delete(path);
+
+    public Task WriteFileAsync(string path, byte[] bytes, CancellationToken cancellationToken) =>
+        File.WriteAllBytesAsync(path, bytes, cancellationToken);
+
     public string? FindOnPath(string fileName)
     {
         string? path = Environment.GetEnvironmentVariable("PATH");
@@ -88,6 +97,52 @@ public sealed class SystemCliPlatform : ICliPlatform
         }
 
         return null;
+    }
+
+    // gh-ledger runs with invariant globalization, which turns off .NET's IANA-to-Windows mapping on Windows, so an IANA ID that
+    // Windows doesn't know is mapped through Windows' own ICU.
+    public TimeZoneInfo? FindTimeZone(string id)
+    {
+        if (id.Length is 0 or > 128 || id.Trim().Length != id.Length)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (TimeZoneInfo.TryFindSystemTimeZoneById(id, out TimeZoneInfo? zone))
+            {
+                return zone;
+            }
+
+            return OperatingSystem.IsWindows()
+                && WindowsTimeZoneId(id) is string windowsId
+                && TimeZoneInfo.TryFindSystemTimeZoneById(windowsId, out zone)
+                    ? zone
+                    : null;
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return null;
+        }
+    }
+
+    // The Windows time zone ID that Windows' ICU (icu.dll, Windows 10 1903 and later) maps an IANA ID to; null when it maps to
+    // none or icu.dll isn't there.
+    [SupportedOSPlatform("windows")]
+    public static string? WindowsTimeZoneId(string ianaId)
+    {
+        char[] buffer = new char[128];
+        int status = 0;
+        try
+        {
+            int length = GetWindowsTimeZoneId(ianaId, ianaId.Length, buffer, buffer.Length, ref status);
+            return status > 0 || length is <= 0 or > 128 ? null : new string(buffer, 0, length);
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
     }
 
     public async Task<ProcessRunResult> RunAsync(
@@ -180,4 +235,10 @@ public sealed class SystemCliPlatform : ICliPlatform
         {
         }
     }
+
+    // ICU's int32_t ucal_getWindowsTimeZoneID(const UChar* id, int32_t len, UChar* winid, int32_t winidCapacity, UErrorCode* status):
+    // the result's length, 0 for an unknown or unmappable ID; a status above 0 is an error.
+    [DllImport("icu.dll", EntryPoint = "ucal_getWindowsTimeZoneID", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int GetWindowsTimeZoneId(string id, int length, [Out] char[] windowsId, int capacity, ref int status);
 }

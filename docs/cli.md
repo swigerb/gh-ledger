@@ -171,7 +171,7 @@ These are the only fields import keeps, and where each comes from. Fields in no 
 | `spans.repo_slug` | `data.context.repository`: an `owner/repo` slug, or the slug of a remote URL, credentials removed | The slug of `payload.git.repository_url`, credentials removed |
 | `spans.branch_name`, `spans.head_commit_sha` | `data.context.branch` and `data.context.headCommit` | `payload.git.branch` and `payload.git.commit_hash` |
 | `spans.canonical_usage_id` | SHA-256 of `data.usage.serviceRequestId`, or of a compaction's `data.serviceRequestId`; none for BYOK | — |
-| `spans.imported_tool_call_count` | `data.usage.numToolCalls` | — |
+| `spans.imported_tool_call_count` | `data.usage.numToolCalls`, or none when it's missing or invalid; 0 for a compaction, which makes no tool calls | — |
 | `spans.model_id`, `spans.rate_card_model_id`, `spans.tier_name`, `spans.billing_channel`, `spans.pricing_status`, `spans.rates_version`, `spans.cost_usd_pico`, `spans.saved_usd_pico`, `spans.api_equivalent_usd_pico`, `spans.api_equivalent_status`, `spans.api_rate_card_model_id`, `spans.api_rates_version`, `spans.api_rate_card_sha256` | Priced from the fields above, as for live spans | Priced from the fields above, as for live spans |
 | `spans.id`, `spans.recorded_at_unix_ms`, `spans.accounting_state`, `spans.superseded_by` | Kept by the ledger | Kept by the ledger |
 | `span_links.trace_id`, `span_links.conversation_id`, `span_links.owner_span_row_id` | The usage record whose response asked for the tool: the latest one of the tool's agent | — |
@@ -290,6 +290,118 @@ The `API-equivalent (retail)` line and column compare the same turns with API li
 
 `export-pr` needs a branch with at least one commit and a GitHub remote named `origin`, and it refuses a receipt over 65,536 bytes, the most the action posts.
 
+## Export a report
+
+`gh ledger export` writes one HTML file that shows the spend of a repository, a branch, a pull request, or a Copilot session: summary cards, a timeline of requests and tool calls, cost by model and agent, cache efficiency, the costliest prompt chains, the spend tables, and circuit-breaker trips and budgets. It opens in any browser, offline and without a server. `--bundle` also writes a ZIP with the report, a manifest of SHA-256 hashes, and the data as JSON. For a walkthrough, see [Attach a cost report to a pull request](guide.md#attach-a-cost-report-to-a-pull-request).
+
+```text
+gh ledger export [--format html] [--out <path>] [--bundle] [--repo <key> | --all-repos] [--branch <name>] [--pr <n>]
+                 [--conversation <id>] [--since <period>] [--time-zone <IANA id>] [--include-local-paths]
+                 [--max-timeline-spans <n>] [--generated-at <UTC time>] [--force]
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--format` | `html` | The report format; `html` is the only one. |
+| `--out` | `copilot-ledger-report.html` | The report file, relative to the current directory. It must end in `.html` or `.htm`, and its folder must exist. |
+| `--bundle` | | Also write a ZIP with the same name and `.zip`, beside the report. |
+| `--repo`, `--all-repos` | The current repository | One repository key, or every repository. Outside a Git repository, every repository. |
+| `--branch` | | One branch, or `(none)`. |
+| `--pr` | | Requests recorded with this pull request number, as `status --cache --by pr` groups them. Only branches that track `refs/pull/<n>/head` have one, so `--branch` is usually what a pull request's report needs. |
+| `--conversation` | | One Copilot session ID. |
+| `--since` | `30d` | `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date, counted at the generation time in the export's time zone. |
+| `--time-zone` | This computer's | An IANA time zone ID, such as `America/New_York`, for dates, times, and night shading. On Windows, IANA IDs need Windows 10 version 1903 or later, and Windows IDs such as `Eastern Standard Time` also work. |
+| `--include-local-paths` | | Show the local roots of repositories without a GitHub remote. Without it, such a repository shows as its folder name, or as `(root folder)` when its root is a drive or a share, so two folders with the same name look the same. |
+| `--max-timeline-spans` | `20000` | The most requests, and the most tool calls, that the timeline draws: the latest ones. 0 to 100,000. |
+| `--generated-at` | Now | The generation time to record, in UTC, such as `2026-11-21T21:30:00Z`, to reproduce an earlier export. |
+| `--force` | | Replace existing files that aren't read-only. If the report can't be replaced, the ZIP is put back as it was. |
+
+The export reads the ledger once, so the report and the bundle agree. It covers the requests that start from the first day of `--since` up to the generation time, and the tool calls of their prompt chains in the same window; breaker trips are those of the same prompt chains, and budgets those of the requests' branches, with their all-time spend as `budget list` shows it. Standard output names the files, the number of requests, the scope, and the period, and never a folder:
+
+```text
+Wrote copilot-ledger-report.html: 8 requests in contoso/webapp, branch feature/search (last 30 days).
+Wrote copilot-ledger-report.zip: report.html, manifest.json, and 4 telemetry files.
+```
+
+When the timeline leaves requests or tool calls out, a third line says how many it draws.
+
+### What the report shows
+
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, imported requests whose session logs give no tool-call count (every Codex request, because rollouts record no tool calls, and a Copilot request whose `numToolCalls` is missing or invalid; a compaction makes no tool calls, so its count is 0), unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete; imported requests without a tool-call count make the tool calls incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call or agent link the ledger keeps, because the daemon deletes older ones by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. A ledger that keeps none has no tool history: every request may be missing its tool calls, and `retainedFromUtc` is the generation time. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Hold Ctrl or Command and scroll, or pinch, to zoom, as far as the axis can still label two times; drag sideways to pan; or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+- **Cache efficiency, prompt chains, spend tables, and the circuit breaker:** the reports' numbers, with sortable columns.
+
+`Unpriced` and `n/a` are never shown as `$0.00` or `0.0%`, and a hatched mark flags requests without a price. The page works without JavaScript: every chart has a table, and the script only adds zooming, the view switch, and sorting. It loads nothing: its Content Security Policy is `default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:`. GitHub accepts `.html` and `.zip` attachments up to 25 MB, and at the default timeline cap a report stays near 6 MB at most; lower `--max-timeline-spans` for a smaller one.
+
+### The bundle
+
+The ZIP holds exactly six files: `manifest.json`, `report.html` (the same bytes as the report beside it), and `telemetry/prompt-chains.json`, `telemetry/spans.json`, `telemetry/summary.json`, and `telemetry/tool-calls.json`. `spans.json` has every request, however many the timeline draws, and `tool-calls.json` every tool call. Money is an exact decimal number, as in every gh-ledger JSON: parse it as a decimal, not a float.
+
+```json
+{
+  "schemaVersion": 1,
+  "tool": "gh-ledger",
+  "toolVersion": "0.4.1",
+  "generatedAtUtc": "2026-11-21T21:30:00.0000000+00:00",
+  "ratesVersions": ["2026-11-23"],
+  "apiRateCards": [{ "ratesVersion": "2026-11-23", "sha256": "<64 hexadecimal digits>" }],
+  "filter": { "repo": "contoso/webapp", "allRepositories": false, "branch": "feature/search", "pr": null, "conversation": null, "since": "30d", "period": "last 30 days", "fromUtc": "…", "toUtc": "…" },
+  "timeZone": { "requested": null, "id": "…", "nightStartLocal": "18:00", "nightEndLocal": "06:00", "nightBandsUtc": [] },
+  "options": { "maxTimelineSpans": 20000, "includeLocalPaths": false },
+  "privacy": { "contentFree": true, "localPathsIncluded": false, "excluded": ["prompts", "responses", "tool arguments", "tool results", "file contents", "remote URLs"] },
+  "files": [{ "path": "report.html", "bytes": 123456, "sha256": "<64 hexadecimal digits>" }],
+  "coverage": { "requestsComplete": true, "warnings": [], "…": "…" }
+}
+```
+
+`files` lists the other five files with their exact sizes and SHA-256 hashes; the manifest doesn't list itself. The hashes show that the files weren't changed after they were written, not who wrote them. The same gh-ledger build on the same operating system writes the same bytes again from an unchanged ledger: repeat the export's filters with `--generated-at` set to `generatedAtUtc` and `--time-zone` set to `timeZone.requested`, or to `timeZone.id`. A Windows ID works only on Windows, so pass an IANA `--time-zone` when a report may be reproduced elsewhere. A request recorded after the export but started before it changes the result. `filter.repo` of a repository without a GitHub remote is its folder name, which `--repo` doesn't select (a slug has a `/`, and a folder name never does): to reproduce such an export, pass the repository's full root to `--repo`, or export with `--include-local-paths`, which records the root.
+
+### What export includes
+
+These are the only fields export writes. In the table, `.` is a file's top level, a name is a nested object, and `name[]` is each object of an array. `report.html` means its `ledger-data` block. `repositoryRoot` is written only with `--include-local-paths`.
+
+<!-- export-allowlist -->
+| File | Object | Fields |
+|---|---|---|
+| `manifest.json` | `.` | `schemaVersion`, `tool`, `toolVersion`, `generatedAtUtc`, `ratesVersions`, `apiRateCards`, `filter`, `timeZone`, `options`, `privacy`, `files`, `coverage` |
+| `manifest.json` | `apiRateCards[]` | `ratesVersion`, `sha256` |
+| `manifest.json` | `options` | `maxTimelineSpans`, `includeLocalPaths` |
+| `manifest.json` | `privacy` | `contentFree`, `localPathsIncluded`, `excluded` |
+| `manifest.json` | `files[]` | `path`, `bytes`, `sha256` |
+| `report.html` | `.` | `schemaVersion`, `generatedAtUtc`, `toolVersion`, `filter`, `timeZone`, `timeline`, `coverage` |
+| `report.html` | `timeline` | `fromUtc`, `toUtc`, `width`, `minWidth`, `ticks` |
+| `report.html` | `timeline.ticks[]` | `x`, `level`, `label` |
+| `manifest.json`, `report.html` | `filter` | `repo`, `allRepositories`, `branch`, `pr`, `conversation`, `since`, `period`, `fromUtc`, `toUtc` |
+| `manifest.json`, `report.html` | `timeZone` | `requested`, `id`, `nightStartLocal`, `nightEndLocal`, `nightBandsUtc` |
+| `manifest.json`, `report.html` | `timeZone.nightBandsUtc[]` | `fromUtc`, `toUtc` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage` | `requestsComplete`, `warnings`, `spans`, `spansBySource`, `supersededMatchedImportSpans`, `supersededUnmatchedImportSpans`, `ledgerAmbiguousImportRecords`, `ledgerIncompleteImportLogs`, `unpricedSpans`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans`, `cacheReportedSpans`, `cacheAbsentSpans`, `cacheLegacyUnknownSpans`, `toolHistory`, `timeline` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage.spansBySource[]` | `source`, `spans` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage.toolHistory` | `complete`, `retentionDays`, `retainedFromUtc`, `spansBeforeRetention`, `importedToolCallsWithoutDetail`, `importedRequestsWithoutToolData` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage.timeline` | `truncated`, `maxSpans`, `spans`, `spansDrawn`, `toolCalls`, `toolCallsDrawn` |
+| `telemetry/summary.json` | `.` | `schemaVersion`, `totals`, `byModel`, `byAgent`, `byBranch`, `byChannelModel`, `cacheByModel`, `cacheByAgent`, `breakerTrips`, `budgets`, `coverage` |
+| `telemetry/summary.json` | `totals` | `spans`, `unpricedSpans`, `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`, `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans`, `cacheReportedSpans`, `cacheUnreportedSpans`, `cacheHitRatio`, `promptChains` |
+| `telemetry/summary.json` | `byModel[]` | `model`, `spans`, `unpricedSpans`, `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`, `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans`, `cacheReportedSpans`, `cacheUnreportedSpans`, `cacheHitRatio` |
+| `telemetry/summary.json` | `byAgent[]` | `agent`, `spans`, `unpricedSpans`, `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`, `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans`, `cacheReportedSpans`, `cacheUnreportedSpans`, `cacheHitRatio` |
+| `telemetry/summary.json` | `byBranch[]` | `repository`, `branch`, `spans`, `unpricedSpans`, `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`, `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans`, `cacheReportedSpans`, `cacheUnreportedSpans`, `cacheHitRatio` |
+| `telemetry/summary.json` | `byChannelModel[]` | `channel`, `model`, `spans`, `unpricedSpans`, `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`, `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans`, `cacheReportedSpans`, `cacheUnreportedSpans`, `cacheHitRatio` |
+| `telemetry/summary.json` | `cacheByModel[]` | `model`, `spans`, `cacheReportedSpans`, `cacheUnreportedSpans`, `inputTokens`, `outputTokens`, `maxInputTokens`, `averageInputTokensPerTurn`, `reportedInputTokens`, `reportedCacheReadInputTokens`, `reportedCacheWriteInputTokens`, `uncachedInputTokens`, `estimatedUncachedInputTokens`, `cacheHitRatio` |
+| `telemetry/summary.json` | `cacheByAgent[]` | `agent`, `spans`, `cacheReportedSpans`, `cacheUnreportedSpans`, `inputTokens`, `outputTokens`, `maxInputTokens`, `averageInputTokensPerTurn`, `reportedInputTokens`, `reportedCacheReadInputTokens`, `reportedCacheWriteInputTokens`, `uncachedInputTokens`, `estimatedUncachedInputTokens`, `cacheHitRatio` |
+| `telemetry/summary.json` | `breakerTrips[]` | `rule`, `traceId`, `conversationId`, `repository`, `repositoryRoot`, `branch`, `trippedAt`, `open`, `resetAt`, `windowCostUsd`, `windowMinutes`, `failureCount` |
+| `telemetry/summary.json` | `budgets[]` | `repository`, `branch`, `budgetAiCredits`, `spentAiCredits`, `exceeded` |
+| `telemetry/spans.json` | `.` | `schemaVersion`, `spans` |
+| `telemetry/spans.json` | `spans[]` | `traceId`, `spanId`, `parentSpanId`, `operationName`, `conversationId`, `agent`, `provider`, `requestModel`, `responseModel`, `model`, `startTime`, `endTime`, `inputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`, `uncachedInputTokens`, `outputTokens`, `cacheReadState`, `cacheWriteState`, `billingChannel`, `pricingStatus`, `ratesVersion`, `costUsd`, `aiCredits`, `savedUsd`, `apiEquivalentUsd`, `apiEquivalentStatus`, `apiRatesVersion`, `apiRateCardSha256`, `repository`, `repositoryRoot`, `branch`, `headCommit`, `pullRequest`, `ingestSource` |
+| `telemetry/tool-calls.json` | `.` | `schemaVersion`, `toolCalls` |
+| `telemetry/tool-calls.json` | `toolCalls[]` | `traceId`, `spanId`, `conversationId`, `agent`, `toolName`, `startTime`, `exitCode`, `status`, `failed`, `ingestSource` |
+| `telemetry/prompt-chains.json` | `.` | `schemaVersion`, `limit`, `total`, `chains` |
+| `telemetry/prompt-chains.json` | `chains[]` | `rank`, `traceId`, `conversationId`, `startTime`, `endTime`, `repository`, `branch`, `agents`, `models`, `spans`, `unpricedSpans`, `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`, `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans` |
+<!-- /export-allowlist -->
+
+- A request's `repository` is its `owner/repo` slug, its root's folder name (the root with `--include-local-paths`), or `(none)`; every other `repository` is the same as the reports' key, with a local root shown the same way. `aiCredits` of a request is its cost in AI credits when GitHub billed it, and 0 otherwise. `costUsd` is 0 for an unpriced request, and `pricingStatus` says why.
+- Tool calls have a start and no end, so the export shows no duration. A tool call's `failed` is true for an exit code other than 0 or an error status.
+- **Never written:** prompts, responses, system instructions, tool arguments and results, file contents, error messages, working directories, data folders, and remote URLs. The ledger doesn't store any of them, and export reads nothing but the ledger.
+
 ## MCP server
 
 `gh ledger mcp` runs an MCP server on standard input and output, so Copilot can read the ledger and see the circuit breaker. Register it with Copilot CLI using the gh-ledger binary's path, which for the extension is shown under [Get gh-ledger](#get-gh-ledger). In PowerShell on Windows:
@@ -329,7 +441,7 @@ See [configuration.md](configuration.md) for pricing, the overlay format, and wh
 
 ## Privacy
 
-CopilotLedger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped. `gh ledger import` keeps only the fields in [What import reads and keeps](#what-import-reads-and-keeps), and never reads prompts, responses, tool arguments or results, or compaction summaries.
+CopilotLedger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped. `gh ledger import` keeps only the fields in [What import reads and keeps](#what-import-reads-and-keeps), and never reads prompts, responses, tool arguments or results, or compaction summaries. `gh ledger export` writes only the fields in [What export includes](#what-export-includes), and shows local repository roots only with `--include-local-paths`.
 
 ## Troubleshooting
 
@@ -343,3 +455,4 @@ CopilotLedger stores no prompt or response content, working directories, or remo
 - **Apps started from the desktop record nothing.** On macOS and Linux, apps started outside a terminal may not read your shell profile, so they don't see `COPILOT_OTEL_ENABLED`. Start them from a terminal.
 - **Move the data directory.** Set `COPILOT_LEDGER_HOME` before running gh-ledger. The daemon started at sign-in uses it only if your sign-in session sets it too, for example as a Windows user environment variable.
 - **A console window flashes at sign-in.** Windows 11 24H2 and later start gh-ledger without a window; earlier versions show it for about a second.
+- **`gh ledger export` says `Invalid --time-zone value` on Windows.** Windows before Windows 10 version 1903 can't look up IANA time zone IDs. Pass a Windows ID, such as `Eastern Standard Time`, instead.

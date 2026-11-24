@@ -54,6 +54,14 @@ jobs:
           echo "$spend"
           grep -q '"spans": 1,' <<< "$spend"
           grep -q '"aiCredits": 50,' <<< "$spend"
+          mkdir -p artifacts/export
+          exported=$(./artifacts/gh-ledger/gh-ledger export --all-repos --since all --time-zone America/New_York --generated-at 2030-01-01T00:00:00Z --bundle --out artifacts/export/report.html | tr -d '\r')
+          echo "$exported"
+          grep -q '^Wrote report.html: 1 request in all repositories (all time)\.$' <<< "$exported"
+          grep -q '^Wrote report.zip: report.html, manifest.json, and 4 telemetry files\.$' <<< "$exported"
+          grep -q "default-src 'none'" artifacts/export/report.html
+          grep -q '"requested": "America/New_York"' artifacts/export/report.html
+          test -s artifacts/export/report.zip
           ./artifacts/gh-ledger/gh-ledger status
           ./artifacts/gh-ledger/gh-ledger breaker status
           ./artifacts/gh-ledger/gh-ledger budget list

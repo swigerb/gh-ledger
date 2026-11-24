@@ -54,7 +54,7 @@ public sealed class CopilotCompactionTests
         Assert.Equal(93_251, record.CacheWriteInputTokens);
         Assert.Equal(CacheCounterState.Reported, record.CacheReadState);
         Assert.Equal(CacheCounterState.Reported, record.CacheWriteState);
-        Assert.Null(record.ToolCallCount);
+        Assert.Equal(0L, record.ToolCallCount);
         Assert.Equal(3, record.LineNumber);
     }
 

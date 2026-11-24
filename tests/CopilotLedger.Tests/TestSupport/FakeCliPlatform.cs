@@ -35,7 +35,13 @@ public sealed class FakeCliPlatform : ICliPlatform
     public Exception? StartupCommandException { get; set; }
     public Dictionary<string, string> PathExecutables { get; } =
         new(StringComparer.Ordinal);
+    public Dictionary<string, TimeZoneInfo> TimeZones { get; } = new(StringComparer.Ordinal);
     public HashSet<string> ExistingFiles { get; } = new(StringComparer.Ordinal);
+
+    // Runs before each WriteFileAsync, with "write" and the file, before each MoveFile, with "move" and the destination, and
+    // before each DeleteFile, with "delete" and the file; a test may create a file or throw. The three act on real files, which
+    // tests keep in their TempDirectory.
+    public Action<string, string>? FileOperationHandler { get; set; }
     public List<(string FileName, IReadOnlyList<string> Arguments)> ProcessRuns { get; } = [];
     public Func<string, IReadOnlyList<string>, CancellationToken, Task<ProcessRunResult>>? RunHandler { get; set; }
     public List<DetachedStart> DetachedStarts { get; } = [];
@@ -85,8 +91,29 @@ public sealed class FakeCliPlatform : ICliPlatform
 
     public bool FileExists(string path) => ExistingFiles.Contains(path);
 
+    public void MoveFile(string source, string destination, bool overwrite)
+    {
+        FileOperationHandler?.Invoke("move", destination);
+        File.Move(source, destination, overwrite);
+    }
+
+    public void DeleteFile(string path)
+    {
+        FileOperationHandler?.Invoke("delete", path);
+        File.Delete(path);
+    }
+
+    public Task WriteFileAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+    {
+        FileOperationHandler?.Invoke("write", path);
+        return File.WriteAllBytesAsync(path, bytes, cancellationToken);
+    }
+
     public string? FindOnPath(string fileName) =>
         PathExecutables.GetValueOrDefault(fileName);
+
+    public TimeZoneInfo? FindTimeZone(string id) =>
+        TimeZones.GetValueOrDefault(id);
 
     public Task<ProcessRunResult> RunAsync(
         string fileName,

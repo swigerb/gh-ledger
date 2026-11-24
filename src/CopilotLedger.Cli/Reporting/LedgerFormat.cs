@@ -46,13 +46,17 @@ internal static class LedgerFormat
         TimeZoneInfo.ConvertTime(value, zone)
             .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
+    // value with every digit it has, as WriteMoney writes it.
+    public static string Exact(decimal value) =>
+        value.ToString("0.############", CultureInfo.InvariantCulture);
+
     public static void WriteMoney(
         Utf8JsonWriter writer,
         string name,
         decimal value)
     {
         writer.WritePropertyName(name);
-        writer.WriteRawValue(value.ToString("0.############", CultureInfo.InvariantCulture));
+        writer.WriteRawValue(Exact(value));
     }
 
     // The API-equivalent fields that report rows have after WriteTotals.
@@ -191,6 +195,54 @@ internal static class LedgerFormat
         WriteMoney(writer, "aiCreditsUsd", row.AiCreditsUsd);
         WriteMoney(writer, "foundryByokUsd", row.FoundryByokUsd);
         WriteMoney(writer, "localSavedUsd", row.LocalSavedUsd);
+    }
+
+    // A top-prompts --json row, which gh ledger export's prompt-chains.json shares.
+    public static void WritePromptChain(Utf8JsonWriter writer, PromptChainRow row, int rank)
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber("rank", rank);
+        writer.WriteString("traceId", row.TraceId);
+        WriteNullable(writer, "conversationId", row.ConversationId);
+        WriteTime(writer, "startTime", row.StartTime);
+        WriteTime(writer, "endTime", row.EndTime);
+        writer.WriteString("repository", row.Repository);
+        writer.WriteString("branch", row.Branch);
+        writer.WriteStartArray("agents");
+        foreach (string agent in row.Agents)
+        {
+            writer.WriteStringValue(agent);
+        }
+
+        writer.WriteEndArray();
+        writer.WriteStartArray("models");
+        foreach (string model in row.Models)
+        {
+            writer.WriteStringValue(model);
+        }
+
+        writer.WriteEndArray();
+        WriteTotals(writer, row);
+        WriteApiEquivalent(writer, row);
+        writer.WriteEndObject();
+    }
+
+    // The fields of a status --cache --json row after its key, which gh ledger export's summary.json shares.
+    public static void WriteCacheFields(Utf8JsonWriter writer, CacheEfficiencyRow row)
+    {
+        writer.WriteNumber("spans", row.SpanCount);
+        writer.WriteNumber("cacheReportedSpans", row.CacheReportedSpanCount);
+        writer.WriteNumber("cacheUnreportedSpans", row.CacheUnreportedSpanCount);
+        writer.WriteNumber("inputTokens", row.InputTokens);
+        writer.WriteNumber("outputTokens", row.OutputTokens);
+        writer.WriteNumber("maxInputTokens", row.MaxInputTokens);
+        WriteDecimal(writer, "averageInputTokensPerTurn", row.AverageInputTokensPerTurn);
+        writer.WriteNumber("reportedInputTokens", row.ReportedInputTokens);
+        writer.WriteNumber("reportedCacheReadInputTokens", row.ReportedCacheReadInputTokens);
+        writer.WriteNumber("reportedCacheWriteInputTokens", row.ReportedCacheWriteInputTokens);
+        WriteNullable(writer, "uncachedInputTokens", row.UncachedInputTokens);
+        writer.WriteNumber("estimatedUncachedInputTokens", row.EstimatedUncachedInputTokens);
+        WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
     }
 
     public static string FinishJson(Utf8JsonWriter writer, MemoryStream stream)
