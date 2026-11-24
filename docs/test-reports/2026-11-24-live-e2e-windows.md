@@ -19,12 +19,12 @@ The machine owner's own history appears only as counts and percentages, and the 
 | Live capture | 11 prompts were recorded with the right repository, branch, agent, model, and tokens. 10 match Copilot's charge exactly; the Auto (Copilot Fusion) prompt is overstated by 43%. | [#76](https://github.com/swigerb/gh-ledger/issues/76) |
 | MCP server | Works in a live prompt and over stdio, but `get_audit_findings` takes 27.6 s per call. | [#83](https://github.com/swigerb/gh-ledger/issues/83) |
 | Budgets | The alert fired once, at the right total. Its hint names `gh-ledger`, which isn't on `PATH` for the extension. | [#81](https://github.com/swigerb/gh-ledger/issues/81) |
-| Import | 61,323 requests and 79,932 tool calls recorded, and all 19 live spans recognized as overlaps. BYOK and failed compactions keep 17 logs incomplete, and a rerun that records nothing takes 192 s. | [#82](https://github.com/swigerb/gh-ledger/issues/82), [#79](https://github.com/swigerb/gh-ledger/issues/79), [#75](https://github.com/swigerb/gh-ledger/issues/75) |
+| Import | 61,323 requests and 79,932 tool calls recorded, and all 19 live spans recognized as overlaps. BYOK and failed compactions keep 17 logs incomplete, a rerun that records nothing takes 192 s, and about 13% of imported tool calls are attached to the wrong request. | [#82](https://github.com/swigerb/gh-ledger/issues/82), [#85](https://github.com/swigerb/gh-ledger/issues/85), [#79](https://github.com/swigerb/gh-ledger/issues/79), [#75](https://github.com/swigerb/gh-ledger/issues/75) |
 | Pricing | 77 of 79 sessions equal Copilot's charge to the nano AIU. The other 2 differ only by the Auto and Copilot Fusion discounts, which gh-ledger doesn't apply: +9.9% overall. | [#76](https://github.com/swigerb/gh-ledger/issues/76) |
 | Reports and cache views | Correct, and 0.1–0.4 s on 61,343 requests. | |
-| Audit | Correct, and 2 s for 7 days of every repository. Noisy: one rule makes 98% of the findings. Scoped to one repository, it takes 28 s. | [#80](https://github.com/swigerb/gh-ledger/issues/80), [#83](https://github.com/swigerb/gh-ledger/issues/83) |
+| Audit | Works, and 2 s for 7 days of every repository. Noisy: one rule makes 98% of the findings. Scoped to one repository, it takes 28 s. | [#80](https://github.com/swigerb/gh-ledger/issues/80), [#83](https://github.com/swigerb/gh-ledger/issues/83) |
 | Export and receipts | Correct, offline, and verifiable, but scoped exports take 84–135 s. | [#83](https://github.com/swigerb/gh-ledger/issues/83) |
-| Privacy | None of 400 content samples appear in anything gh-ledger wrote. | |
+| Privacy | None of 900 content samples, 500 of them from the sessions gh-ledger imported or recorded, appear in anything it wrote. | |
 | Supply chain | The binary's SHA-256 matched the release's, but it's unsigned, and the release has no provenance attestation. | [#77](https://github.com/swigerb/gh-ledger/issues/77) |
 
 ## Environment
@@ -134,6 +134,7 @@ ALERT gh-ledger branch budget exceeded: swigerb/gh-ledger @ swigerb-capability-g
 | Tool calls recorded | 79,936 | 79,932 | 0 |
 
 - **Overlap:** the 19 overlap-skipped records are exactly the 19 live spans recorded by then, matched by service request ID. Nothing was charged twice.
+- **Malformed lines:** both are lines over 8 MiB, in one log.
 - **Totals:** the dry run's AI credits equal the import's.
 - **Tool calls:** the dry run counted 4 more because import keeps tool calls from the last 7 days, and that window moved between the runs. The earliest imported tool call starts less than a minute after the point 7 days before the import began.
 - **Size:** the import grew the ledger from 0.83 MB to 96.4 MB.
@@ -146,7 +147,13 @@ ALERT gh-ledger branch budget exceeded: swigerb/gh-ledger @ swigerb-capability-g
 
 Every log with such a record stays incomplete. Those 17 logs make every `import` exit with code 2, make every export and audit report incomplete coverage, and are read again on every run. The rerun that recorded nothing took 192 s, resolving each of 18,545 records as a duplicate at about 10 ms each.
 
-**Local model ([#79](https://github.com/swigerb/gh-ledger/issues/79)).** 4,412 of the imported requests (7.2%) went to a BYOK model served from the local GPU.
+**Tool calls ([#85](https://github.com/swigerb/gh-ledger/issues/85)).** Import attaches each tool call to the latest usage record of its agent in file order. In these logs, a record that asked for tools is often followed directly by another record of the same agent before its tools start. So:
+- of the 85,144 tool calls in these sessions, 6,597 (7.7%) are attached to another request of the same prompt, and 4,123 (4.8%) to a request of another prompt;
+- in the 7-day tool history, 6,295 imported requests miss 11,130 tool calls, and 501 own 10,066 that they didn't ask for, although only about 1,064 requested tool calls never started.
+
+Linking each tool call through the `apiCallId` of the `assistant.message` that asked for it reproduces each usage record's `numToolCalls` exactly for 97.6% of records.
+
+**Local model ([#79](https://github.com/swigerb/gh-ledger/issues/79)).** 4,412 of the imported requests (7.2%) went to a BYOK model, `qwen3.8-27b-cuda-gpu:1`, which by its name runs on a local GPU.
 - Copilot logs that provider as `openai`, so import records the requests as `other_provider`, as `docs/configuration.md` documents.
 - So the history shows no local savings, and no overlay setting can safely mark them local.
 
@@ -168,9 +175,9 @@ The sessions have 59,720 usage records and 1,741 compactions. 4,412 usage record
 | Compactions charged at 0.70 times | 177 |
 | Records charged at any other ratio | 0 |
 | gh-ledger's total compared with Copilot's | **+9.9%** |
-| How much of that the 0.70-times records explain | All of it, to within 0.1%. Most of the rest is the 2 failed compactions that Copilot charged and import skips. |
+| Where the difference comes from | Exactly the discount on the imported Auto and Fusion records (+9.905%), less the charge of the 2 failed compactions that Copilot charged and import skips (−0.005%) |
 
-**What matches.** gh-ledger prices every record that Copilot charged at the rate card's price exactly. The 77 sessions' totals match to the nano AIU, and in the other 2, every record matches individually except the discounted ones. That covers every GitHub-billed model, long-context tier, cache-write price, and promotional price window in this history, and vendor model IDs such as `claude-opus-5-5`.
+**What matches.** gh-ledger prices every record that Copilot charged at the rate card's price exactly. Rebuilding each record's amount from the logs at list price reproduces the ledger to the nano AIU. The 77 sessions' totals match Copilot's charge to the nano AIU, and in the other 2, every record matches individually except the discounted ones. That covers every GitHub-billed model, long-context tier, cache-write price, and promotional price window in this history, and vendor model IDs such as `claude-opus-5-5`.
 
 **What doesn't ([#76](https://github.com/swigerb/gh-ledger/issues/76)).**
 - **The discounts:** GitHub documents a 10% discount for auto model selection and a limited-time 30% discount for Copilot Fusion.
@@ -218,13 +225,13 @@ Every command ran from this repository against the real ledger, with the daemon 
 - **Exports:**
   - The all-repositories export drew the latest 20,000 requests and tool calls on its timeline, and said so. Its totals include all 61,343 requests.
   - The HTML reports ran from 46 KB (one request) to 6.8 MB, and the bundles from 1.3 to 8.4 MB.
-  - Each bundle had `report.html`, `manifest.json`, and 5 telemetry files, and every SHA-256 in the manifest verified.
+  - Each bundle had `report.html`, `manifest.json`, and 5 telemetry files. Every SHA-256 in the repository bundle's manifest verified, and so did those of an all-repositories bundle exported again later.
   - The `America/New_York` time zone resolved under invariant globalization.
 - **In a browser:** this repository's 3.5 MB report, with 7,230 requests and 10,884 tool calls, rendered in about 0.2 s, with all nine sections and 22,930 SVG marks.
 
 ### Scoped queries ([#83](https://github.com/swigerb/gh-ledger/issues/83))
 
-A repository or conversation scope is 14–20 times slower than none:
+A repository or conversation scope is 13–21 times slower than the same command for every repository over the same period:
 - **Why:** export's and audit's tool-call condition is a correlated `EXISTS` over the spans of the tool call's trace. When a trace has no selected span, every one of its spans is tested.
 - **Trace size:** imported traces here reach 6,044 spans and 9,030 tool calls.
 - **One count query:** 0.10 s unscoped, 27.5 s for one repository, and 24.7 s for one session.
@@ -233,27 +240,25 @@ A repository or conversation scope is 14–20 times slower than none:
 
 Over 7 days, 53,854 requests produced 34,026 findings:
 - **`context_bloat` (info):** 33,446 of them, on 62% of all requests. Agent turns send large, mostly cached contexts and get short tool calls back, which matches the rule's trigger.
-- **`tool_loop` (high):** most of these findings are successful runs of `view`, `grep`, or `powershell` with a $0.00 impact.
-- **`premium_model_trivial_turn`:** flags short calls that Copilot Fusion routed, not models the user picked.
-- **Real signals:** the rest look like real review signals: bursts of 60–71 requests in 5 minutes, failing commands retried 4 times, and a cache-miss streak on a local model.
+- **`tool_loop` (high):** over 30 days, 8 of the 10 high findings have a $0.00 or unknown impact, such as successful runs of `view` 17–24 times and of `grep` 95 times.
+- **`premium_model_trivial_turn`:** over 30 days, 4 of its 7 findings (71 of 130 requests), including 1 of the 2 high ones, are requests whose model Auto or Copilot Fusion chose, not the user.
+- **Real signals:** the rest look like real review signals: bursts of 64–71 requests in 5 minutes, failing tool calls retried 4 times in a row, and a cache-miss streak on the BYOK model.
 
 ### Documented limits, as observed
 
 - **Sequence rules:** they skipped 32,341 requests (60%): imported sub-agent requests, which have no agent invocation.
-- **Tool rules:** they reported the tool history as insufficient, because tool calls are kept for 7 days.
+- **Tool rules:** they reported the tool history as insufficient: tool calls are kept for 7 days, and 10,006 imported tool calls had no detail. Most of those 10,006 come from the attribution problem in [#85](https://github.com/swigerb/gh-ledger/issues/85).
 
-Both are described in [Audit for wasted spend](../cli.md#audit-for-wasted-spend).
+Both rules' limits are described in [Audit for wasted spend](../cli.md#audit-for-wasted-spend).
 
 ## Privacy
 
-**Content samples.** The audit took 400 content samples at random from 120 randomly chosen session folders on the machine:
-- 100 each from user messages, assistant messages, tool results, and compaction summaries;
-- each a 40-character excerpt with at least two spaces.
-
-**What was searched.** Each sample was searched for as UTF-8, as escaped JSON, and as UTF-16 in 81 files and archive entries, 302 MB in all. **None were found.** The files and entries were:
-- `ledger.db`, `ledger.db-wal`, `daemon.log`, `install.json`, and `daemon.json`;
-- the 4 HTML reports and every entry of the 2 bundles;
-- the saved output of every command and MCP tool above.
+**Content samples.** Two passes searched everything gh-ledger wrote for excerpts of the session logs' content. Each sample was a 40-character excerpt with at least two spaces, searched for as UTF-8, as escaped JSON, and as UTF-16. **Neither pass found any.**
+- **Pass 1:** 400 samples, 100 each from user messages, assistant messages, tool results, and compaction summaries, taken from 120 randomly chosen session folders. It searched 81 files and archive entries, 302 MB in all:
+  - `ledger.db`, `ledger.db-wal`, `daemon.log`, `install.json`, and `daemon.json`;
+  - the 4 HTML reports and every entry of the 2 bundles;
+  - the saved output of every command and MCP tool above.
+- **Pass 2:** 500 samples, 100 each from user messages, assistant messages and reasoning, tool arguments, tool results, and compaction summaries. All came from the 81 sessions that gh-ledger imported or recorded live, whose metadata the ledger holds. It searched 71 files and archive entries, 269 MB in all: the same data files and `ledger.db-shm`, a new all-repositories export with every entry of its bundle, and the saved outputs.
 
 **Ledger columns.** No text value in `spans` or `span_links` has two or more spaces. The longest are local repository roots, as documented, and a 129-character tool name made of two hexadecimal hashes.
 
@@ -279,6 +284,7 @@ Both are described in [Audit for wasted spend](../cli.md#audit-for-wasted-spend)
 | [#83](https://github.com/swigerb/gh-ledger/issues/83) | Medium | Repository- and conversation-scoped export, audit, and MCP `get_audit_findings` take 25–135 s. |
 | [#78](https://github.com/swigerb/gh-ledger/issues/78) | Medium | A daemon started from a kill-on-close job, such as a Copilot app agent shell, dies with it. |
 | [#82](https://github.com/swigerb/gh-ledger/issues/82) | Medium | BYOK and failed compactions keep 17 logs incomplete: every import exits with code 2, every report shows incomplete coverage, and reruns that record nothing take 192 s. |
+| [#85](https://github.com/swigerb/gh-ledger/issues/85) | Medium | Import attaches 13% of tool calls to the wrong request and 5% to the wrong prompt, which inflates the count of imported tool calls without detail about tenfold. |
 | [#80](https://github.com/swigerb/gh-ledger/issues/80) | Low | The audit is noisy on agentic history. |
 | [#79](https://github.com/swigerb/gh-ledger/issues/79) | Low | BYOK requests to a local OpenAI-compatible server import as `other_provider`, with no local savings. |
 | [#81](https://github.com/swigerb/gh-ledger/issues/81) | Low | Alert hints name `gh-ledger` instead of `gh ledger`. |
