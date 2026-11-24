@@ -3,6 +3,7 @@ using CopilotLedger.Core.Telemetry;
 using CopilotLedger.Storage;
 using CopilotLedger.Tests.TestSupport;
 using Microsoft.Data.Sqlite;
+using System.Text.Json;
 
 namespace CopilotLedger.Tests.Storage;
 
@@ -10,6 +11,8 @@ public sealed class ConversationLiveIndexTests
 {
     private static readonly JsonRateCardCalculator Calculator = JsonRateCardCalculator.LoadEmbedded();
     private const string IndexRow = "ix_spans_conversation_live|0|c|1";
+    private const string R1 = "11111111-1111-4111-8111-111111111111";
+    private const string R2 = "22222222-2222-4222-8222-222222222222";
 
     [Fact]
     public async Task LX1_ANewLedger_HasTheIndex()
@@ -129,8 +132,8 @@ public sealed class ConversationLiveIndexTests
         using TempDirectory temp = new();
         await using CliHarness harness = new(temp.Path);
         new CopilotSessionLogs("s-a")
-            .Usage("u-1", "r-1")
-            .Usage("u-2", "r-2")
+            .Usage("u-1", R1)
+            .Usage("u-2", R2)
             .Write(harness.Context.CopilotHome);
         SqliteLedgerStore store = new(harness.Context.DatabasePath, harness.TimeProvider);
         await store.InitializeAsync();
@@ -158,6 +161,26 @@ public sealed class ConversationLiveIndexTests
             await LedgerSql.ScalarAsync(
                 harness.Context.DatabasePath,
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_spans_conversation_live';"));
+        AssertDeferred(first);
+        AssertDeferred(second);
+    }
+
+    private static void AssertDeferred(CliRun run)
+    {
+        Assert.Equal(2, run.ExitCode);
+        using JsonDocument document = JsonDocument.Parse(run.Out);
+        JsonElement source = document.RootElement.GetProperty("sources")[0];
+
+        Assert.Equal("copilot", source.GetProperty("source").GetString());
+        Assert.Equal(2, source.GetProperty("recordsParsed").GetInt32());
+        Assert.Equal(0, source.GetProperty("unsupportedUsageShapes").GetInt32());
+        Assert.Equal(2, source.GetProperty("ambiguousOverlap").GetInt32());
+        Assert.Equal(0, source.GetProperty("recorded").GetInt32());
+
+        JsonElement diagnostic = Assert.Single(
+            document.RootElement.GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("ambiguousOverlap", diagnostic.GetProperty("code").GetString());
+        Assert.Equal(2, diagnostic.GetProperty("count").GetInt32());
     }
 
     private static async Task AssertIndexAsync(string path)
