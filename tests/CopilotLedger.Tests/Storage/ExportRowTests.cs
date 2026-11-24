@@ -269,6 +269,38 @@ public sealed class ExportRowTests
         Assert.Equal([null, ImportEntries.Start, new DateTimeOffset(2026, 11, 21, 14, 0, 50, TimeSpan.Zero)], earliest);
     }
 
+    // An imported request lacks the tool calls it reported beyond its own execute_tool links: all 3 with none, 2 of 3 with one
+    // (an invoke_agent link it owns doesn't count), and none of 1 with two.
+    [Fact]
+    public async Task XR14_EachImportedRequestLacksWhatItsOwnToolLinksDontCover()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        ImportedLedgerEntry none = ImportEntries.Copilot("k1", "conv-1", null);
+        ImportedLedgerEntry some = ImportEntries.Copilot("k2", "conv-2", null);
+        ImportedLedgerEntry more = ImportEntries.Copilot("k3", "conv-3", null);
+        await store.RecordImportedAsync(
+        [
+            none with { ToolCallCount = 3 },
+            some with { ToolCallCount = 3, ToolLinks = [ImportEntries.ToolLink(some, "call-1", 0)] },
+            more with { ToolCallCount = 1, ToolLinks = [ImportEntries.ToolLink(more, "call-2", 0), ImportEntries.ToolLink(more, "call-3", 1)] },
+        ],
+            null);
+        await LedgerSql.ExecuteAsync(
+            store.DatabasePath,
+            """
+            INSERT INTO span_links (trace_id, span_id, operation_name, start_time_unix_ms, recorded_at_unix_ms, owner_span_row_id)
+            SELECT trace_id, '7a00000000000001', 'invoke_agent', start_time_unix_ms, 0, id FROM spans WHERE trace_id = @p0;
+            """,
+            some.Span.TraceId);
+
+        await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();
+        ExportCoverageRow coverage = await snapshot.GetCoverageAsync(LedgerFilter.All, ImportEntries.Start.AddDays(-7));
+
+        Assert.Equal(5, coverage.ImportedToolCallsWithoutDetail);
+    }
+
     // Pages seek past rows that start in the same millisecond, from the period's first, and skip or repeat none.
     [Fact]
     public async Task XR13_PagesSplitRowsThatStartTogether()
