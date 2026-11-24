@@ -36,9 +36,9 @@ public sealed partial class SqliteLedgerStore
         RETURNING id;
         """;
 
-    // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
-    // Only effective rows count: an imported row that a live row superseded is kept for diagnosis and never reported.
-    private const string FilterSql = """
+    // The conditions of a LedgerFilter on a span row, whatever its accounting state, with parameters from AddFilterParameters.
+    // A null filter property matches every span.
+    private const string SpanFilterSql = """
         (@from IS NULL OR start_time_unix_ms >= @from)
           AND (@to IS NULL OR start_time_unix_ms < @to)
           AND (@repository IS NULL OR COALESCE(repo_slug, repo_root, '(none)') = @repository)
@@ -46,8 +46,11 @@ public sealed partial class SqliteLedgerStore
           AND (@pull_request IS NULL OR pull_request_number = @pull_request)
           AND (@agent IS NULL OR COALESCE(agent_name, '(none)') = @agent)
           AND (@conversation_id IS NULL OR conversation_id = @conversation_id)
-          AND accounting_state = 'effective'
         """;
+
+    // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
+    // Only effective rows count: an imported row that a live row superseded is kept for diagnosis and never reported.
+    private const string FilterSql = SpanFilterSql + "\n  AND accounting_state = 'effective'";
 
     // An execute_tool link counts unless an imported row that was superseded owns it (its live twin's links count instead).
     private const string EffectiveLinkSql = """
@@ -65,6 +68,16 @@ public sealed partial class SqliteLedgerStore
     private const string SequenceSql = """
         trace_id, agent_span_id, COALESCE(repo_slug, repo_root, '(none)'), COALESCE(branch_name, '(none)'),
                                  COALESCE(conversation_id, '(none)'), COALESCE(model_id, '(none)')
+        """;
+
+    // Budgets with their key's all-time effective spend, in ReadBranchBudgetsAsync's column order, from branch_budgets AS b.
+    private const string BranchBudgetSelectSql = """
+        SELECT b.repository, b.branch, b.budget_usd_pico, b.set_at_unix_ms, b.alerted_at_unix_ms, b.notified_at_unix_ms,
+               (SELECT COALESCE(SUM(s.cost_usd_pico), 0) FROM spans AS s
+                 WHERE COALESCE(s.repo_slug, s.repo_root, '(none)') = b.repository
+                   AND COALESCE(s.branch_name, '(none)') = b.branch
+                   AND s.accounting_state = 'effective') AS spent_usd_pico
+        FROM branch_budgets AS b
         """;
 
     private readonly TimeProvider _timeProvider;
@@ -967,13 +980,8 @@ public sealed partial class SqliteLedgerStore
         EnsureInitialized();
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT b.repository, b.branch, b.budget_usd_pico, b.set_at_unix_ms, b.alerted_at_unix_ms, b.notified_at_unix_ms,
-                   (SELECT COALESCE(SUM(s.cost_usd_pico), 0) FROM spans AS s
-                     WHERE COALESCE(s.repo_slug, s.repo_root, '(none)') = b.repository
-                       AND COALESCE(s.branch_name, '(none)') = b.branch
-                       AND s.accounting_state = 'effective') AS spent_usd_pico
-            FROM branch_budgets AS b
+        command.CommandText = $"""
+            {BranchBudgetSelectSql}
             WHERE (@repository IS NULL OR b.repository = @repository) AND (@branch IS NULL OR b.branch = @branch) ORDER BY b.repository, b.branch;
             """;
         command.Parameters.AddWithValue("@repository", OrDbNull(repository));
