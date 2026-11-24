@@ -56,7 +56,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
   - `tool_loop` is High only when the run is long enough and its known impact is above $0.
 - [x] Task 7: Per-Rule Totals in the Audit Table, and the Docs (CopilotLedger.Cli, docs & tests). #80. The text table gains a `By rule:` line. Update the `docs/cli.md` rule table and "Output" paragraph, and the guide's `audit` sample.
 - [x] Task 8: Unscoped Tool-Call Paging Selects the Chains Once per Snapshot (CopilotLedger.Storage & tests). #83, review finding. Task 2 made `export --all-repos --since all --bundle` 3× slower on a real ledger, because every 1,000-row page rescans the spans and sorts every selected tool call. The snapshot fills a connection-private `TEMP` table with the selected traces once per filter, and `ExportToolCallWhereSql` looks traces up in it with a unary `+`. The always-on SQ3 pins exact rows and linear paging on `LargeLedger` (D10).
-- [ ] Task 9: Docs Consistency and Final Verification (tests). All four issues.
+- [x] Task 9: Docs Consistency and Final Verification (tests). All four issues.
   - DC1 checks the docs that this sprint changed.
   - Run the opt-in timing harness once more.
   - Publish a single-file `win-x64` binary and smoke-test the job check.
