@@ -99,6 +99,8 @@ A session log has no endpoint, so the channel comes from who billed the request:
 - A Copilot BYOK request is local when its `providerType` is in `localOffload.providerNames`, or when its model is one of `localOffload.models` and its `providerType` isn't in `foundryByok.providerNames`; Foundry BYOK when its `providerType` is in `foundryByok.providerNames`; and `other_provider` otherwise. So a BYOK request through a local server that speaks OpenAI's API, which Copilot logs with provider type `openai`, is local when its model is listed in `localOffload.models`, such as Qwen3.8-27B's `qwen3.8-27b-cuda-gpu:1`, and `other_provider` when it isn't.
 - A Codex request is classified the same way by its `model_provider`, with Codex's `lmstudio` matched as `lm_studio` and with the same model rule. A Codex request to OpenAI is `other_provider`.
 
+ A compaction that Copilot billed is recorded even when it failed; a failed compaction that nobody billed is skipped. A compaction through your own provider (BYOK) is priced as that provider's requests are, by the provider of the latest BYOK request with the same model.
+
 An `other_provider` request bills nothing in the ledger, and it still gets an API-equivalent cost when its model has a list price.
 
 ## Why Foundry BYOK is unpriced by default

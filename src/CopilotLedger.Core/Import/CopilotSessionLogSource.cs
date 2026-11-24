@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using CopilotLedger.Core.Pricing;
 using CopilotLedger.Core.Telemetry;
 
 namespace CopilotLedger.Core.Import;
@@ -80,6 +81,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ("agentId", 2048),
         ("data.success", 0),
         ("data.serviceRequestId", 64),
+        ("data.compactionAttemptId", 2048),
         ("data.compactionTokensUsed.requestCount", 0),
         ("data.compactionTokensUsed.inputTokens", 0),
         ("data.compactionTokensUsed.outputTokens", 0),
@@ -88,6 +90,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ("data.compactionTokensUsed.model", 256),
         ("data.compactionTokensUsed.duration", 0),
         ("data.compactionTokensUsed.provider.kind", 64),
+        ("data.compactionTokensUsed.provider.id", 64),
         ("data.compactionTokensUsed.copilotUsage.totalNanoAiu", 0));
 
     private static readonly PathTree SubagentPaths = new(
@@ -235,6 +238,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         // The latest usage record of each agent (context key), which owns the tool calls that follow it.
         private readonly Dictionary<string, string> _latestRecordByContext = new(StringComparer.Ordinal);
         private readonly Dictionary<string, PendingTool> _pendingTools = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _latestByokProviderByModel = new(StringComparer.OrdinalIgnoreCase);
 
         internal bool OnLine(ReadOnlySpan<byte> line, long number, long offset)
         {
@@ -414,6 +418,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             string? tokens = Tokens(fields, "data.usage.", out long input, out long output, out long cacheRead, out long cacheWrite);
             bool? cacheReported = fields.Boolean("data.usage.cacheDetailsReported");
             bool? byok = fields.Boolean("data.usage.isByok");
+            string? providerType = fields.String("data.usage.providerType");
             string? serviceRequestId = UsageIdentity.NormalizeServiceRequestId(fields.String("data.usage.serviceRequestId"));
             long duration = Duration(fields.Integer("data.usage.duration")) ?? 0;
             string? failed =
@@ -457,7 +462,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 RequestModel = model!,
                 ResponseModel = responseModel,
                 ProviderName = byok == true
-                    ? fields.String("data.usage.providerType")?.ToLowerInvariant()
+                    ? providerType?.ToLowerInvariant()
                     : UsageIdentity.GitHubProviderName,
                 BillingSource = byok == true ? BillingSource.Provider : BillingSource.Endpoint,
                 AgentName = agentName,
@@ -473,9 +478,13 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 LineNumber = number,
             });
             _latestRecordByContext[contextKey] = usageId!;
+            if (byok == true && providerType is not null)
+            {
+                _latestByokProviderByModel[model!] = providerType.ToLowerInvariant();
+            }
         }
 
-        // A session.compaction_complete with compactionTokensUsed: the one billed call that summarized the conversation.
+        // A session.compaction_complete: a billed GitHub call, or a BYOK call identifiable by its compaction attempt.
         // Without compactionTokensUsed, it reports no usage and is a skipped event.
         private void Compaction(JsonFields fields, long number, long offset)
         {
@@ -486,26 +495,74 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 return;
             }
 
-            _parsed++;
+            if (fields.Duplicate is not null)
+            {
+                _parsed++;
+                Unsupported(kind, fields.Duplicate, number, offset);
+                return;
+            }
+
             string? serviceRequestId = UsageIdentity.NormalizeServiceRequestId(fields.String("data.serviceRequestId"));
+            string? compactionAttemptId = fields.String("data.compactionAttemptId");
+            bool? success = fields.Boolean("data.success");
+            ReportedCharge charge = fields.NanoAiu("data.compactionTokensUsed.copilotUsage.totalNanoAiu");
+            bool byok;
+            if (success is null)
+            {
+                _parsed++;
+                Unsupported(kind, "data.success", number, offset);
+                return;
+            }
+
+            if (success == false)
+            {
+                if (serviceRequestId is null && !fields.IsObject("data.compactionTokensUsed.copilotUsage"))
+                {
+                    _skipped++;
+                    return;
+                }
+
+                if (serviceRequestId is null || charge.State != ReportedChargeState.Valid)
+                {
+                    _parsed++;
+                    Unsupported(kind, "data.success", number, offset);
+                    return;
+                }
+
+                byok = false;
+            }
+            else if (serviceRequestId is not null)
+            {
+                byok = false;
+            }
+            else if (!fields.IsObject("data.compactionTokensUsed.provider") &&
+                     !fields.IsObject("data.compactionTokensUsed.copilotUsage") &&
+                     compactionAttemptId is not null)
+            {
+                byok = true;
+            }
+            else
+            {
+                _parsed++;
+                Unsupported(kind, "data.serviceRequestId", number, offset);
+                return;
+            }
+
+            _parsed++;
             string? model = fields.String("data.compactionTokensUsed.model");
             DateTimeOffset? end = Time(fields);
-            string? failed =
-                fields.Duplicate
-                ?? (end is null ? "timestamp"
-                : fields.Boolean("data.success") != true ? "data.success"
+            string? failed = end is null ? "timestamp"
                 : !fields.IsObject("data.compactionTokensUsed") ? "data.compactionTokensUsed"
                 : fields.Integer("data.compactionTokensUsed.requestCount") != 1 ? "data.compactionTokensUsed.requestCount"
-                : serviceRequestId is null ? "data.serviceRequestId"
                 : model is null ? "data.compactionTokensUsed.model"
-                : null);
+                : null;
             long input = 0;
             long output = 0;
             long cacheRead = 0;
             long cacheWrite = 0;
             long duration = Duration(fields.Integer("data.compactionTokensUsed.duration")) ?? 0;
             failed ??= Tokens(fields, "data.compactionTokensUsed.", out input, out output, out cacheRead, out cacheWrite)
-                ?? (fields.String("data.compactionTokensUsed.provider.kind") != "copilot"
+                ?? (!byok && fields.String("data.compactionTokensUsed.provider.kind") != "copilot"
                     ? "data.compactionTokensUsed.provider.kind"
                     : StartsBeforeTime(end!.Value, duration) ? "data.compactionTokensUsed.duration"
                     : null);
@@ -521,14 +578,16 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 Source = ImportSourceKind.Copilot,
                 Kind = ImportedRecordKind.Compaction,
                 SessionId = location.LogId,
-                RecordKey = serviceRequestId!,
+                RecordKey = byok ? compactionAttemptId! : serviceRequestId!,
                 TurnKey = _turnKey,
-                ServiceRequestId = serviceRequestId,
+                ServiceRequestId = byok ? null : serviceRequestId,
                 StartTime = end!.Value.AddMilliseconds(-duration),
                 EndTime = end.Value,
                 RequestModel = model!,
-                ProviderName = UsageIdentity.GitHubProviderName,
-                BillingSource = BillingSource.Endpoint,
+                ProviderName = byok
+                    ? _latestByokProviderByModel.GetValueOrDefault(model!)
+                    : UsageIdentity.GitHubProviderName,
+                BillingSource = byok ? BillingSource.Provider : BillingSource.Endpoint,
                 AgentName = agentName,
                 InputTokens = input,
                 OutputTokens = output,
@@ -536,7 +595,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 CacheWriteInputTokens = cacheWrite,
                 CacheReadState = CacheCounterState.Reported,
                 CacheWriteState = CacheCounterState.Reported,
-                ReportedCharge = fields.NanoAiu("data.compactionTokensUsed.copilotUsage.totalNanoAiu"),
+                ReportedCharge = byok ? ReportedCharge.Absent : charge,
                 ToolCallCount = 0, // a compaction makes no tool calls, so a missing count always means an unknown one
                 Git = _context,
                 LineNumber = number,
