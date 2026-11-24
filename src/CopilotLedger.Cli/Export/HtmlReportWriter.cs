@@ -102,7 +102,12 @@ internal static class HtmlReportWriter
         long before = coverage.SpansBeforeToolHistory;
         if (before > 0)
         {
-            yield return $"Tool calls are kept for {coverage.ToolHistoryRetentionDays.ToString(CultureInfo.InvariantCulture)} days, so the {ExportRecords.Plural(before, "request", "requests")} before {LedgerFormat.LocalTime(coverage.ToolHistoryFromUtc, zone)} may be missing {(before == 1 ? "its" : "their")} tool calls.";
+            string requests = ExportRecords.Plural(before, "request", "requests");
+            string their = before == 1 ? "its" : "their";
+            string from = LedgerFormat.LocalTime(coverage.ToolHistoryFromUtc, zone);
+            yield return coverage.ToolHistoryFromEarliestToolCall
+                ? $"The earliest tool call the ledger keeps started at {from}, so the {requests} before it may be missing {their} tool calls."
+                : $"Tool calls are kept for {coverage.ToolHistoryRetentionDays.ToString(CultureInfo.InvariantCulture)} days, so the {requests} before {from} may be missing {their} tool calls.";
         }
 
         long withoutDetail = coverage.ImportedToolCallsWithoutDetail;

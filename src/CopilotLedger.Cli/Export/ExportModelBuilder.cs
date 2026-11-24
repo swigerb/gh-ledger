@@ -34,7 +34,12 @@ internal static class ExportModelBuilder
         IReadOnlyList<LedgerRollupRow> byChannelModel =
             await snapshot.GetRollupAsync(LedgerGrouping.ChannelModel, filter, cancellationToken);
         LedgerRollupRow totals = ReportCommands.Sum(byChannelModel);
-        DateTimeOffset toolHistoryFrom = inputs.GeneratedAt - LedgerImporter.ToolLinkRetention;
+
+        // Tool history is the retention before generatedAt, but starts no earlier than the earliest tool call the ledger
+        // keeps: the daemon deletes tool calls by its own clock, so a past --generated-at can't count on the retention.
+        DateTimeOffset retained = inputs.GeneratedAt - LedgerImporter.ToolLinkRetention;
+        DateTimeOffset? earliestToolCall = await snapshot.GetEarliestToolCallStartAsync(cancellationToken);
+        DateTimeOffset toolHistoryFrom = earliestToolCall is DateTimeOffset earliest && earliest > retained ? earliest : retained;
         ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
         IReadOnlyList<LedgerRollupRow> byModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken);
 
@@ -89,6 +94,7 @@ internal static class ExportModelBuilder
                 CacheLegacyUnknownSpans = coverage.CacheLegacyUnknownSpans,
                 ToolHistoryRetentionDays = LedgerImporter.ToolLinkRetention.Days,
                 ToolHistoryFromUtc = toolHistoryFrom,
+                ToolHistoryFromEarliestToolCall = toolHistoryFrom > retained,
                 SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
                 ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
                 ToolCalls = await snapshot.CountToolCallsAsync(filter, cancellationToken),

@@ -71,7 +71,8 @@ internal sealed record ExportCoverage
     public required long CacheAbsentSpans { get; init; }
     public required long CacheLegacyUnknownSpans { get; init; }
     public required int ToolHistoryRetentionDays { get; init; }        // LedgerImporter.ToolLinkRetention.Days (7)
-    public required DateTimeOffset ToolHistoryFromUtc { get; init; }    // GeneratedAt less the retention
+    public required DateTimeOffset ToolHistoryFromUtc { get; init; }    // GeneratedAt less the retention, or the earliest tool call kept
+    public required bool ToolHistoryFromEarliestToolCall { get; init; } // ToolHistoryFromUtc is the earliest tool call kept, which is later
     public required long SpansBeforeToolHistory { get; init; }
     public required long ImportedToolCallsWithoutDetail { get; init; }
     public required long ToolCalls { get; init; }                       // CountToolCallsAsync

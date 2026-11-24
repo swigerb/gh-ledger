@@ -219,6 +219,56 @@ public sealed class ExportRowTests
     }
 
     [Fact]
+    public async Task XR11_ImportedToolCallsWithoutDetailAreWhatEachRequestLacks()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        DateTimeOffset toolHistoryFrom = new(2026, 11, 14, 0, 0, 0, TimeSpan.Zero);
+        string i1 = ImportEntries.Copilot("k1", "conv-i", null).Span.TraceId;
+        List<long> withoutDetail = [];
+
+        // I1 owns the link of one tool call: it lacks none of 1, and 2 of 3.
+        foreach (int count in new[] { 1, 3 })
+        {
+            await LedgerSql.ExecuteAsync(
+                store.DatabasePath,
+                "UPDATE spans SET imported_tool_call_count = @p0 WHERE trace_id = @p1;",
+                count,
+                i1);
+            await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();
+            withoutDetail.Add((await snapshot.GetCoverageAsync(LedgerFilter.All, toolHistoryFrom)).ImportedToolCallsWithoutDetail);
+        }
+
+        Assert.Equal([0L, 2L], withoutDetail);
+    }
+
+    [Fact]
+    public async Task XR12_TheEarliestToolCallIsTheWholeLedgers()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore empty = new(Path.Combine(temp.Path, "empty.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await empty.InitializeAsync();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        List<DateTimeOffset?> earliest = [];
+
+        foreach (SqliteLedgerStore ledger in new[] { empty, store })
+        {
+            await using LedgerExportSnapshot snapshot = await ledger.OpenExportSnapshotAsync();
+            earliest.Add(await snapshot.GetEarliestToolCallStartAsync());
+        }
+
+        // Once I1's, I2's, T1, and T2 are deleted, T5 (A's invoke_agent link, at 14:00:50) is the earliest link, but T3 the
+        // earliest tool call.
+        await store.PruneSpanLinksAsync(new DateTimeOffset(2026, 11, 21, 14, 0, 45, TimeSpan.Zero));
+        await using (LedgerExportSnapshot pruned = await store.OpenExportSnapshotAsync())
+        {
+            earliest.Add(await pruned.GetEarliestToolCallStartAsync());
+        }
+
+        Assert.Equal([null, ImportEntries.Start, new DateTimeOffset(2026, 11, 21, 15, 0, 10, TimeSpan.Zero)], earliest);
+    }
+
+    [Fact]
     public async Task XR5_ProvenanceListsTheRateCardsThatPricedTheSelection()
     {
         using TempDirectory temp = new();

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Xml.Linq;
 using CopilotLedger.Core.Import;
 using CopilotLedger.Core.Pricing;
@@ -153,6 +154,7 @@ public sealed class ExportCommandTests
 
         XDocument fixture = await ExportAsync(cli, temp.Path, "--all-repos");
         await store.RecordAsync([Entry(new DateTimeOffset(2026, 11, 10, 12, 0, 0, TimeSpan.Zero))]);
+        await store.RecordSpanLinksAsync([ToolCall("9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a", new DateTimeOffset(2026, 11, 10, 12, 0, 30, TimeSpan.Zero))]);
         XDocument older = await ExportAsync(cli, temp.Path, "--all-repos", "--force");
         await store.RecordImportedAsync([], Checkpoint(ambiguous: 2));
         XDocument deferred = await ExportAsync(cli, temp.Path, "--all-repos", "--force");
@@ -284,6 +286,29 @@ public sealed class ExportCommandTests
         Assert.Equal([report, bundle], Directory.GetFiles(temp.Path).Order(StringComparer.Ordinal));
     }
 
+    // The daemon deleted the tool calls before 11-21, so the two requests of 11-20 may have lost theirs, though they're
+    // within 7 days of the generation time.
+    [Fact]
+    public async Task EC13_ToolHistoryStartsNoEarlierThanTheEarliestToolCallKept()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        await store.RecordSpanLinksAsync([ToolCall(ExportSeeds.E, new DateTimeOffset(2026, 11, 21, 13, 0, 0, TimeSpan.Zero))]);
+        await store.PruneSpanLinksAsync(new DateTimeOffset(2026, 11, 21, 0, 0, 0, TimeSpan.Zero));
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos", "--generated-at", "2026-11-21T21:30:00Z");
+
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement history = data.RootElement.GetProperty("coverage").GetProperty("toolHistory");
+        Assert.Equal(
+            ("2026-11-21T13:00:00.0000000+00:00", 2, false),
+            (history.GetProperty("retainedFromUtc").GetString(), history.GetProperty("spansBeforeRetention").GetInt32(), history.GetProperty("complete").GetBoolean()));
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains(
+            "The earliest tool call the ledger keeps started at 2026-11-21 08:00, so the 2 requests before it may be missing their tool calls.",
+            Notes(page));
+    }
+
     // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
     private static CliHarness Harness(string root)
     {
@@ -326,6 +351,18 @@ public sealed class ExportCommandTests
         };
         return new LedgerEntry(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), null);
     }
+
+    // A bash call in trace at start.
+    private static GenAiSpanLink ToolCall(string trace, DateTimeOffset start) => new()
+    {
+        TraceId = trace,
+        SpanId = trace[..2] + "00000000000099",
+        OperationName = "execute_tool",
+        ConversationId = "conv-x",
+        StartTime = start,
+        ToolName = "bash",
+        ToolExitCode = 0,
+    };
 
     private static ImportSessionCheckpoint Checkpoint(long ambiguous) => new()
     {

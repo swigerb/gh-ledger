@@ -114,6 +114,11 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
         CancellationToken cancellationToken = default) =>
         SqliteLedgerStore.CountExportToolCallsAsync(_transaction, filter, cancellationToken);
 
+    // The start of the earliest tool call the ledger keeps, of any filter, or null when it keeps none. The daemon deletes
+    // older ones, so no tool call before it is left.
+    public Task<DateTimeOffset?> GetEarliestToolCallStartAsync(CancellationToken cancellationToken = default) =>
+        SqliteLedgerStore.ReadEarliestToolCallStartAsync(_transaction, cancellationToken);
+
     // What the filter's spans cover. Spans that start before toolHistoryFrom may have lost their tool calls to retention.
     public Task<ExportCoverageRow> GetCoverageAsync(
         LedgerFilter filter,

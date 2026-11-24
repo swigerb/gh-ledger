@@ -132,10 +132,25 @@ public sealed partial class SqliteLedgerStore
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
+    // The start of the earliest execute_tool link in the whole ledger, whatever its owner, or null when there's none.
+    internal static async Task<DateTimeOffset?> ReadEarliestToolCallStartAsync(
+        SqliteTransaction snapshot,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = snapshot.Connection!.CreateCommand();
+        command.Transaction = snapshot;
+        command.CommandText = "SELECT MIN(start_time_unix_ms) FROM span_links WHERE operation_name = 'execute_tool';";
+        return await command.ExecuteScalarAsync(cancellationToken) is long start
+            ? DateTimeOffset.FromUnixTimeMilliseconds(start)
+            : null;
+    }
+
     // A superseded row that a live span of the same call replaced (the same canonical usage ID) counts when that live row is
     // selected: it's the same request, counted once. One that live spans of its session replaced without matching it may be a
     // call that no live span covers, so it counts when the filter selects it by its own columns, as gh ledger import reports
-    // it. import_sessions has no repository, so its two counts are the whole ledger's.
+    // it. An imported request lacks the detail of each tool call it made beyond the execute_tool links it owns: import keeps
+    // the links of only the tool calls that started within the retention, and that completed. import_sessions has no
+    // repository, so its two counts are the whole ledger's.
     internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
         SqliteTransaction snapshot,
         LedgerFilter filter,
@@ -160,8 +175,11 @@ public sealed partial class SqliteLedgerStore
 
             SELECT COALESCE(SUM(CASE WHEN start_time_unix_ms < @tool_history_from THEN 1 ELSE 0 END), 0),
                    COALESCE(SUM(CASE WHEN imported_tool_call_count > 0
-                                      AND NOT EXISTS (SELECT 1 FROM span_links WHERE span_links.owner_span_row_id = spans.id)
-                                     THEN imported_tool_call_count ELSE 0 END), 0),
+                                     THEN MAX(imported_tool_call_count
+                                              - (SELECT COUNT(*) FROM span_links
+                                                  WHERE span_links.owner_span_row_id = spans.id
+                                                    AND span_links.operation_name = 'execute_tool'), 0)
+                                     ELSE 0 END), 0),
                    COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
                    COALESCE(SUM(CASE WHEN NOT {ReportedSql}
                                       AND cache_read_state <> 'legacy_unknown' AND cache_write_state <> 'legacy_unknown'
