@@ -314,8 +314,16 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             return true;
         }
 
-        internal void OnOversized(long number, long offset) =>
+        internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset)
+        {
+            if (_started && _stop is null && JsonFields.ReadTypePrefix(prefix, Types) == -1)
+            {
+                _skipped++;
+                return;
+            }
+
             Malformed(ImportDiagnosticCode.OversizedLine, ImportEventKind.Unknown, null, number, offset);
+        }
 
         internal void OnUnterminated(long number, long offset) =>
             Malformed(ImportDiagnosticCode.UnterminatedLine, ImportEventKind.Unknown, null, number, offset);

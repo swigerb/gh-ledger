@@ -4,22 +4,25 @@ using System.Security.Cryptography;
 namespace CopilotLedger.Core.Import;
 
 // Splits the first maxBytes bytes of a JSON Lines stream into lines, reading 64 KiB at a time, and hands each complete line
-// to a callback. A line longer than maxLineBytes is skipped without being kept, and a last line without "\n" is reported but
-// never handed over. Blank lines are skipped silently. Line numbers are 1-based and count every "\n". Every byte read is also
-// added to hash, when it isn't null.
+// to a callback. A line longer than maxLineBytes is skipped, with only its prefix handed to the oversized callback, and a last
+// line without "\n" is reported but never handed over. Blank lines are skipped silently. Line numbers are 1-based and count
+// every "\n". Every byte read is also added to hash, when it isn't null.
 internal static class JsonlLineReader
 {
     private const int ChunkBytes = 64 * 1024;
+    internal const int PrefixBytes = 64 * 1024;
 
     // line is valid only during the call. Returns false to stop reading.
     internal delegate bool LineHandler(ReadOnlySpan<byte> line, long lineNumber, long byteOffset);
+
+    internal delegate void OversizedHandler(ReadOnlySpan<byte> prefix, long lineNumber, long byteOffset);
 
     internal static void Read(
         Stream stream,
         long maxBytes,
         int maxLineBytes,
         LineHandler onLine,
-        Action<long, long> onOversized,
+        OversizedHandler onOversized,
         Action<long, long> onUnterminated,
         IncrementalHash? hash,
         CancellationToken cancellationToken)
@@ -27,6 +30,7 @@ internal static class JsonlLineReader
         byte[] chunk = ArrayPool<byte>.Shared.Rent(ChunkBytes);
         byte[] line = ArrayPool<byte>.Shared.Rent(ChunkBytes);
         int lineLength = 0;
+        int prefixLength = 0;
         bool oversized = false;
         long lineNumber = 1;
         long lineOffset = 0;
@@ -53,8 +57,18 @@ internal static class JsonlLineReader
                         int count = end - start;
                         if (lineLength + count > maxLineBytes)
                         {
+                            if (lineLength < PrefixBytes)
+                            {
+                                int copied = Math.Min(PrefixBytes - lineLength, count);
+                                Buffer.BlockCopy(chunk, start, line, lineLength, copied);
+                                prefixLength = lineLength + copied;
+                            }
+                            else
+                            {
+                                prefixLength = PrefixBytes;
+                            }
+
                             oversized = true;
-                            lineLength = 0;
                         }
                         else
                         {
@@ -79,7 +93,7 @@ internal static class JsonlLineReader
 
                     if (oversized)
                     {
-                        onOversized(lineNumber, lineOffset);
+                        onOversized(line.AsSpan(0, prefixLength), lineNumber, lineOffset);
                     }
                     else
                     {
@@ -98,6 +112,7 @@ internal static class JsonlLineReader
                     lineNumber++;
                     lineOffset = position + newline + 1;
                     lineLength = 0;
+                    prefixLength = 0;
                     oversized = false;
                     start = newline + 1;
                 }
@@ -107,7 +122,7 @@ internal static class JsonlLineReader
 
             if (oversized)
             {
-                onOversized(lineNumber, lineOffset);
+                onOversized(ReadOnlySpan<byte>.Empty, lineNumber, lineOffset);
             }
             else if (!IsBlank(line.AsSpan(0, lineLength)))
             {
