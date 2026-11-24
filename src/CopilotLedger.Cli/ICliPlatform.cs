@@ -17,6 +17,7 @@ public interface ICliPlatform
     void SetStartupCommand(string name, string? command);                  // Windows: sets that value (REG_SZ), or deletes it when command is null; other platforms throw PlatformNotSupportedException
     bool FileExists(string path);
     string? FindOnPath(string fileName);                                   // full path of an executable on PATH, or null
+    TimeZoneInfo? FindTimeZone(string id);                                 // a time zone by IANA ID (on Windows also by Windows ID), or null
     Task<ProcessRunResult> RunAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken);
     int StartDetached(string fileName, IReadOnlyList<string> arguments, string workingDirectory);   // returns the new process id; its standard input, output, and error are the null device; on Windows it inherits no other handle
     bool IsProcessRunning(int processId);

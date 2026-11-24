@@ -35,6 +35,7 @@ public sealed class FakeCliPlatform : ICliPlatform
     public Exception? StartupCommandException { get; set; }
     public Dictionary<string, string> PathExecutables { get; } =
         new(StringComparer.Ordinal);
+    public Dictionary<string, TimeZoneInfo> TimeZones { get; } = new(StringComparer.Ordinal);
     public HashSet<string> ExistingFiles { get; } = new(StringComparer.Ordinal);
     public List<(string FileName, IReadOnlyList<string> Arguments)> ProcessRuns { get; } = [];
     public Func<string, IReadOnlyList<string>, CancellationToken, Task<ProcessRunResult>>? RunHandler { get; set; }
@@ -87,6 +88,9 @@ public sealed class FakeCliPlatform : ICliPlatform
 
     public string? FindOnPath(string fileName) =>
         PathExecutables.GetValueOrDefault(fileName);
+
+    public TimeZoneInfo? FindTimeZone(string id) =>
+        TimeZones.GetValueOrDefault(id);
 
     public Task<ProcessRunResult> RunAsync(
         string fileName,
