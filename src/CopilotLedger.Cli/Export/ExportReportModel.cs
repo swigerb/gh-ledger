@@ -1,3 +1,4 @@
+using CopilotLedger.Core.Audit;
 using CopilotLedger.Core.Pricing;
 using CopilotLedger.Storage;
 
@@ -9,7 +10,8 @@ internal sealed record ExportReportModel
     public required ExportHeader Header { get; init; }
     public required ExportSummary Summary { get; init; }
     public required ExportCoverage Coverage { get; init; }
-    public required IReadOnlyList<ExportAuditFinding> AuditFindings { get; init; }      // always empty until gh ledger audit (#65)
+    public required IReadOnlyList<ExportAuditFinding> AuditFindings { get; init; }      // the first ExportLimits.AuditFindings of Audit's
+    public required AuditReport Audit { get; init; }                                    // gh ledger audit of the same window; shown repository keys
     public required IReadOnlyList<LedgerRollupRow> ByModel { get; init; }               // GetRollupAsync's order
     public required IReadOnlyList<LedgerRollupRow> ByAgent { get; init; }
     public required IReadOnlyList<LedgerRollupRow> ByBranch { get; init; }              // Repository is the shown key

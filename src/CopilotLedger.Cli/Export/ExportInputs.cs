@@ -1,3 +1,4 @@
+using CopilotLedger.Core.Audit;
 using CopilotLedger.Storage;
 
 namespace CopilotLedger.Cli.Export;
@@ -14,4 +15,5 @@ internal sealed record ExportInputs
     public required bool AllRepositories { get; init; }         // no repository key: --all-repos, or outside a Git repository
     public required int MaxTimelineSpans { get; init; }
     public required bool IncludeLocalPaths { get; init; }
+    public IAuditPricing? AuditPricing { get; init; }           // the rates in use for the audit findings; null when the overlay is invalid
 }

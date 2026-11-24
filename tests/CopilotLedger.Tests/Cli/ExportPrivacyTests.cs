@@ -122,7 +122,7 @@ public sealed class ExportPrivacyTests
             File.ReadAllText(Path.Combine(temp.Path, Report)),
             .. ExportFiles.ReadZip(Path.Combine(temp.Path, Bundle)).Select(entry => Encoding.UTF8.GetString(entry.Bytes)),
         ];
-        Assert.Equal(9, texts.Length);
+        Assert.Equal(10, texts.Length);
         Assert.All(Canaries, canary => Assert.All(texts, text => Assert.DoesNotContain(canary, text, StringComparison.Ordinal)));
     }
 
@@ -235,7 +235,7 @@ public sealed class ExportPrivacyTests
 
         using JsonDocument manifest = JsonDocument.Parse(Entry(temp.Path, "manifest.json"));
         Assert.Equal(
-            (0, $"Wrote copilot-ledger-report.html: 0 requests in {shown} (last 30 days).\nWrote copilot-ledger-report.zip: report.html, manifest.json, and 4 telemetry files.\n", string.Empty),
+            (0, $"Wrote copilot-ledger-report.html: 0 requests in {shown} (last 30 days).\nWrote copilot-ledger-report.zip: report.html, manifest.json, and 5 telemetry files.\n", string.Empty),
             (run.ExitCode, run.Out, run.Error));
         Assert.Equal(shown, manifest.RootElement.GetProperty("filter").GetProperty("repo").GetString());
         Assert.All(Texts(temp.Path), text => Assert.DoesNotContain("9f3e", text, StringComparison.Ordinal));

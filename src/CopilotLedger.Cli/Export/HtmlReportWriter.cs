@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
 using CopilotLedger.Cli.Reporting;
+using CopilotLedger.Core.Audit;
 using CopilotLedger.Core.Breaker;
 using CopilotLedger.Core.Pricing;
 using CopilotLedger.Storage;
@@ -45,7 +46,7 @@ internal static class HtmlReportWriter
         WritePromptChains(html, model, header.TimeZone);
         WriteRollups(html, model);
         WriteBreaker(html, model, header.TimeZone);
-        WriteAuditFindings(html, model.AuditFindings);
+        WriteAuditFindings(html, model);
         Line(html, "</main>");
         Line(
             html,
@@ -785,14 +786,29 @@ internal static class HtmlReportWriter
 
     private static Cell Code(string value) => new($"<code>{Text(value)}</code>", value);
 
-    private static void WriteAuditFindings(StringBuilder html, IReadOnlyList<ExportAuditFinding> findings)
+    private static void WriteAuditFindings(StringBuilder html, ExportReportModel model)
     {
+        IReadOnlyList<ExportAuditFinding> findings = model.AuditFindings;
         if (findings.Count == 0)
         {
             return;
         }
 
+        AuditReport audit = model.Audit;
         SectionStart(html, "audit-findings", "Audit findings");
+        Line(
+            html,
+            "<p id=\"audit-note\">Review signals from fixed rules over these requests and tool calls, not proof of waste. " +
+            $"Estimated impacts are billed USD{(audit.RatesVersion is null ? "" : $" at rates {Text(audit.RatesVersion)}")}; findings can " +
+            "overlap, so their impacts aren't added together." +
+            (audit.Findings.Count > findings.Count
+                ? $" The table shows the first {LedgerFormat.Count(findings.Count)} of {LedgerFormat.Count(audit.Findings.Count)} findings; " +
+                  "telemetry/audit-findings.json in the bundle and gh ledger audit --json list them all."
+                : "") +
+            (audit.RatesVersion is null
+                ? " The rates in use couldn't be loaded, so premium_model_trivial_turn wasn't evaluated and repriced estimates are unknown."
+                : "") +
+            "</p>");
         Line(html, "<table>");
         Line(html, "<caption>Audit findings</caption>");
         Line(html, "<thead><tr><th scope=\"col\">Severity</th><th scope=\"col\">Finding</th><th scope=\"col\">Detail</th></tr></thead>");

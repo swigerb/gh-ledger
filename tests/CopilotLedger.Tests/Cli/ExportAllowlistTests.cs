@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Storage;
 using CopilotLedger.Tests.TestSupport;
 
 namespace CopilotLedger.Tests.Cli;
@@ -18,7 +21,16 @@ public sealed partial class ExportAllowlistTests
         foreach (bool includeLocalPaths in new[] { false, true })
         {
             using TempDirectory temp = new();
-            await ExportSeeds.CreateAsync(temp.Path);
+            SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+
+            // A request whose input dwarfs its output, so the audit file has a finding.
+            NormalizedGenAiSpan bloated = TestSpans.Chat(
+                startTime: ExportSeeds.GeneratedAt.AddHours(-1),
+                requestModel: "claude-opus-5.5",
+                conversationId: "conv-bloat",
+                inputTokens: 60_000,
+                outputTokens: 100);
+            await store.RecordAsync([new LedgerEntry(bloated, JsonRateCardCalculator.LoadEmbedded().Calculate(bloated), null)]);
             foreach ((string file, JsonDocument document) in await ExportAsync(temp.Path, includeLocalPaths))
             {
                 using (document)

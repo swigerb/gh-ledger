@@ -1,6 +1,8 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Globalization;
+using CopilotLedger.Cli.Rates;
+using CopilotLedger.Core.Audit;
 using CopilotLedger.Core.Git;
 using CopilotLedger.Storage;
 
@@ -228,6 +230,7 @@ internal static class ExportCommands
 
         SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
         await store.InitializeAsync(cancellationToken);
+        inputs = inputs with { AuditPricing = LoadAuditPricing(context) };
         string htmlTemp = TemporaryPath(htmlPath);
         string? zipTemp = zipPath is null ? null : TemporaryPath(zipPath);
         string? zipBackup = null;
@@ -312,7 +315,7 @@ internal static class ExportCommands
             $"Wrote {Path.GetFileName(htmlPath)}: {ExportRecords.Plural(model.Summary.Totals.SpanCount, "request", "requests")} in {model.Header.Scope} ({model.Header.Filter.Period}).");
         if (zipPath is not null)
         {
-            context.Out.WriteLine($"Wrote {Path.GetFileName(zipPath)}: report.html, manifest.json, and 4 telemetry files.");
+            context.Out.WriteLine($"Wrote {Path.GetFileName(zipPath)}: report.html, manifest.json, and 5 telemetry files.");
         }
 
         if (model.Coverage.TimelineTruncated)
@@ -332,14 +335,32 @@ internal static class ExportCommands
     {
         byte[] chains = ExportJson.PromptChains(model);
         byte[] summary = ExportJson.Summary(model);
+        byte[] audit = ExportJson.AuditFindings(model);
         return
         [
             new("report.html", (stream, token) => stream.WriteAsync(html, token).AsTask()),
+            new("telemetry/audit-findings.json", (stream, token) => stream.WriteAsync(audit, token).AsTask()),
             new("telemetry/prompt-chains.json", (stream, token) => stream.WriteAsync(chains, token).AsTask()),
             new("telemetry/spans.json", (stream, token) => ExportJson.WriteSpansAsync(stream, snapshot, inputs, token)),
             new("telemetry/summary.json", (stream, token) => stream.WriteAsync(summary, token).AsTask()),
             new("telemetry/tool-calls.json", (stream, token) => ExportJson.WriteToolCallsAsync(stream, snapshot, inputs, token)),
         ];
+    }
+
+    // The rates in use, loaded as import loads them, for the audit findings. An invalid overlay doesn't stop the export: it
+    // warns, and the findings leave out premium_model_trivial_turn and repriced estimates.
+    private static IAuditPricing? LoadAuditPricing(CliContext context)
+    {
+        try
+        {
+            return RateCardFiles.Load(RateCardFiles.LoadBase(context), RateCardFiles.OverlayPath(context));
+        }
+        catch (InvalidDataException ex)
+        {
+            context.Error.WriteLine(
+                $"Warning: invalid rates overlay, so the report's audit findings leave out premium_model_trivial_turn and repriced estimates: {ex.Message}");
+            return null;
+        }
     }
 
     // False, after writing why, when path is a directory, a file that --force doesn't allow replacing, or a read-only file,

@@ -1,5 +1,7 @@
 using System.Globalization;
+using CopilotLedger.Cli.Audit;
 using CopilotLedger.Cli.Reporting;
+using CopilotLedger.Core.Audit;
 using CopilotLedger.Core.Pricing;
 using CopilotLedger.Storage;
 
@@ -68,6 +70,14 @@ internal static class ExportRecords
     // The line that says the timeline doesn't draw every request or tool call.
     public static string TimelineTruncation(ExportCoverage coverage) =>
         $"The timeline draws the latest {LedgerFormat.Count(coverage.TimelineSpans)} of {Plural(coverage.Spans, "request", "requests")} and {LedgerFormat.Count(coverage.TimelineToolCalls)} of {Plural(coverage.ToolCalls, "tool call", "tool calls")}; the totals and tables include them all.";
+
+    // An audit finding as the report's row: its severity, "{rule title}: {key metrics}", and "{scope}; {window}; est. impact
+    // {usd or -}. {recommendation}", in zone. Never the local model's text.
+    public static ExportAuditFinding AuditFinding(AuditFinding finding, AuditThresholds thresholds, TimeZoneInfo zone) => new(
+        AuditText.Severity(finding.Severity),
+        $"{AuditText.RuleTitle(finding.RuleId)}: {AuditText.KeyMetrics(finding, thresholds)}",
+        $"{AuditText.Scope(finding.Scope)}; {AuditText.Window(finding.WindowStart, finding.WindowEnd, zone)}; " +
+        $"est. impact {AuditText.Impact(finding.EstimatedImpactUsd)}. {AuditRecommendations.Text(finding.RecommendationKey)}");
 
     // value when it has at most length UTF-16 code units; else its first length - 1 units and "…", one fewer when the cut
     // would split a surrogate pair (HtmlEncoder would write a lone surrogate as U+FFFD).

@@ -14,7 +14,8 @@ public sealed class ExportBundleTests
 
     private static readonly string[] Telemetry =
     [
-        "report.html", "telemetry/prompt-chains.json", "telemetry/spans.json", "telemetry/summary.json", "telemetry/tool-calls.json",
+        "report.html", "telemetry/audit-findings.json", "telemetry/prompt-chains.json", "telemetry/spans.json", "telemetry/summary.json",
+        "telemetry/tool-calls.json",
     ];
 
     private static readonly HashSet<string> MoneyNames =
@@ -24,7 +25,7 @@ public sealed class ExportBundleTests
     ];
 
     [Fact]
-    public async Task EB1_TheZipHasSixEntriesWithFixedDatesInOrdinalOrder()
+    public async Task EB1_TheZipHasSevenEntriesWithFixedDatesInOrdinalOrder()
     {
         using TempDirectory temp = new();
         await ExportSeeds.CreateAsync(temp.Path);
@@ -33,7 +34,7 @@ public sealed class ExportBundleTests
 
         Assert.Equal(
             "Wrote copilot-ledger-report.html: 8 requests in all repositories (last 30 days).\n" +
-            "Wrote copilot-ledger-report.zip: report.html, manifest.json, and 4 telemetry files.\n",
+            "Wrote copilot-ledger-report.zip: report.html, manifest.json, and 5 telemetry files.\n",
             run.Out);
         Assert.Equal(["manifest.json", .. Telemetry], ExportFiles.ReadZip(Path.Combine(temp.Path, Bundle)).Select(entry => entry.Name));
         Assert.All(
@@ -172,7 +173,7 @@ public sealed class ExportBundleTests
         Assert.Equal("old", File.ReadAllText(Path.Combine(temp.Path, Bundle)));
         CliRun replaced = await cli.RunAsync("export", "--all-repos", "--bundle", "--force");
         Assert.Equal((0, string.Empty), (replaced.ExitCode, replaced.Error));
-        Assert.Equal(6, ExportFiles.ReadZip(Path.Combine(temp.Path, Bundle)).Count);
+        Assert.Equal(7, ExportFiles.ReadZip(Path.Combine(temp.Path, Bundle)).Count);
     }
 
     [Fact]

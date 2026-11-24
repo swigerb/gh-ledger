@@ -589,7 +589,7 @@ gh ledger export --branch feature/search --bundle
 
 ```text
 Wrote copilot-ledger-report.html: 8 requests in contoso/webapp, branch feature/search (last 30 days).
-Wrote copilot-ledger-report.zip: report.html, manifest.json, and 4 telemetry files.
+Wrote copilot-ledger-report.zip: report.html, manifest.json, and 5 telemetry files.
 ```
 <!-- /sample -->
 

@@ -320,7 +320,7 @@ The export reads the ledger once, so the report and the bundle agree. It covers 
 
 ```text
 Wrote copilot-ledger-report.html: 8 requests in contoso/webapp, branch feature/search (last 30 days).
-Wrote copilot-ledger-report.zip: report.html, manifest.json, and 4 telemetry files.
+Wrote copilot-ledger-report.zip: report.html, manifest.json, and 5 telemetry files.
 ```
 
 When the timeline leaves requests or tool calls out, a third line says how many it draws.
@@ -332,12 +332,13 @@ When the timeline leaves requests or tool calls out, a third line says how many 
 - **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Hold Ctrl or Command and scroll, or pinch, to zoom, as far as the axis can still label two times; drag sideways to pan; or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
 - **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
 - **Cache efficiency, prompt chains, spend tables, and the circuit breaker:** the reports' numbers, with sortable columns.
+- **Audit findings:** the review signals that `gh ledger audit` finds in the same window, most severe first, with fixed texts: the first 100, and a note when there are more. The bundle's `telemetry/audit-findings.json` has them all. The section appears only when there are findings, and never holds a local model's suggestions.
 
 `Unpriced` and `n/a` are never shown as `$0.00` or `0.0%`, and a hatched mark flags requests without a price. The page works without JavaScript: every chart has a table, and the script only adds zooming, the view switch, and sorting. It loads nothing: its Content Security Policy is `default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:`. GitHub accepts `.html` and `.zip` attachments up to 25 MB, and at the default timeline cap a report stays near 6 MB at most; lower `--max-timeline-spans` for a smaller one.
 
 ### The bundle
 
-The ZIP holds exactly six files: `manifest.json`, `report.html` (the same bytes as the report beside it), and `telemetry/prompt-chains.json`, `telemetry/spans.json`, `telemetry/summary.json`, and `telemetry/tool-calls.json`. `spans.json` has every request, however many the timeline draws, and `tool-calls.json` every tool call. Money is an exact decimal number, as in every gh-ledger JSON: parse it as a decimal, not a float.
+The ZIP holds exactly seven files: `manifest.json`, `report.html` (the same bytes as the report beside it), and `telemetry/audit-findings.json`, `telemetry/prompt-chains.json`, `telemetry/spans.json`, `telemetry/summary.json`, and `telemetry/tool-calls.json`. `spans.json` has every request, however many the timeline draws, `tool-calls.json` every tool call, and `audit-findings.json` every audit finding, as `gh ledger audit --json` writes them with the export's window and repository. Money is an exact decimal number, as in every gh-ledger JSON: parse it as a decimal, not a float.
 
 ```json
 {
@@ -356,7 +357,7 @@ The ZIP holds exactly six files: `manifest.json`, `report.html` (the same bytes 
 }
 ```
 
-`files` lists the other five files with their exact sizes and SHA-256 hashes; the manifest doesn't list itself. The hashes show that the files weren't changed after they were written, not who wrote them. The same gh-ledger build on the same operating system writes the same bytes again from an unchanged ledger: repeat the export's filters with `--generated-at` set to `generatedAtUtc` and `--time-zone` set to `timeZone.requested`, or to `timeZone.id`. A Windows ID works only on Windows, so pass an IANA `--time-zone` when a report may be reproduced elsewhere. A request recorded after the export but started before it changes the result. `filter.repo` of a repository without a GitHub remote is its folder name, which `--repo` doesn't select (a slug has a `/`, and a folder name never does): to reproduce such an export, pass the repository's full root to `--repo`, or export with `--include-local-paths`, which records the root.
+`files` lists the other six files with their exact sizes and SHA-256 hashes; the manifest doesn't list itself. The hashes show that the files weren't changed after they were written, not who wrote them. The same gh-ledger build on the same operating system writes the same bytes again from an unchanged ledger: repeat the export's filters with `--generated-at` set to `generatedAtUtc` and `--time-zone` set to `timeZone.requested`, or to `timeZone.id`. A Windows ID works only on Windows, so pass an IANA `--time-zone` when a report may be reproduced elsewhere. A request recorded after the export but started before it changes the result. `filter.repo` of a repository without a GitHub remote is its folder name, which `--repo` doesn't select (a slug has a `/`, and a folder name never does): to reproduce such an export, pass the repository's full root to `--repo`, or export with `--include-local-paths`, which records the root.
 
 ### What export includes
 
@@ -396,6 +397,14 @@ These are the only fields export writes. In the table, `.` is a file's top level
 | `telemetry/tool-calls.json` | `toolCalls[]` | `traceId`, `spanId`, `conversationId`, `agent`, `toolName`, `startTime`, `exitCode`, `status`, `failed`, `ingestSource` |
 | `telemetry/prompt-chains.json` | `.` | `schemaVersion`, `limit`, `total`, `chains` |
 | `telemetry/prompt-chains.json` | `chains[]` | `rank`, `traceId`, `conversationId`, `startTime`, `endTime`, `repository`, `branch`, `agents`, `models`, `spans`, `unpricedSpans`, `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`, `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans` |
+| `telemetry/audit-findings.json` | `.` | `schemaVersion`, `generatedAtUtc`, `filter`, `impactLens`, `ratesVersion`, `economyModel`, `thresholds`, `rules`, `coverage`, `minSeverity`, `limit`, `findingsTotal`, `findings` |
+| `telemetry/audit-findings.json` | `filter` | `repository`, `branch`, `pullRequest`, `conversation`, `since`, `period`, `fromUtc`, `toUtc` |
+| `telemetry/audit-findings.json` | `thresholds` | `turnVelocityRequests`, `turnVelocityWindowMinutes`, `toolLoopCalls`, `failedToolRetryCalls`, `contextBloatInputTokens`, `contextBloatRatio`, `contextGrowthRequests`, `contextGrowthRatio`, `cacheMissStreakRequests`, `cacheMissInputTokens`, `cacheMissHitRatio`, `trivialOutputTokens`, `trivialRequestsPerDay`, `nearBreakerFraction`, `breakerVelocityAiCredits`, `breakerVelocityWindowMinutes`, `breakerChurnFailures` |
+| `telemetry/audit-findings.json` | `coverage` | `spans`, `spansBySource`, `toolCalls`, `unpricedSpans`, `cacheReportedSpans`, `cacheAbsentSpans`, `cacheLegacyUnknownSpans`, `spansWithoutAgentIdentity`, `toolCallsWithoutAgentIdentity`, `spansWithUnknownToolCount`, `insufficientToolHistory`, `toolHistoryRetentionDays`, `toolHistoryFromUtc`, `toolHistoryStart`, `spansBeforeToolHistory`, `importedToolCallsWithoutDetail`, `importedRequestsWithoutToolData`, `supersededMatchedImportSpans`, `supersededUnmatchedImportSpans`, `ledgerAmbiguousImportRecords`, `ledgerIncompleteImportLogs` |
+| `telemetry/audit-findings.json` | `coverage.spansBySource[]` | `source`, `spans` |
+| `telemetry/audit-findings.json` | `findings[]` | `ruleId`, `severity`, `scope`, `windowStart`, `windowEnd`, `metrics`, `estimatedImpactUsd`, `recommendationKey` |
+| `telemetry/audit-findings.json` | `findings[].scope` | `repository`, `branch`, `pullRequest`, `agent`, `model`, `traceId`, `conversationId`, `tool`, `toolOutcome` |
+| `telemetry/audit-findings.json` | `findings[].metrics[]` | `name`, `value`, `unit` |
 <!-- /export-allowlist -->
 
 - A request's `repository` is its `owner/repo` slug, its root's folder name (the root with `--include-local-paths`), or `(none)`; every other `repository` is the same as the reports' key, with a local root shown the same way. `aiCredits` of a request is its cost in AI credits when GitHub billed it, and 0 otherwise. `costUsd` is 0 for an unpriced request, and `pricingStatus` says why.
