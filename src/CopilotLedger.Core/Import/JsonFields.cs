@@ -33,7 +33,7 @@ internal sealed class JsonFields
             int? found = null;
             while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
             {
-                bool isType = reader.ValueTextEquals("type"u8);
+                bool isType = TextEquals(ref reader, "type");
                 reader.Read();
                 if (!isType)
                 {
@@ -49,7 +49,7 @@ internal sealed class JsonFields
                 found = -1;
                 for (int index = 0; index < types.Count; index++)
                 {
-                    if (reader.ValueTextEquals(types[index]))
+                    if (TextEquals(ref reader, types[index]))
                     {
                         found = index;
                         break;
@@ -116,7 +116,7 @@ internal sealed class JsonFields
             PathTree.Node? child = null;
             foreach (PathTree.Node candidate in node.Children)
             {
-                if (reader.ValueTextEquals(candidate.Name))
+                if (TextEquals(ref reader, candidate.Name))
                 {
                     child = candidate;
                     break;
@@ -183,6 +183,21 @@ internal sealed class JsonFields
                 return new Value(token, null, null);
             default:
                 return new Value(reader.TokenType, null, null);
+        }
+    }
+
+    // Whether the property name or string at the reader is text. ValueTextEquals throws InvalidOperationException for an
+    // escaped lone surrogate, which it can't unescape; a name or string that holds one is never one of the parser's ASCII
+    // names or types.
+    private static bool TextEquals(ref Utf8JsonReader reader, string text)
+    {
+        try
+        {
+            return reader.ValueTextEquals(text);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
         }
     }
 

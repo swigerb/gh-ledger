@@ -406,6 +406,35 @@ public sealed class CodexRolloutTests
         Assert.Equal(result.ContentSha256, await SessionLogHash.ComputeAsync(location, CancellationToken.None));
     }
 
+    // As CS16: a name or type that holds an escaped lone surrogate is none of the parser's, and the rollout is read on.
+    [Fact]
+    public async Task CX17_AnEscapedLoneSurrogateInANameOrATypeIsNeverOneOfTheParsers()
+    {
+        using TempDirectory temp = new();
+        string path = new CodexRollouts(Thread)
+            .Raw("{\"\\uDC00\\uDC00\":\"" + CopilotSessionLogs.Canary + "\",\"type\":\"event_msg\",\"payload\":{}}")
+            .Raw("{\"type\":\"\\uDC00\\uDC00\\uDC00\",\"payload\":{\"message\":\"" + CopilotSessionLogs.Canary + "\"}}")
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_1", "turn-1")
+            .Write(temp.Path);
+        await File.WriteAllTextAsync(
+            path,
+            (await File.ReadAllTextAsync(path)).Replace(
+                "\"usage\":{\"input_tokens\":",
+                "\"usage\":{\"\\uDC00\\uDC00\":1,\"input_tokens\":",
+                StringComparison.Ordinal));
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(
+            (1L, 0L, 0L, 2L),
+            (result.RecordsParsed, result.UnsupportedUsageShapes, result.MalformedLines, result.SkippedEvents));
+        Assert.Equal("resp_1", Assert.Single(result.Records).RecordKey);
+        Assert.Empty(result.Diagnostics);
+        AssertNoCanary(result);
+    }
+
     private static async Task<SessionLogReadResult> ReadAsync(string home) =>
         await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
 

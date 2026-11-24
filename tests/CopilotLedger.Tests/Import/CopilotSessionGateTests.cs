@@ -304,6 +304,33 @@ public sealed class CopilotSessionGateTests
         Assert.Equal(1, discovery.UnreadableEntries);
     }
 
+    // ValueTextEquals can't unescape a lone surrogate, so a name or type that holds one is none of the parser's: its line is
+    // skipped, or its property ignored, like any other unknown one, and the log is read on.
+    [Fact]
+    public async Task CS16_AnEscapedLoneSurrogateInANameOrATypeIsNeverOneOfTheParsers()
+    {
+        using TempDirectory temp = new();
+        string usage = new CopilotSessionLogs(SessionId)
+            .Usage("u1", "1f0e9c2a-7b3d-4e5f-8a9b-0c1d2e3f4a5b")
+            .Lines[1]
+            .Replace("\"usage\":{\"model\":", "\"usage\":{\"\\uDC00\\uDC00\":1,\"model\":", StringComparison.Ordinal);
+        new CopilotSessionLogs(SessionId)
+            .Raw("{\"\\uDC00\\uDC00\":\"" + CopilotSessionLogs.Canary + "\",\"type\":\"user.message\"}")
+            .Raw("{\"type\":\"\\uDC00\\uDC00\\uDC00\",\"data\":{\"content\":\"" + CopilotSessionLogs.Canary + "\"}}")
+            .Raw(usage)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(
+            (1L, 0L, 0L, 2L),
+            (result.RecordsParsed, result.UnsupportedUsageShapes, result.MalformedLines, result.SkippedEvents));
+        Assert.Equal("u1", Assert.Single(result.Records).RecordKey);
+        Assert.Empty(result.Diagnostics);
+        AssertNoCanary(result);
+    }
+
     private static async Task<SessionLogReadResult> ReadAsync(string home) =>
         await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
 

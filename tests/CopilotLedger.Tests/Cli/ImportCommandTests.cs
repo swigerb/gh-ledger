@@ -606,6 +606,85 @@ public sealed class ImportCommandTests
             JsonSerializer.Serialize(Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray())));
     }
 
+    // A line whose name or type holds an escaped lone surrogate is skipped like any other unknown event: the import completes,
+    // and no exception message reaches the output.
+    [Fact]
+    public async Task IC15_AnEscapedLoneSurrogateNeverStopsAnImport()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        new CopilotSessionLogs("s-a")
+            .Raw("{\"\\uDC00\\uDC00\":1,\"type\":\"user.message\"}")
+            .Raw("{\"type\":\"\\uDC00\\uDC00\\uDC00\"}")
+            .Usage("u1", S1)
+            .Write(harness.Context.CopilotHome);
+        new CodexRollouts(Thread)
+            .Raw("{\"\\uDC00\\uDC00\":1,\"type\":\"event_msg\",\"payload\":{}}")
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_1", "turn-1")
+            .Write(harness.Context.CodexHome);
+
+        CliRun dryRun = await harness.RunAsync("import", "--all", "--source", "copilot", "--source", "codex", "--dry-run");
+        CliRun run = await harness.RunAsync("import", "--all", "--source", "copilot", "--source", "codex");
+
+        Assert.Equal((0, "", 0, ""), (dryRun.ExitCode, dryRun.Error, run.ExitCode, run.Error));
+        Assert.Equal(
+            Normalize("""
+            Import from local session logs (all time, dry run)
+
+                                       Copilot     Codex
+            Sessions scanned                 1         1
+            Skipped, unchanged               0         0
+            Skipped, active                  0         0
+            Skipped, out of scope            0         0
+            Unsupported sessions             0         0
+            Records parsed                   1         1
+            Out of scope                     0         0
+            Recorded                         1         1
+            Duplicate                        0         0
+            Overlap-skipped                  0         0
+            Ambiguous-overlap                0         0
+            Superseded, unmatched            0         0
+            Malformed lines                  0         0
+            Unsupported usage shapes         0         0
+            Cost out of range                0         0
+            Unpriced                         0         1
+            Coverage                  complete  complete
+
+            Importing would record 2 requests: 0.15 AI credits ($0.00), API equivalent $0.00.
+            Dry run: nothing was written.
+
+            """),
+            dryRun.Out);
+        Assert.Equal(
+            Normalize("""
+            Import from local session logs (all time)
+
+                                       Copilot     Codex
+            Sessions scanned                 1         1
+            Skipped, unchanged               0         0
+            Skipped, active                  0         0
+            Skipped, out of scope            0         0
+            Unsupported sessions             0         0
+            Records parsed                   1         1
+            Out of scope                     0         0
+            Recorded                         1         1
+            Duplicate                        0         0
+            Overlap-skipped                  0         0
+            Ambiguous-overlap                0         0
+            Superseded, unmatched            0         0
+            Malformed lines                  0         0
+            Unsupported usage shapes         0         0
+            Cost out of range                0         0
+            Unpriced                         0         1
+            Coverage                  complete  complete
+
+            Recorded 2 requests: 0.15 AI credits ($0.00), API equivalent $0.00.
+
+            """),
+            run.Out);
+    }
+
     private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
 
     private static string Normalize(string value) => value.Replace("\r\n", "\n");
