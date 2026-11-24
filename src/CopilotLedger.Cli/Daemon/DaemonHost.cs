@@ -109,7 +109,7 @@ internal static class DaemonHost
                 context,
                 store,
                 message => WriteLog(writer, context, message));
-            CircuitBreakerMonitor monitor = new(store, dispatcher);
+            CircuitBreakerMonitor monitor = new(store, dispatcher, dispatcher.Command);
             LedgerIngestor ingestor = new(
                 store,
                 calculator,

@@ -413,7 +413,7 @@ Budgets count Foundry BYOK spend at $0.01 per AI credit, so the branch's 617.75 
 
 <!-- sample: budget-alert -->
 ```text
-2026-11-21T21:30:00.0000000+00:00 ALERT gh-ledger branch budget exceeded: contoso/webapp @ feature/search: 766.75 of 750.00 AI credits spent. Run: gh-ledger budget list
+2026-11-21T21:30:00.0000000+00:00 ALERT gh-ledger branch budget exceeded: contoso/webapp @ feature/search: 766.75 of 750.00 AI credits spent. Run: gh ledger budget list
 ```
 <!-- /sample -->
 

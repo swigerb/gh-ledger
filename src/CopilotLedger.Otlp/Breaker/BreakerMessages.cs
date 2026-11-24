@@ -9,6 +9,7 @@ public static class BreakerMessages
 {
     public const string TripTitle = "gh-ledger circuit breaker tripped";
     public const string BudgetTitle = "gh-ledger branch budget exceeded";
+    public const string DefaultCommand = "gh-ledger";   // how alerts name gh-ledger unless the caller knows better; the daemon passes GhExtension.CommandName
 
     public static string Credits(decimal aiCredits) =>                          // decimal.Round(aiCredits, 2, MidpointRounding.AwayFromZero).ToString("N2", CultureInfo.InvariantCulture)
         decimal.Round(aiCredits, 2, MidpointRounding.AwayFromZero)
@@ -33,27 +34,29 @@ public static class BreakerMessages
         string repository,
         string branch,
         string detail,
-        bool showNotification) => new()
+        bool showNotification,
+        string command = DefaultCommand) => new()
     {
         Kind = BreakerAlertKind.Trip,
         TripId = tripId,
         Repository = repository,
         Branch = branch,
         Title = TripTitle,
-        Body = $"{repository} @ {branch}: {detail} on one prompt. Run: gh-ledger breaker status",
+        Body = $"{repository} @ {branch}: {detail} on one prompt. Run: {command} breaker status",
         ShowNotification = showNotification,
     };
 
     public static BreakerAlert ForBudget(
         BranchBudgetRow budget,
-        bool showNotification) => new()
+        bool showNotification,
+        string command = DefaultCommand) => new()
     {
         Kind = BreakerAlertKind.Budget,
         TripId = null,
         Repository = budget.Repository,
         Branch = budget.Branch,
         Title = BudgetTitle,
-        Body = $"{budget.Repository} @ {budget.Branch}: {Credits(budget.SpentAiCredits)} of {Credits(budget.BudgetAiCredits)} AI credits spent. Run: gh-ledger budget list",
+        Body = $"{budget.Repository} @ {budget.Branch}: {Credits(budget.SpentAiCredits)} of {Credits(budget.BudgetAiCredits)} AI credits spent. Run: {command} budget list",
         ShowNotification = showNotification,
     };
 }
