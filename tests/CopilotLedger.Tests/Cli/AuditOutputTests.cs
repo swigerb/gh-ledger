@@ -119,6 +119,7 @@ public sealed class AuditOutputTests
             """
             Audit of all repositories (last 7 days)
             4 findings: 1 high, 2 warning, 1 info. Showing 1.
+            By rule: failed_tool_retry 1, context_bloat 1, cache_miss_streak 1, premium_model_trivial_turn 1.
 
             Severity  Rule               Scope                                                   Window                  Key metrics          Est. impact
             High      failed_tool_retry  swigerb/copilot-ledger @ feature/ledger, explore, bash  2026-11-21 10:00-10:01  4 failures in a row        $0.01
@@ -268,6 +269,35 @@ public sealed class AuditOutputTests
             ],
             AuditRuleIds.All.Select(AuditText.RuleTitle));
         Assert.Equal(["High", "Warning", "Info"], new[] { AuditSeverity.High, AuditSeverity.Warning, AuditSeverity.Info }.Select(AuditText.Severity));
+    }
+
+    [Fact]
+    public void AO8_ByRule_CountsEveryFindingInRuleOrder()
+    {
+        AuditSpan Agentic(int k) => AuditFixtures.Span(k, TimeSpan.FromMinutes(k)) with
+        {
+            InputTokens = 120_000,
+            CacheReadInputTokens = 114_000,
+            CacheReadState = CacheCounterState.Reported,
+            OutputTokens = 150,
+        };
+        AuditInput input = AuditFixtures.Input(
+            Enumerable.Range(1, 20).Select(k =>
+                k % 2 == 0 ? Agentic(k) with { AgentInvocationId = "b0000000000000b0" } : Agentic(k)),
+            Enumerable.Range(0, 8).Select(k =>
+                AuditFixtures.Tool(k + 1, TimeSpan.FromSeconds(10 * k + 5)))) with
+        {
+            Rules = [AuditRuleIds.ContextBloat, AuditRuleIds.ToolLoop],
+        };
+        AuditReport report = AuditAnalyzer.Report(
+            input,
+            AuditSeeds.GeneratedAt,
+            new AuditReportFilter { Since = "all", Period = "all time", ToUtc = AuditSeeds.GeneratedAt },
+            AuditSeverity.Info,
+            1);
+
+        string[] lines = Write(report).ReplaceLineEndings("\n").Split('\n');
+        Assert.Equal("By rule: tool_loop 1, context_bloat 2.", lines[2]);
     }
 
     // Tool history is worded as export words its start: the retention, the earliest span link the ledger keeps when that's
