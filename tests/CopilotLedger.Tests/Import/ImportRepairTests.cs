@@ -15,6 +15,7 @@ public sealed class ImportRepairTests
 {
     private const string S1 = "11111111-1111-4111-8111-111111111111";
     private const string S2 = "22222222-2222-4222-8222-222222222222";
+    private const string S3 = "33333333-3333-4333-8333-333333333333";
     private static readonly DateTimeOffset Now = new(2026, 11, 23, 12, 0, 0, TimeSpan.Zero);
     private static readonly JsonRateCardCalculator Embedded = JsonRateCardCalculator.LoadEmbedded();
 
@@ -226,6 +227,138 @@ public sealed class ImportRepairTests
         Assert.Equal(0.0473886m, budget.SpentAiCredits);
     }
 
+    [Fact]
+    public async Task RL1_ReimportRelinksToolCallsToTheRequestThatAsked()
+    {
+        using TempDirectory temp = new();
+        await PrepareMisownedToolLinksAsync(temp, "s-links");
+
+        ImportSourceReport report = Copilot(await RunAsync(temp));
+
+        Assert.Equal((0, 2), (report.ToolLinksRecorded, report.ToolLinksRelinked));
+        Assert.Equal(
+            ["1|1", "1|1"],
+            await LedgerSql.RowsAsync(
+                Database(temp),
+                $"""
+                SELECT l.owner_span_row_id = (SELECT id FROM spans WHERE canonical_usage_id = '{Canonical(S1)}'),
+                       l.trace_id = (SELECT trace_id FROM spans WHERE canonical_usage_id = '{Canonical(S1)}')
+                  FROM span_links AS l
+                 WHERE l.owner_span_row_id IS NOT NULL
+                 ORDER BY l.span_id;
+                """));
+        Assert.Equal(
+            2L,
+            await LedgerSql.ScalarAsync(
+                Database(temp), "SELECT COUNT(*) FROM span_links WHERE owner_span_row_id IS NOT NULL;"));
+    }
+
+    [Fact]
+    public async Task RL2_ARepairedLogIsUnchangedOnTheNextRun()
+    {
+        using TempDirectory temp = new();
+        await PrepareMisownedToolLinksAsync(temp, "s-links");
+        await RunAsync(temp);
+
+        ImportSourceReport report = Copilot(await RunAsync(temp));
+
+        Assert.Equal((1, 0, 0), (report.SessionsSkippedUnchanged, report.ToolLinksRecorded, report.ToolLinksRelinked));
+    }
+
+    [Fact]
+    public async Task RL3_ReimportRemovesALinkWhoseRequestWasOverlapSkipped()
+    {
+        using TempDirectory temp = new();
+        await PrepareSupersededToolLinkAsync(temp, "s-removed", S3);
+
+        ImportSourceReport report = Copilot(await RunAsync(temp));
+
+        Assert.Equal(1, report.ToolLinksRemoved);
+        Assert.Equal(0L, await LedgerSql.ScalarAsync(
+            Database(temp), "SELECT COUNT(*) FROM span_links WHERE owner_span_row_id IS NOT NULL;"));
+    }
+
+    [Fact]
+    public async Task RL4_ReimportLeavesALiveLinkWithTheSameSpanIdUntouched()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await PrepareSupersededToolLinkAsync(temp, "s-live-link", S3);
+        string spanId = Assert.Single(await LedgerSql.RowsAsync(
+            Database(temp), "SELECT span_id FROM span_links WHERE owner_span_row_id IS NOT NULL;"));
+        await store.RecordSpanLinksAsync(
+        [
+            new GenAiSpanLink
+            {
+                TraceId = new string('f', 32),
+                SpanId = spanId,
+                OperationName = "execute_tool",
+                ConversationId = "s-live-link",
+                StartTime = Now,
+                ToolName = "bash",
+            },
+        ]);
+
+        ImportSourceReport report = Copilot(await RunAsync(temp));
+
+        Assert.Equal(1, report.ToolLinksRemoved);
+        Assert.Equal(
+            1L,
+            await LedgerSql.ScalarAsync(
+                Database(temp),
+                $"SELECT COUNT(*) FROM span_links WHERE owner_span_row_id IS NULL AND span_id = '{spanId}' " +
+                $"AND trace_id = '{new string('f', 32)}';"));
+    }
+
+    [Fact]
+    public async Task RL5_DryRunReportsRelinksAndRemovalsWithoutWriting()
+    {
+        using TempDirectory temp = new();
+        WriteOneToolCall(temp, "s-removes", S3, complete: true);
+        await PrepareMisownedToolLinksAsync(temp, "s-relinks");
+        SqliteLedgerStore store = await StoreAsync(temp);
+        await store.RecordAsync([ImportEntries.Live("s-removes", S3)]);
+        await LedgerSql.ExecuteAsync(
+            Database(temp),
+            "UPDATE import_sessions SET import_revision = 0 WHERE log_id = 's-removes';");
+        Assert.Equal(
+            ["0", "0"],
+            await LedgerSql.RowsAsync(
+                Database(temp), "SELECT import_revision FROM import_sessions ORDER BY log_id;"));
+        Assert.Equal(
+            1L,
+            await LedgerSql.ScalarAsync(
+                Database(temp),
+                "SELECT COUNT(*) FROM span_links WHERE conversation_id = 's-removes' " +
+                "AND owner_span_row_id IS NOT NULL;"));
+        SqliteConnection.ClearAllPools();
+        byte[] before = SHA256.HashData(await FileRetry.ReadAllBytesAsync(Database(temp)));
+
+        ImportSourceReport dry = Copilot(await RunAsync(
+            temp, request => request with { DryRun = true }));
+
+        Assert.Equal(before, SHA256.HashData(await FileRetry.ReadAllBytesAsync(Database(temp))));
+        Assert.Equal((2, 1), (dry.ToolLinksRelinked, dry.ToolLinksRemoved));
+        ImportSourceReport real = Copilot(await RunAsync(temp));
+        Assert.Equal(
+            (dry.ToolLinksRelinked, dry.ToolLinksRemoved),
+            (real.ToolLinksRelinked, real.ToolLinksRemoved));
+    }
+
+    [Fact]
+    public async Task RL6_ReimportRecordsANewlyCompletedToolCall()
+    {
+        using TempDirectory temp = new();
+        WriteOneToolCall(temp, "s-new-tool", S3, complete: false);
+        await RunAsync(temp);
+        WriteOneToolCall(temp, "s-new-tool", S3, complete: true);
+
+        ImportSourceReport report = Copilot(await RunAsync(temp));
+
+        Assert.Equal((1, 0), (report.ToolLinksRecorded, report.ToolLinksRelinked));
+        Assert.Equal(1L, await LedgerSql.ScalarAsync(
+            Database(temp), "SELECT COUNT(*) FROM span_links WHERE owner_span_row_id IS NOT NULL;"));
+    }
+
     private static async Task<SqliteLedgerStore> PrepareReportedImportAsync(
         TempDirectory temp,
         string session,
@@ -266,6 +399,71 @@ public sealed class ImportRepairTests
         await store.RecordImportedAsync([entry], Checkpoint(log, read, true, 0));
         return store;
     }
+
+    private static async Task PrepareMisownedToolLinksAsync(TempDirectory temp, string session)
+    {
+        Tl1(session).Write(CopilotHome(temp));
+        await RunAsync(temp);
+        await LedgerSql.ExecuteAsync(
+            Database(temp),
+            $"""
+            UPDATE span_links
+               SET owner_span_row_id = (SELECT id FROM spans WHERE canonical_usage_id = '{Canonical(S2)}'),
+                   trace_id = (SELECT trace_id FROM spans WHERE canonical_usage_id = '{Canonical(S2)}')
+             WHERE owner_span_row_id IS NOT NULL;
+            UPDATE import_sessions SET import_revision = 0 WHERE log_id = '{session}';
+            """);
+    }
+
+    private static async Task<SqliteLedgerStore> PrepareSupersededToolLinkAsync(
+        TempDirectory temp,
+        string session,
+        string serviceRequestId)
+    {
+        WriteOneToolCall(temp, session, serviceRequestId, complete: true);
+        await RunAsync(temp);
+        SqliteLedgerStore store = await StoreAsync(temp);
+        await store.RecordAsync([ImportEntries.Live(session, serviceRequestId)]);
+        await LedgerSql.ExecuteAsync(
+            Database(temp),
+            $"UPDATE import_sessions SET import_revision = 0 WHERE log_id = '{session}';");
+        return store;
+    }
+
+    private static CopilotSessionLogs Tl1(string session)
+    {
+        CopilotSessionLogs log = new CopilotSessionLogs(session).AssistantMessage("api-A");
+        string messageA = log.LastId;
+        log.Usage("api-A", S1, numToolCalls: 2)
+            .AssistantMessage("api-B")
+            .Usage("api-B", S2);
+        log.ToolStart("t1", "bash", parentId: messageA);
+        string startA = log.LastId;
+        return log.ToolStart("t2", "bash", parentId: startA)
+            .ToolComplete("t1", true, parentId: startA)
+            .ToolComplete("t2", true);
+    }
+
+    private static void WriteOneToolCall(
+        TempDirectory temp,
+        string session,
+        string serviceRequestId,
+        bool complete)
+    {
+        string apiCallId = "api-" + session;
+        CopilotSessionLogs log = new CopilotSessionLogs(session).AssistantMessage(apiCallId);
+        string message = log.LastId;
+        log.Usage(apiCallId, serviceRequestId, numToolCalls: complete ? 1 : 0);
+        if (complete)
+        {
+            log.ToolStart("t1", "bash", parentId: message).ToolComplete("t1", true);
+        }
+
+        log.Write(CopilotHome(temp));
+    }
+
+    private static string Canonical(string serviceRequestId) =>
+        UsageIdentity.CanonicalUsageId("github", serviceRequestId, BillingChannel.GitHubAiCredits)!;
 
     private static async Task<SqliteLedgerStore> PrepareLiveAsync(
         TempDirectory temp,

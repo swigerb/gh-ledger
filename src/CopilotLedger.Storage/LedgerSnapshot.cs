@@ -19,7 +19,7 @@ public sealed class LedgerSnapshot : IAsyncDisposable
     private readonly SqliteTransaction? _transaction;
     private readonly HashSet<(string Source, string Key)> _aliases = [];
     private readonly HashSet<string> _recordedCanonicalIds = new(StringComparer.Ordinal);
-    private readonly HashSet<(string TraceId, string SpanId)> _links = [];
+    private readonly Dictionary<(string Conversation, string SpanId), (string TraceId, long? Owner)?> _ownedLinks = [];
     private readonly HashSet<long> _repricedRows = [];
     private readonly HashSet<long> _liveRepricedRows = [];
 
@@ -103,6 +103,8 @@ public sealed class LedgerSnapshot : IAsyncDisposable
 
         List<ImportResolution> resolutions = new(entries.Count);
         int links = 0;
+        int relinked = 0;
+        int removed = 0;
         int repriced = 0;
         int liveRepriced = 0;
         foreach (ImportedLedgerEntry entry in entries)
@@ -133,6 +135,7 @@ public sealed class LedgerSnapshot : IAsyncDisposable
             }
 
             ImportResolution resolution = UsageAuthority.Decide(facts);
+            long? ownRowId = null;
             if (resolution != ImportResolution.AmbiguousOverlap)
             {
                 _aliases.Add((source, entry.RecordKeySha256));
@@ -140,34 +143,61 @@ public sealed class LedgerSnapshot : IAsyncDisposable
 
             if (resolution == ImportResolution.Recorded)
             {
-                links += entry.ToolLinks.Count;
-                foreach (GenAiSpanLink link in entry.ToolLinks)
-                {
-                    _links.Add((link.TraceId, link.SpanId));
-                }
-
                 if (canonical is not null)
                 {
                     _recordedCanonicalIds.Add(canonical);
                 }
             }
-            else if (resolution == ImportResolution.Duplicate &&
-                     aliasInLedger &&
-                     await UsageAuthority.RecordedRowAsync(_transaction!, source, entry, cancellationToken) is long ownRowId)
+            else if (resolution == ImportResolution.Duplicate && aliasInLedger)
             {
-                UsageAuthority.StoredPricing stored = await UsageAuthority.ReadPricingAsync(
-                    _connection!, _transaction, ownRowId, SchemaVersion, cancellationToken);
-                if (stored != UsageAuthority.PricingOf(entry.Calculation) && _repricedRows.Add(ownRowId))
+                ownRowId = await UsageAuthority.RecordedRowAsync(
+                    _transaction!, source, entry, cancellationToken);
+                if (ownRowId is long recordedRowId)
                 {
-                    repriced++;
+                    UsageAuthority.StoredPricing stored = await UsageAuthority.ReadPricingAsync(
+                        _connection!, _transaction, recordedRowId, SchemaVersion, cancellationToken);
+                    if (stored != UsageAuthority.PricingOf(entry.Calculation) &&
+                        _repricedRows.Add(recordedRowId))
+                    {
+                        repriced++;
+                    }
                 }
+            }
 
+            if (resolution == ImportResolution.Recorded || ownRowId is not null)
+            {
                 foreach (GenAiSpanLink link in entry.ToolLinks)
                 {
-                    if (_links.Add((link.TraceId, link.SpanId)) && !await LinkExistsAsync(link, cancellationToken))
+                    (string TraceId, long? Owner)? existing =
+                        await OwnedLinkAsync(link, cancellationToken);
+                    if (existing is not null)
+                    {
+                        if (resolution == ImportResolution.Recorded ||
+                            existing.Value.TraceId != link.TraceId ||
+                            existing.Value.Owner != ownRowId)
+                        {
+                            relinked++;
+                        }
+                    }
+                    else if (!await LinkExistsAsync(link, cancellationToken))
                     {
                         links++;
                     }
+
+                    _ownedLinks[(link.ConversationId!, link.SpanId)] = (link.TraceId, ownRowId);
+                }
+            }
+            else if (resolution is ImportResolution.OverlapSkipped or ImportResolution.AmbiguousOverlap ||
+                     resolution == ImportResolution.Duplicate)
+            {
+                foreach (GenAiSpanLink link in entry.ToolLinks)
+                {
+                    if (await OwnedLinkAsync(link, cancellationToken) is not null)
+                    {
+                        removed++;
+                    }
+
+                    _ownedLinks[(link.ConversationId!, link.SpanId)] = null;
                 }
             }
 
@@ -193,6 +223,8 @@ public sealed class LedgerSnapshot : IAsyncDisposable
         {
             Resolutions = resolutions,
             ToolLinksRecorded = links,
+            ToolLinksRelinked = relinked,
+            ToolLinksRemoved = removed,
             Repriced = repriced,
             LiveRepriced = liveRepriced,
         };
@@ -273,12 +305,52 @@ public sealed class LedgerSnapshot : IAsyncDisposable
 
     private async Task<bool> LinkExistsAsync(GenAiSpanLink link, CancellationToken cancellationToken)
     {
+        if (_connection is null)
+        {
+            return false;
+        }
+
         await using SqliteCommand command = _connection!.CreateCommand();
         command.Transaction = _transaction;
         command.CommandText = "SELECT EXISTS (SELECT 1 FROM span_links WHERE trace_id = @trace AND span_id = @span);";
         command.Parameters.AddWithValue("@trace", link.TraceId);
         command.Parameters.AddWithValue("@span", link.SpanId);
         return (long)(await command.ExecuteScalarAsync(cancellationToken))! == 1;
+    }
+
+    private async Task<(string TraceId, long? Owner)?> OwnedLinkAsync(
+        GenAiSpanLink link,
+        CancellationToken cancellationToken)
+    {
+        var key = (link.ConversationId!, link.SpanId);
+        if (_ownedLinks.TryGetValue(key, out (string TraceId, long? Owner)? overlay))
+        {
+            return overlay;
+        }
+
+        if (_connection is null)
+        {
+            _ownedLinks[key] = null;
+            return null;
+        }
+
+        await using SqliteCommand command = _connection.CreateCommand();
+        command.Transaction = _transaction;
+        command.CommandText = """
+            SELECT trace_id, owner_span_row_id
+              FROM span_links
+             WHERE span_id = @span_id AND conversation_id = @conversation_id
+               AND owner_span_row_id IS NOT NULL
+             ORDER BY trace_id;
+            """;
+        command.Parameters.AddWithValue("@span_id", link.SpanId);
+        command.Parameters.AddWithValue("@conversation_id", link.ConversationId);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        (string TraceId, long? Owner)? stored = await reader.ReadAsync(cancellationToken)
+            ? (reader.GetString(0), reader.GetInt64(1))
+            : null;
+        _ownedLinks[key] = stored;
+        return stored;
     }
 
     // file:///C:/…/ledger.db?immutable=1 (file:///home/… elsewhere), every byte but [A-Za-z0-9-._~/:] percent-encoded.

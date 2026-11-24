@@ -35,6 +35,8 @@ public sealed partial class SqliteLedgerStore
         long now = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
         List<ImportResolution> resolutions = new(entries.Count);
         int links = 0;
+        int relinked = 0;
+        int removed = 0;
         int repriced = 0;
         int liveRepriced = 0;
         foreach (ImportedLedgerEntry entry in entries)
@@ -53,6 +55,7 @@ public sealed partial class SqliteLedgerStore
                 entry.Span.ConversationId!,
                 cancellationToken);
             ImportResolution resolution = UsageAuthority.Decide(facts);
+            long? ownRowId = null;
             if (resolution == ImportResolution.Recorded)
             {
                 long? id = await InsertSpanAsync(
@@ -66,10 +69,7 @@ public sealed partial class SqliteLedgerStore
                 {
                     await UsageAuthority.AddAliasAsync(
                         transaction, source, entry.RecordKeySha256, rowId, "recorded", now, cancellationToken);
-                    foreach (GenAiSpanLink link in entry.ToolLinks)
-                    {
-                        links += await InsertOwnedLinkAsync(transaction, link, rowId, now, cancellationToken);
-                    }
+                    ownRowId = rowId;
                 }
                 else
                 {
@@ -97,26 +97,47 @@ public sealed partial class SqliteLedgerStore
                     now,
                     cancellationToken);
             }
-            else if (resolution == ImportResolution.Duplicate &&
-                     await UsageAuthority.RecordedRowAsync(transaction, source, entry, cancellationToken) is long ownRowId)
+
+            if (resolution == ImportResolution.Duplicate &&
+                ownRowId is null)
+            {
+                ownRowId = await UsageAuthority.RecordedRowAsync(
+                    transaction, source, entry, cancellationToken);
+            }
+
+            if (resolution == ImportResolution.Duplicate && ownRowId is long existingRowId)
             {
                 UsageAuthority.StoredPricing stored =
-                    await UsageAuthority.ReadPricingAsync(connection, transaction, ownRowId, 7, cancellationToken);
+                    await UsageAuthority.ReadPricingAsync(connection, transaction, existingRowId, 7, cancellationToken);
                 UsageAuthority.StoredPricing wanted = UsageAuthority.PricingOf(entry.Calculation);
                 if (stored != wanted)
                 {
                     repriced += await UsageAuthority.RewritePricingAsync(
-                        transaction, ownRowId, wanted, cancellationToken);
+                        transaction, existingRowId, wanted, cancellationToken);
                 }
+            }
 
-                // The record's own effective row, read again from its log: tool calls that completed since then get links.
-                if (entry.ToolLinks.Count > 0)
+            if (ownRowId is long linkOwnerRowId)
+            {
+                foreach (GenAiSpanLink link in entry.ToolLinks)
                 {
-                    foreach (GenAiSpanLink link in entry.ToolLinks)
+                    removed += await ExtraOwnedLinksAsync(transaction, link, cancellationToken);
+                    switch (await UpsertOwnedLinkAsync(
+                                transaction, link, linkOwnerRowId, now, cancellationToken))
                     {
-                        links += await InsertOwnedLinkAsync(transaction, link, ownRowId, now, cancellationToken);
+                        case LinkWrite.Inserted:
+                            links++;
+                            break;
+                        case LinkWrite.Relinked:
+                            relinked++;
+                            break;
                     }
                 }
+            }
+            else if (resolution is ImportResolution.OverlapSkipped or ImportResolution.AmbiguousOverlap ||
+                     resolution == ImportResolution.Duplicate)
+            {
+                removed += await RemoveOwnedLinksAsync(transaction, entry.ToolLinks, cancellationToken);
             }
 
             if (canonical is not null &&
@@ -143,6 +164,8 @@ public sealed partial class SqliteLedgerStore
         {
             Resolutions = resolutions,
             ToolLinksRecorded = links,
+            ToolLinksRelinked = relinked,
+            ToolLinksRemoved = removed,
             Repriced = repriced,
             LiveRepriced = liveRepriced,
         };
@@ -196,38 +219,147 @@ public sealed partial class SqliteLedgerStore
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    // An imported execute_tool link owned by the row that asked for the tool. Returns 1, or 0 when the link exists.
-    private static async Task<int> InsertOwnedLinkAsync(
+    private enum LinkWrite { Unchanged, Inserted, Relinked }
+
+    // The imported link for link.SpanId in link.ConversationId, made to belong to the requesting row in place.
+    private static async Task<LinkWrite> UpsertOwnedLinkAsync(
         SqliteTransaction transaction,
         GenAiSpanLink link,
         long ownerRowId,
         long recordedAtUnixMs,
         CancellationToken cancellationToken)
     {
+        (string TraceId, long OwnerRowId)? existing = null;
+        await using (SqliteCommand read = transaction.Connection!.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = """
+                SELECT trace_id, owner_span_row_id
+                  FROM span_links
+                 WHERE span_id = @span_id AND conversation_id = @conversation_id
+                   AND owner_span_row_id IS NOT NULL
+                 ORDER BY trace_id;
+                """;
+            read.Parameters.AddWithValue("@span_id", link.SpanId);
+            read.Parameters.AddWithValue("@conversation_id", OrDbNull(link.ConversationId));
+            await using SqliteDataReader reader = await read.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                existing = (reader.GetString(0), reader.GetInt64(1));
+            }
+        }
+
+        if (existing is (string retainedTraceId, long _))
+        {
+            await using SqliteCommand remove = transaction.Connection!.CreateCommand();
+            remove.Transaction = transaction;
+            remove.CommandText = """
+                DELETE FROM span_links
+                 WHERE span_id = @span_id AND conversation_id = @conversation_id
+                   AND owner_span_row_id IS NOT NULL AND trace_id <> @retained_trace;
+                """;
+            remove.Parameters.AddWithValue("@span_id", link.SpanId);
+            remove.Parameters.AddWithValue("@conversation_id", OrDbNull(link.ConversationId));
+            remove.Parameters.AddWithValue("@retained_trace", retainedTraceId);
+            await remove.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        LinkWrite result;
+        if (existing is (string traceId, long existingOwnerRowId) &&
+            (traceId != link.TraceId || existingOwnerRowId != ownerRowId))
+        {
+            await using SqliteCommand update = transaction.Connection!.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE span_links
+                   SET trace_id = @trace_id, owner_span_row_id = @owner
+                 WHERE trace_id = @old_trace AND span_id = @span_id;
+                """;
+            update.Parameters.AddWithValue("@trace_id", link.TraceId);
+            update.Parameters.AddWithValue("@owner", ownerRowId);
+            update.Parameters.AddWithValue("@old_trace", traceId);
+            update.Parameters.AddWithValue("@span_id", link.SpanId);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+            result = LinkWrite.Relinked;
+        }
+        else if (existing is not null)
+        {
+            result = LinkWrite.Unchanged;
+        }
+        else
+        {
+            await using SqliteCommand insert = transaction.Connection!.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO span_links (
+                    trace_id, span_id, parent_span_id, operation_name, agent_name, conversation_id, start_time_unix_ms,
+                    tool_name, tool_exit_code, status_code, recorded_at_unix_ms, owner_span_row_id
+                ) VALUES (
+                    @trace_id, @span_id, @parent_span_id, @operation_name, @agent_name, @conversation_id, @start_time_unix_ms,
+                    @tool_name, @tool_exit_code, @status_code, @recorded_at_unix_ms, @owner
+                ) ON CONFLICT (trace_id, span_id) DO NOTHING;
+                """;
+            insert.Parameters.AddWithValue("@trace_id", link.TraceId);
+            insert.Parameters.AddWithValue("@span_id", link.SpanId);
+            insert.Parameters.AddWithValue("@parent_span_id", OrDbNull(link.ParentSpanId));
+            insert.Parameters.AddWithValue("@operation_name", OrDbNull(link.OperationName));
+            insert.Parameters.AddWithValue("@agent_name", OrDbNull(link.AgentName));
+            insert.Parameters.AddWithValue("@conversation_id", OrDbNull(link.ConversationId));
+            insert.Parameters.AddWithValue("@start_time_unix_ms", link.StartTime.ToUnixTimeMilliseconds());
+            insert.Parameters.AddWithValue("@tool_name", OrDbNull(link.ToolName));
+            insert.Parameters.AddWithValue("@tool_exit_code", OrDbNull(link.ToolExitCode));
+            insert.Parameters.AddWithValue("@status_code", link.StatusCode);
+            insert.Parameters.AddWithValue("@recorded_at_unix_ms", recordedAtUnixMs);
+            insert.Parameters.AddWithValue("@owner", ownerRowId);
+            result = await insert.ExecuteNonQueryAsync(cancellationToken) == 1
+                ? LinkWrite.Inserted
+                : LinkWrite.Unchanged;
+        }
+
+        return result;
+    }
+
+    private static async Task<int> ExtraOwnedLinksAsync(
+        SqliteTransaction transaction,
+        GenAiSpanLink link,
+        CancellationToken cancellationToken)
+    {
         await using SqliteCommand command = transaction.Connection!.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO span_links (
-                trace_id, span_id, parent_span_id, operation_name, agent_name, conversation_id, start_time_unix_ms,
-                tool_name, tool_exit_code, status_code, recorded_at_unix_ms, owner_span_row_id
-            ) VALUES (
-                @trace_id, @span_id, @parent_span_id, @operation_name, @agent_name, @conversation_id, @start_time_unix_ms,
-                @tool_name, @tool_exit_code, @status_code, @recorded_at_unix_ms, @owner
-            ) ON CONFLICT (trace_id, span_id) DO NOTHING;
+            SELECT MAX(COUNT(*) - 1, 0)
+              FROM span_links
+             WHERE span_id = @span_id AND conversation_id = @conversation_id
+               AND owner_span_row_id IS NOT NULL;
             """;
-        command.Parameters.AddWithValue("@trace_id", link.TraceId);
         command.Parameters.AddWithValue("@span_id", link.SpanId);
-        command.Parameters.AddWithValue("@parent_span_id", OrDbNull(link.ParentSpanId));
-        command.Parameters.AddWithValue("@operation_name", OrDbNull(link.OperationName));
-        command.Parameters.AddWithValue("@agent_name", OrDbNull(link.AgentName));
         command.Parameters.AddWithValue("@conversation_id", OrDbNull(link.ConversationId));
-        command.Parameters.AddWithValue("@start_time_unix_ms", link.StartTime.ToUnixTimeMilliseconds());
-        command.Parameters.AddWithValue("@tool_name", OrDbNull(link.ToolName));
-        command.Parameters.AddWithValue("@tool_exit_code", OrDbNull(link.ToolExitCode));
-        command.Parameters.AddWithValue("@status_code", link.StatusCode);
-        command.Parameters.AddWithValue("@recorded_at_unix_ms", recordedAtUnixMs);
-        command.Parameters.AddWithValue("@owner", ownerRowId);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return Convert.ToInt32(
+            await command.ExecuteScalarAsync(cancellationToken),
+            System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<int> RemoveOwnedLinksAsync(
+        SqliteTransaction transaction,
+        IReadOnlyList<GenAiSpanLink> links,
+        CancellationToken cancellationToken)
+    {
+        int removed = 0;
+        foreach (GenAiSpanLink link in links)
+        {
+            await using SqliteCommand command = transaction.Connection!.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                DELETE FROM span_links
+                 WHERE span_id = @span_id AND conversation_id = @conversation_id
+                   AND owner_span_row_id IS NOT NULL;
+                """;
+            command.Parameters.AddWithValue("@span_id", link.SpanId);
+            command.Parameters.AddWithValue("@conversation_id", OrDbNull(link.ConversationId));
+            removed += await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        return removed;
     }
 
     internal static void ValidateImportedEntry(ImportedLedgerEntry entry, string parameterName)
