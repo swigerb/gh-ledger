@@ -36,6 +36,7 @@ public sealed partial class GuideSamplesTests
         ["breaker-reset"] = GuideState.Month,
         ["export-pr"] = GuideState.Month,
         ["export"] = GuideState.Month,
+        ["audit"] = GuideState.Audit,
         ["rates-validate"] = GuideState.Month,
         ["daemon-stop"] = GuideState.Month,
         ["uninstall"] = GuideState.Month,

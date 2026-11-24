@@ -15,6 +15,7 @@ public enum GuideState
     FirstPrompt,    // installed at 16:20, the daemon running, one prompt at 16:25
     Backfill,       // FirstPrompt, and Copilot's session logs of earlier sessions
     Month,          // installed, the daemon running since 08:02, a month of spend, one breaker trip, a budget, and an overlay
+    Audit,          // installed, the daemon running since 08:02, and a day of agent activity with waste for gh ledger audit
 }
 
 // The setup behind the samples in docs/guide.md: gh-ledger as the GitHub CLI extension on Windows, run in the
@@ -196,6 +197,12 @@ public sealed class GuideWorld : IAsyncDisposable
             return;
         }
 
+        if (state == GuideState.Audit)
+        {
+            await SeedAuditAsync(store);
+            return;
+        }
+
         string overlayPath = Path.Combine(Harness.Context.DataDirectory, "rates.json");
         await File.WriteAllTextAsync(overlayPath, overlay);
         _ = await FileRetry.ReadAllTextAsync(overlayPath);
@@ -251,6 +258,84 @@ public sealed class GuideWorld : IAsyncDisposable
         Commit,
         "https://github.com/contoso/webapp.git",
         Slug);
+
+    // The Audit state's live prompts on feature/search on 2026-11-21, each with its agents' invoke_agent spans (UTC times):
+    // 0  a week earlier, on 2026-11-14 at 20:00: one claude-haiku-4.5 request and a view call, whose links the daemon still
+    //    keeps: it last deleted old links at 14:02 local, those that started before 2026-11-14 at 19:02. So tool history starts
+    //    7 days before 16:30, and no request of the week started before it.
+    // A  12 short, tool-free claude-opus-5.5 questions from 14:00, 2 minutes apart (30,000 input tokens, 24,000 from the
+    //    cache, 120 output).
+    // B  claude-opus-5.5 at 15:00:00 (20,000, 16,000, 400), a task call at 15:00:05 whose explore subagent asks
+    //    claude-haiku-4.5 six times from 15:00:10, 20 seconds apart (10,000, 8,000, 300), between bash calls from 15:00:20
+    //    that exit 1, 1, 1, 1, and 0; then claude-opus-5.5 at 15:02:00 (22,000, 17,600, 300).
+    // C  six mai-code-2 requests from 18:00, a minute apart, with 40,000 input tokens that the cache never served, and 1,500
+    //    output.
+    // D  ten gpt-6.2-sol requests from 19:00, 30 seconds apart, whose input grows from 20,000 to 92,000 tokens, each reading
+    //    the previous request's input from the cache, with 2,000 output.
+    // E  one gpt-6.2-sol request at 17:00 with 260,000 input tokens (200,000 from the cache) and 1,000 output.
+    // F  five claude-opus-5.5 requests from 20:00, 50 seconds apart (60,000, 10,000, 2,400: $0.25 each).
+    private async Task SeedAuditAsync(SqliteLedgerStore store)
+    {
+        GitWorkspaceContext git = Context("feature/search");
+        DateTimeOffset At(string time) => Utc($"2026-11-21T{time}Z");
+        AuditSeeds.LiveTrace Trace(char id) =>
+            new($"0f3c9a7e5d1b4f2a8c6e0d9b7a5c0a{id}{id}", $"7d4e1c2a-5b3f-4e8d-9a6c-0000000a00{id}{id}", git);
+
+        AuditSeeds.LiveTrace week = Trace('0');
+        string agent = week.Agent(0, Utc("2026-11-14T20:00:00Z"));
+        week.Request(1, agent, Utc("2026-11-14T20:00:00Z"), "claude-haiku-4.5", 10_000, 8_000, 300);
+        week.Tool(0, agent, Utc("2026-11-14T20:00:05Z"), "view", null, 1);
+        AuditSeeds.LiveTrace a = Trace('a');
+        agent = a.Agent(0, At("14:00:00"));
+        for (int k = 0; k < 12; k++)
+        {
+            a.Request(1 + k, agent, At("14:00:00").AddMinutes(2 * k), "claude-opus-5.5", 30_000, 24_000, 120);
+        }
+
+        AuditSeeds.LiveTrace b = Trace('b');
+        agent = b.Agent(0, At("15:00:00"));
+        b.Request(1, agent, At("15:00:00"), "claude-opus-5.5", 20_000, 16_000, 400);
+        string task = b.Tool(0, agent, At("15:00:05"), "task", null, 1);
+        string explore = b.Agent(1, At("15:00:06"), task, "explore");
+        for (int k = 0; k < 6; k++)
+        {
+            b.Request(2 + k, explore, At("15:00:10").AddSeconds(20 * k), "claude-haiku-4.5", 10_000, 8_000, 300, "explore");
+            if (k < 5)
+            {
+                b.Tool(1 + k, explore, At("15:00:20").AddSeconds(20 * k), "bash", k < 4 ? 1 : 0, k < 4 ? 2 : 1, "explore");
+            }
+        }
+
+        b.Request(8, agent, At("15:02:00"), "claude-opus-5.5", 22_000, 17_600, 300);
+        AuditSeeds.LiveTrace c = Trace('c');
+        agent = c.Agent(0, At("18:00:00"));
+        for (int k = 0; k < 6; k++)
+        {
+            c.Request(1 + k, agent, At("18:00:00").AddMinutes(k), "mai-code-2", 40_000, 0, 1_500, reportZeroCache: true);
+        }
+
+        AuditSeeds.LiveTrace d = Trace('d');
+        agent = d.Agent(0, At("19:00:00"));
+        for (int k = 0; k < 10; k++)
+        {
+            long input = 20_000 + 8_000 * k;
+            d.Request(1 + k, agent, At("19:00:00").AddSeconds(30 * k), "gpt-6.2-sol", input, k == 0 ? 4_000 : input - 8_000, 2_000);
+        }
+
+        AuditSeeds.LiveTrace e = Trace('e');
+        e.Request(1, e.Agent(0, At("17:00:00")), At("17:00:00"), "gpt-6.2-sol", 260_000, 200_000, 1_000);
+        AuditSeeds.LiveTrace f = Trace('f');
+        agent = f.Agent(0, At("20:00:00"));
+        for (int k = 0; k < 5; k++)
+        {
+            f.Request(1 + k, agent, At("20:00:00").AddSeconds(50 * k), "claude-opus-5.5", 60_000, 10_000, 2_400);
+        }
+
+        foreach (AuditSeeds.LiveTrace trace in new[] { week, a, b, c, d, e, f })
+        {
+            await trace.RecordAsync(store);
+        }
+    }
 
     // Copilot 1.0.110's logs, as Copilot CLI writes them under COPILOT_HOME: two sessions in this repository on 2026-11-20,
     // before CopilotLedger was installed, one with an explore subagent and one with a compaction; one in contoso/api; and the

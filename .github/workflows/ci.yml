@@ -62,6 +62,13 @@ jobs:
           grep -q "default-src 'none'" artifacts/export/report.html
           grep -q '"requested": "America/New_York"' artifacts/export/report.html
           test -s artifacts/export/report.zip
+          audited=$(./artifacts/gh-ledger/gh-ledger audit --since all --json | tr -d '\r')
+          echo "$audited"
+          grep -q '"impactLens": "billed",' <<< "$audited"
+          grep -q '"spans": 1,' <<< "$audited"
+          payload=$(./artifacts/gh-ledger/gh-ledger audit --since all --local-llm http://127.0.0.1:9/v1 --local-llm-model smoke --show-llm-payload | tr -d '\r')
+          echo "$payload"
+          grep -q '"stream":false' <<< "$payload"
           ./artifacts/gh-ledger/gh-ledger status
           ./artifacts/gh-ledger/gh-ledger breaker status
           ./artifacts/gh-ledger/gh-ledger budget list
@@ -69,6 +76,7 @@ jobs:
           response=$( { echo "$request"; sleep 10; } | ./artifacts/gh-ledger/gh-ledger mcp )
           echo "$response"
           grep -q '"get_branch_ledger"' <<< "$response"
+          grep -q '"get_audit_findings"' <<< "$response"
           ./artifacts/gh-ledger/gh-ledger daemon stop
       - name: Smoke-test daemon start under PowerShell capture
         shell: pwsh

@@ -49,7 +49,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 11: Findings in the Export (CopilotLedger.Cli, docs, CI & tests). The report's "Audit findings" section, with fixed texts and a note, and the bundle's `telemetry/audit-findings.json`, which has every finding; an invalid overlay leaves the premium rule and repriced estimates out instead of failing the export.
 - [x] Task 12: Privacy, Determinism, and Culture (tests). The local model's answer is shown and never stored; output is the same in every culture and on every run; and the audit code uses no binary floating point.
 - [x] Task 13: The Reference (docs & tests). `docs/cli.md` documents the command, the rules, the output, the recommendations, and the local model's payload, whose tables tests compare with the code; `docs/configuration.md` and the README gain their audit notes.
-- [ ] Task 14: The Weekly Waste Review, and CI (docs, CI & tests). `docs/guide.md` gains "Weekly waste review" with a checked sample in its own guide state, and CI smoke-tests `audit --json`, `--show-llm-payload`, and `get_audit_findings`.
+- [x] Task 14: The Weekly Waste Review, and CI (docs, CI & tests). `docs/guide.md` gains "Weekly waste review" with a checked sample in its own guide state, and CI smoke-tests `audit --json`, `--show-llm-payload`, and `get_audit_findings`.
 
 ## Starting point
 
