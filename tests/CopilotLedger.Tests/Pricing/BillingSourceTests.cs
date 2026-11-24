@@ -140,13 +140,12 @@ public sealed class BillingSourceTests
         Assert.Equal(0.45m, other.ApiEquivalent.UsdCost);
     }
 
-    // A provider-billed request is local only by its provider name: a known local model without an endpoint makes a live
-    // span local, but never a Foundry BYOK or another provider's imported request.
+    // A provider-billed request is local by provider name or by a known local model, unless its provider is Foundry.
     [Theory]
     [InlineData("azure.ai.inference", BillingChannel.FoundryByok, PricingStatus.ByokUnpriced)]
-    [InlineData("openai", BillingChannel.Unpriced, PricingStatus.OtherProvider)]
+    [InlineData("openai", BillingChannel.Local, PricingStatus.LocalOffload)]
     [InlineData("ollama", BillingChannel.Local, PricingStatus.LocalOffload)]
-    public void BI8_AProviderBilledRequestIsLocalOnlyByItsProviderName(
+    public void BI8_AProviderBilledRequestUsesItsProviderNameAndModel(
         string provider,
         BillingChannel channel,
         PricingStatus status)
