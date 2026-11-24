@@ -12,6 +12,7 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly SqliteTransaction _transaction;
+    private LedgerFilter? _selectedChains;   // the filter whose chains temp.export_selected_chains holds, or null
 
     internal LedgerExportSnapshot(SqliteConnection connection, SqliteTransaction transaction)
     {
@@ -98,7 +99,18 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         CheckPageLimit(limit);
-        return SqliteLedgerStore.ReadExportToolCallsAsync(_transaction, filter, after, limit, cancellationToken);
+        return ReadAsync();
+
+        async Task<IReadOnlyList<ExportToolCallRow>> ReadAsync()
+        {
+            await SelectChainsAsync(filter, cancellationToken);
+            return await SqliteLedgerStore.ReadExportToolCallsAsync(
+                _transaction,
+                filter,
+                after,
+                limit,
+                cancellationToken);
+        }
     }
 
     // GetToolCallsAsync's latest rows, descending. Throws ArgumentOutOfRangeException unless 0 <= limit <= 100,000.
@@ -108,14 +120,32 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         CheckLatestLimit(limit);
-        return SqliteLedgerStore.ReadLatestExportToolCallsAsync(_transaction, filter, limit, cancellationToken);
+        return ReadAsync();
+
+        async Task<IReadOnlyList<ExportToolCallRow>> ReadAsync()
+        {
+            await SelectChainsAsync(filter, cancellationToken);
+            return await SqliteLedgerStore.ReadLatestExportToolCallsAsync(
+                _transaction,
+                filter,
+                limit,
+                cancellationToken);
+        }
     }
 
     // The number of rows GetToolCallsAsync pages through.
     public Task<long> CountToolCallsAsync(
         LedgerFilter filter,
-        CancellationToken cancellationToken = default) =>
-        SqliteLedgerStore.CountExportToolCallsAsync(_transaction, filter, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        return CountAsync();
+
+        async Task<long> CountAsync()
+        {
+            await SelectChainsAsync(filter, cancellationToken);
+            return await SqliteLedgerStore.CountExportToolCallsAsync(_transaction, filter, cancellationToken);
+        }
+    }
 
     // The start of the earliest span link the ledger keeps, a tool call's or an agent invocation's, of any filter, or null when
     // it keeps none. The daemon deletes older links of every kind, so no tool call before it is left.
@@ -169,7 +199,13 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filter);
-        return SqliteLedgerStore.ReadAuditToolCallsAsync(_transaction, filter, cancellationToken);
+        return ReadAsync();
+
+        async Task<IReadOnlyList<AuditToolCall>> ReadAsync()
+        {
+            await SelectChainsAsync(filter, cancellationToken);
+            return await SqliteLedgerStore.ReadAuditToolCallsAsync(_transaction, filter, cancellationToken);
+        }
     }
 
     // As SqliteLedgerStore.GetBreakerSettingsAsync.
@@ -231,6 +267,20 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
     {
         await _transaction.DisposeAsync();
         await _connection.DisposeAsync();
+    }
+
+    // Fills temp.export_selected_chains with the filter's prompt chains unless it already holds them, so every page of one
+    // read, and every read of one filter, selects the chains once.
+    private async Task SelectChainsAsync(LedgerFilter filter, CancellationToken cancellationToken)
+    {
+        if (filter == _selectedChains)
+        {
+            return;
+        }
+
+        _selectedChains = null;
+        await SqliteLedgerStore.SelectExportChainsAsync(_transaction, filter, cancellationToken);
+        _selectedChains = filter;
     }
 
     private static void CheckPageLimit(int limit)

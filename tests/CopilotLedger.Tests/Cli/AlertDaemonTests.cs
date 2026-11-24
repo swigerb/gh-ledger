@@ -198,6 +198,52 @@ public sealed class AlertDaemonTests
         Assert.DoesNotContain("feature/d", harness.DaemonOutput);
     }
 
+    [Fact]
+    public async Task BA3_Daemon_AsTheExtension_SaysGhLedger()
+    {
+        using TempDirectory temp = new();
+        FakeCliPlatform platform = OperatingSystem.IsWindows()
+            ? Windows()
+            : new FakeCliPlatform { IsMacOS = OperatingSystem.IsMacOS() };
+        string extensionDirectory = Path.Combine(
+            temp.Path,
+            "gh",
+            "extensions",
+            "gh-ledger");
+        platform.ProcessPath = Path.Combine(
+            extensionDirectory,
+            OperatingSystem.IsWindows() ? "gh-ledger.exe" : "gh-ledger");
+        platform.ExistingFiles.Add(Path.Combine(extensionDirectory, "manifest.yml"));
+        ManualTimeProvider clock = new(Now);
+        await using CliHarness harness = new(temp.Path, platform, clock);
+
+        SqliteLedgerStore store = await StoreAsync(temp.Path, Now.AddMinutes(-20));
+        await LedgerSeeds.SeedChainsAsync(
+            store,
+            Path.Combine(temp.Path, "repo"),
+            Path.Combine(temp.Path, "api"));
+        await store.SetBranchBudgetAsync(
+            "swigerb/copilot-ledger",
+            "feature/ledger",
+            50m);
+        Assert.True(
+            await store.MarkBranchBudgetAlertedAsync(
+                "swigerb/copilot-ledger",
+                "feature/ledger"));
+
+        await harness.StartInProcessDaemonAsync();
+        await WaitUntilAsync(async () =>
+            Assert.Single(
+                await store.GetBranchBudgetsAsync(
+                    "swigerb/copilot-ledger",
+                    "feature/ledger")).NotifiedAt is not null);
+        await StopAsync(harness);
+
+        Assert.Contains(
+            "ALERT gh-ledger branch budget exceeded: swigerb/copilot-ledger @ feature/ledger: 56.00 of 50.00 AI credits spent. Run: gh ledger budget list",
+            harness.DaemonOutput);
+    }
+
     public static TheoryData<string> NotificationCases => new()
     {
         "linux-notify-send",

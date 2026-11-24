@@ -22,15 +22,19 @@ public sealed partial class SqliteLedgerStore
                COALESCE((SELECT owner.ingest_source FROM spans AS owner WHERE owner.id = span_links.owner_span_row_id), 'otlp')
         """;
 
-    // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span: a
-    // correlated EXISTS, which finds each link's trace through ix_spans_trace, rather than an IN list of every selected trace
-    // that each page would build again. Unqualified columns are span_links' outside the subquery and spans' inside it.
+    // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span: one
+    // in temp.export_selected_chains, which LedgerExportSnapshot fills for the filter before every tool-call read
+    // (SelectExportChainsAsync). The unary + keeps the trace term off span_links' primary key, so a page seeks
+    // ix_span_links_start, walks in ORDER BY order, and looks each link's chain up in the temp table. Driven by the chains
+    // instead, every page read and sorted all of their links, and an IN (SELECT … FROM spans) here rescanned the spans for
+    // every page (#83). Both trace_id columns are TEXT, so the affinity that + removes doesn't change the comparison.
+    // Unqualified columns are span_links'.
     private const string ExportToolCallWhereSql = $"""
         operation_name = 'execute_tool'
           AND {EffectiveLinkSql}
           AND (@from IS NULL OR start_time_unix_ms >= @from)
           AND (@to IS NULL OR start_time_unix_ms < @to)
-          AND EXISTS (SELECT 1 FROM spans AS chain WHERE chain.trace_id = span_links.trace_id AND {FilterSql})
+          AND +span_links.trace_id IN (SELECT trace_id FROM temp.export_selected_chains)
         """;
 
     // Rows after the cursor in (start time, trace ID, span ID) order. The plain lower bound on start_time_unix_ms lets every
@@ -135,6 +139,26 @@ public sealed partial class SqliteLedgerStore
         command.CommandText = $"SELECT COUNT(*) FROM span_links WHERE {ExportToolCallWhereSql};";
         AddFilterParameters(command, filter);
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+    }
+
+    // Fills temp.export_selected_chains with the trace ID of every prompt chain with a span that the filter selects: the
+    // chains whose tool calls ExportToolCallWhereSql reads. The table lives in the connection's own temp database, never in
+    // the ledger, and the snapshot's read transaction never commits, so the table is gone when the snapshot ends. DELETE
+    // clears an earlier filter's chains in the same snapshot.
+    internal static async Task SelectExportChainsAsync(
+        SqliteTransaction snapshot,
+        LedgerFilter filter,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = snapshot.Connection!.CreateCommand();
+        command.Transaction = snapshot;
+        command.CommandText = $"""
+            CREATE TEMP TABLE IF NOT EXISTS export_selected_chains (trace_id TEXT NOT NULL PRIMARY KEY) WITHOUT ROWID;
+            DELETE FROM temp.export_selected_chains;
+            INSERT INTO temp.export_selected_chains (trace_id) SELECT DISTINCT trace_id FROM spans WHERE {FilterSql};
+            """;
+        AddFilterParameters(command, filter);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     // The start of the earliest span link in the whole ledger, of any operation or owner, or null when there's none.

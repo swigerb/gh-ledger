@@ -1,6 +1,8 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.ComponentModel;
 using System.Globalization;
+using CopilotLedger.Cli.Install;
 
 namespace CopilotLedger.Cli.Daemon;
 
@@ -75,6 +77,23 @@ internal static class DaemonCommands
         {
             context.Error.WriteLine(
                 $"Run this command from the gh-ledger executable (current process: {executable ?? "unknown"}).");
+            return 1;
+        }
+
+        JobState job;
+        string? jobError = null;
+        try { job = context.Platform.GetJobState(); }
+        catch (Win32Exception ex) { job = default; jobError = ex.Message; }
+        if (jobError is not null || DetachedLaunchPolicy.Decide(job) == DetachedLaunch.Blocked)
+        {
+            context.Error.WriteLine(jobError is null
+                ? "gh-ledger daemon not started: this terminal runs in a Windows job that stops the processes it started when it closes, so the daemon would stop with it."
+                : $"gh-ledger daemon not started: can't read this terminal's Windows job, so the daemon might stop when the terminal closes ({jobError}).");
+            string command = GhExtension.CommandName(context.Platform);
+            context.Error.WriteLine(
+                context.Platform.GetStartupCommand("CopilotLedger") is not null
+                    ? $"Run {command} daemon start from a regular terminal, or sign out and back in to start it from the sign-in item."
+                    : $"Run {command} daemon start from a regular terminal.");
             return 1;
         }
 

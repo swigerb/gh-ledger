@@ -7,14 +7,19 @@ public sealed class CircuitBreakerMonitor
 {
     private readonly SqliteLedgerStore _store;
     private readonly IBreakerAlertSink _sink;
+    private readonly string _command;
 
     // Throws ArgumentNullException for null arguments. The caller initializes the store.
-    public CircuitBreakerMonitor(SqliteLedgerStore store, IBreakerAlertSink sink)
+    public CircuitBreakerMonitor(
+        SqliteLedgerStore store,
+        IBreakerAlertSink sink,
+        string command = BreakerMessages.DefaultCommand)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(sink);
         _store = store;
         _sink = sink;
+        _command = command;
     }
 
     // Evaluates both rules for each trace and the budgets of the branches those traces touched. Store exceptions propagate.
@@ -128,7 +133,10 @@ public sealed class CircuitBreakerMonitor
                 continue;
             }
 
-            _sink.Publish(BreakerMessages.ForBudget(reread[0], settings.Notifications));
+            _sink.Publish(BreakerMessages.ForBudget(
+                reread[0],
+                settings.Notifications,
+                _command));
         }
     }
 
@@ -148,7 +156,8 @@ public sealed class CircuitBreakerMonitor
             trip.Repository,
             trip.Branch,
             trip.Detail,
-            settings.Notifications));
+            settings.Notifications,
+            _command));
         if (!settings.FlagFile || trip.RepositoryRoot is null)
         {
             return;

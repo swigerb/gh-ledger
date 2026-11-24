@@ -34,7 +34,7 @@ Use `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, or `osx-arm64
 - It sets `COPILOT_OTEL_ENABLED=true`: as a user environment variable on Windows, or in a marked block in your shell profile elsewhere (`.zshrc` for zsh, `.bash_profile` for bash on macOS, `.bashrc` for bash on Linux, and `.profile` otherwise).
 - For a binary you built, it sets the `gh ledger` alias when `gh` is on `PATH`. The extension doesn't need one. On Windows, the alias needs `sh.exe` from Git for Windows.
 - It registers the daemon to start when you sign in: the `CopilotLedger` value under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` on Windows, `~/Library/LaunchAgents/io.github.swigerb.copilot-ledger.plist` on macOS, or `copilot-ledger.desktop` in `$XDG_CONFIG_HOME/autostart` (default `~/.config/autostart`) on Linux.
-- It starts the daemon.
+- It starts the daemon, as `gh ledger daemon start` does. On Windows, in a terminal whose job would stop the daemon, it doesn't start it; see [The daemon](#the-daemon). The other changes stay, and `install` exits with code 1.
 
 It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTelemetry variables. Use `--dry-run` to print the changes without making them. Afterward, restart the GitHub Copilot app, VS Code, and open terminals so they see `COPILOT_OTEL_ENABLED`.
 
@@ -87,6 +87,15 @@ If `gh ledger daemon start` then says that the daemon did not start, run `gh led
 - `gh ledger daemon run [--port <port>] [--log-file <path>]` runs the receiver in the foreground. It logs to standard output, or appends to `--log-file`.
 - `gh ledger daemon start [--port <port>]` starts it as a detached process that logs to `daemon.log`. The daemon gets the null device as its standard input, output, and error, so a script can capture the command's output, for example `started=$(gh ledger daemon start)`.
 - `gh ledger daemon stop` asks the daemon to stop, waits up to 15 seconds, and then ends its process if it's still running.
+
+On Windows, some programs run their terminals in a job that stops every process the terminal started when it closes; the GitHub Copilot app's agent terminals can. `daemon start` reads the job it runs in. When the job lets processes leave it, the daemon leaves it. When the job would stop the daemon and doesn't let it leave, `daemon start` starts nothing, exits with code 1, and says:
+
+```text
+gh-ledger daemon not started: this terminal runs in a Windows job that stops the processes it started when it closes, so the daemon would stop with it.
+Run gh ledger daemon start from a regular terminal, or sign out and back in to start it from the sign-in item.
+```
+
+The second line leaves out the sign-in part when there's no sign-in item, and says `gh-ledger` for a binary you built. If the job can't be read, `daemon start` refuses the same way. A job inside another job can still pass the daemon to an outer job that stops it; the daemon then writes a `Warning:` line to `daemon.log` when it starts, as `daemon run` does in such a terminal.
 
 The port defaults to 4318. Only one daemon runs at a time. Copilot's telemetry is lost while no daemon is running.
 
@@ -283,7 +292,7 @@ The daemon checks every prompt against two rules and trips the breaker when one 
 - **Credit velocity:** one prompt's billed spend, GitHub AI credits plus Foundry BYOK at $0.01 per credit, exceeds 150 AI credits within 5 minutes.
 - **Retry churn:** one prompt makes 5 failed tool calls in a row, with no successful command and no new commit between them. A failed call is a shell command with a non-zero exit code or a tool call that Copilot reports as an error. Copilot doesn't export the commands themselves, so any failing command counts. VS Code's Local agent harness may not report exit codes, so this rule may not trip there.
 
-A trip writes an `ALERT` line to `daemon.log` and shows a desktop notification: a toast on Windows, a notification on macOS, and `notify-send` on Linux when it's installed. It doesn't stop the agent. Each rule trips at most once per prompt, and a trip stays open until you reset it.
+A trip writes an `ALERT` line to `daemon.log` and shows a desktop notification: a toast on Windows, a notification on macOS, and `notify-send` on Linux when it's installed. It doesn't stop the agent. The alert names the command the way the daemon runs: `gh ledger breaker status` from the extension, or `gh-ledger breaker status` for a binary you built. Each rule trips at most once per prompt, and a trip stays open until you reset it.
 
 - `gh ledger breaker status [--json]` shows the rules and the open trips.
 - `gh ledger breaker reset` closes the current branch's open trips. Use `--id <id>` for one trip, `--repo <key> --branch <name>` for another branch, or `--all`.
@@ -462,9 +471,9 @@ gh ledger audit [--repo <key>] [--branch <name>] [--pr <n>] [--since <period>] [
 | Rule | Finds | Warning | High | Estimated impact |
 |---|---|---|---|---|
 | `turn_velocity` | One agent invocation sending many requests within 5 minutes | 30 requests | 60 requests | The billed cost of the busiest 5 minutes, less the typical (lower median) 5-minute cost of the conversation |
-| `tool_loop` | One agent invocation calling the same tool again and again with the same outcome | 8 calls in a row | 16 calls | The billed cost of the invocation's requests between the first call and the last |
+| `tool_loop` | One agent invocation calling the same tool again and again with the same outcome | 8 calls in a row | 16 calls, when the estimated impact is known and more than $0 | The billed cost of the invocation's requests between the first call and the last |
 | `failed_tool_retry` | One agent invocation retrying a failing tool call | 3 failures in a row, or one less than `--churn-failures` when that's lower, but at least 2 | One less than `--churn-failures` | As `tool_loop` |
-| `context_bloat` | A request of at least 50,000 input tokens with at least 200 times as much input as output, or no output | Info only | | None |
+| `context_bloat` | Requests of at least 50,000 input tokens with at least 200 times as much input as output, or no output: one finding for each agent invocation and model (or prompt chain, agent, and model when the invocation is unknown), and a separate one for its requests without output | Info only | | None |
 | `context_growth` | One agent invocation's requests to one model whose input grew at least 4 times over 10 or more requests | Info only | | None |
 | `cache_miss_streak` | Requests in a row, of one agent invocation and model, each with at least 20,000 input tokens and less than 10% of them read from the prompt cache | 5 requests | 10 requests | What the uncached input cost above the cached input price |
 | `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
@@ -479,7 +488,7 @@ gh ledger audit [--repo <key>] [--branch <name>] [--pr <n>] [--since <period>] [
 
 ### Output and exit codes
 
-The table lists the findings, most severe first, then by estimated impact; what the audit read and what it couldn't see; and the recommendation for each kind of finding shown. `--json` writes the same report: `filter`, `impactLens` (always `billed`), `ratesVersion`, `economyModel`, `thresholds` (the triggers in use, with the circuit breaker's settings), `rules`, `coverage`, `minSeverity`, `limit`, `findingsTotal`, and the findings shown, each with its `ruleId`, `severity`, `scope`, `windowStart`, `windowEnd`, `metrics` (`name`, `value`, and `unit`), `estimatedImpactUsd`, and `recommendationKey`. Its fields are those of `telemetry/audit-findings.json` in [What export includes](#what-export-includes). Money is an exact decimal number: parse it as a decimal, not a float. The table shows names from the ledger, the options, and the rates without escape sequences or control characters; `--json` keeps them as recorded.
+The table counts the findings by severity and, on the line `By rule:`, by rule, in the rule table's order; then it lists them, most severe first, then by estimated impact; what the audit read and what it couldn't see; and the recommendation for each kind of finding shown. `--json` writes the same report: `filter`, `impactLens` (always `billed`), `ratesVersion`, `economyModel`, `thresholds` (the triggers in use, with the circuit breaker's settings), `rules`, `coverage`, `minSeverity`, `limit`, `findingsTotal`, and the findings shown, each with its `ruleId`, `severity`, `scope`, `windowStart`, `windowEnd`, `metrics` (`name`, `value`, and `unit`), `estimatedImpactUsd`, and `recommendationKey`. Its fields are those of `telemetry/audit-findings.json` in [What export includes](#what-export-includes). Money is an exact decimal number: parse it as a decimal, not a float. The table shows names from the ledger, the options, and the rates without escape sequences or control characters; `--json` keeps them as recorded.
 
 | Exit code | Meaning |
 |---|---|
@@ -582,6 +591,7 @@ gh-ledger stores no prompt or response content, working directories, or remote U
 - **`gh ledger import` reports `Superseded, unmatched` requests.** Live spans that can't be matched to them arrived after they were imported and replaced them, as above. The live spans count, but they may not cover every request of the session, so import reports these on every run whose scope holds them; `--since` can leave older ones out.
 - **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
 - **`gh ledger daemon start` says that the daemon did not start.** `daemon.log` in your data directory says why. After an upgrade, `Invalid rates overlay: … duplicate model identity in the merged rates: <name> (built-in model <id>)` means that your rates overlay lists a model name that the new release has built in. Remove that entry from the overlay, check it with `gh ledger rates validate`, and start the daemon.
+- **`gh ledger daemon start` or `install` says `gh-ledger daemon not started: this terminal runs in a Windows job …`.** The terminal, such as an agent terminal of the GitHub Copilot app, would stop the daemon when it closes. Run `gh ledger daemon start` from a regular terminal, or sign out and back in.
 - **`gh extension upgrade` or `remove` fails on Windows.** A program is running the extension's binary: the daemon, or the MCP server of a Copilot session. Run `gh ledger daemon stop`, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code, then try again.
 - **Apps started from the desktop record nothing.** On macOS and Linux, apps started outside a terminal may not read your shell profile, so they don't see `COPILOT_OTEL_ENABLED`. Start them from a terminal.
 - **Move the data directory.** Set `COPILOT_LEDGER_HOME` before running gh-ledger. The daemon started at sign-in uses it only if your sign-in session sets it too, for example as a Windows user environment variable.
