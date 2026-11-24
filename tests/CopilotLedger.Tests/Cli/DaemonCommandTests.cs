@@ -21,7 +21,7 @@ public sealed class DaemonCommandTests
         JsonElement root = state.RootElement;
         Assert.Equal(Environment.ProcessId, root.GetProperty("processId").GetInt32());
         Assert.Equal("http://localhost:4318", root.GetProperty("endpoint").GetString());
-        Assert.Equal("0.5.0", root.GetProperty("version").GetString());
+        Assert.Equal("0.6.0", root.GetProperty("version").GetString());
         Assert.Equal(
             Path.Combine(temp.Path, "data", "ledger.db"),
             root.GetProperty("databasePath").GetString());

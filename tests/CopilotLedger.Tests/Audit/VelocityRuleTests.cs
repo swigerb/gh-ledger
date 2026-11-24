@@ -145,6 +145,29 @@ public sealed class VelocityRuleTests
             "economy model pricier",
             "warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0 premium_model_trivial_turn"
         },
+        { "routed", "none" },
+        { "one routed of ten", "none" },
+        {
+            "one routed of eleven",
+            "warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0.273 premium_model_trivial_turn"
+        },
+        {
+            "list equals charge",
+            "warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0.273 premium_model_trivial_turn"
+        },
+        {
+            "list within 5%",
+            "warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0.273 premium_model_trivial_turn"
+        },
+        { "boundary skipped", "none" },
+        {
+            "boundary kept",
+            "warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0.273 premium_model_trivial_turn"
+        },
+        {
+            "zero list",
+            "warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0.273 premium_model_trivial_turn"
+        },
     };
 
     [Theory]
@@ -172,6 +195,31 @@ public sealed class VelocityRuleTests
             "high" => AuditFixtures.Input(Trivial(20)),
             "without pricing" => AuditFixtures.Input(Trivial(10)) with { Pricing = null },
             "economy model pricier" => AuditFixtures.Input(Trivial(10)) with { EconomyModel = "claude-fable-5" },
+            "routed" => AuditFixtures.Input(Trivial(10).Select(span => span with { ListCostUsd = 0.0347m })),
+            "one routed of ten" => AuditFixtures.Input(Trivial(10).Select(span =>
+                span.SpanId.EndsWith('5') ? span with { ListCostUsd = 0.0347m } : span)),
+            "one routed of eleven" => AuditFixtures.Input(Trivial(11).Select(span =>
+                span.SpanId.EndsWith('5') ? span with { ListCostUsd = 0.0347m } : span)),
+            "list equals charge" => AuditFixtures.Input(Trivial(10).Select(span => span with { ListCostUsd = 0.0312m })),
+            "list within 5%" => AuditFixtures.Input(Trivial(10).Select(span => span with { ListCostUsd = 0.0328m })),
+            "boundary skipped" => AuditFixtures.Input(Trivial(10).Select(span => span with
+            {
+                CostUsd = 0.0285m,
+                AiCredits = 2.85m,
+                ListCostUsd = 0.0300m,
+            })),
+            "boundary kept" => AuditFixtures.Input(Trivial(10).Select(span => span with
+            {
+                CostUsd = 0.0286m,
+                AiCredits = 2.86m,
+                ListCostUsd = 0.0300m,
+            })),
+            "zero list" => AuditFixtures.Input(Trivial(10).Select(span => span with
+            {
+                CostUsd = 0m,
+                AiCredits = 0m,
+                ListCostUsd = 0m,
+            })),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
 

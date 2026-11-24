@@ -79,6 +79,7 @@ public sealed class LedgerSnapshotTests
             ALTER TABLE spans DROP COLUMN superseded_by;
             ALTER TABLE spans DROP COLUMN imported_tool_call_count;
             ALTER TABLE spans DROP COLUMN accounting_state;
+            DROP INDEX ix_spans_conversation_live;
             ALTER TABLE spans DROP COLUMN canonical_usage_id;
             ALTER TABLE spans DROP COLUMN ingest_source;
             PRAGMA user_version = 5;

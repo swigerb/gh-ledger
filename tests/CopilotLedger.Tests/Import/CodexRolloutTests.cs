@@ -435,6 +435,24 @@ public sealed class CodexRolloutTests
         AssertNoCanary(result);
     }
 
+    [Fact]
+    public async Task CX18_AnOversizedRolloutLine_StaysMalformed_WhateverItsType()
+    {
+        using TempDirectory temp = new();
+        const string head = "{\"type\":\"model.messages_snapshot\",\"payload\":{\"x\":\"";
+        new CodexRollouts(Thread)
+            .Raw(head + new string('x', ImportLimits.MaxLineBytes + 1 - head.Length - 3) + "\"}}")
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(1, result.MalformedLines);
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(ImportDiagnosticCode.OversizedLine, diagnostic.Code);
+        Assert.Equal(2, diagnostic.FirstLine);
+    }
+
     private static async Task<SessionLogReadResult> ReadAsync(string home) =>
         await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
 

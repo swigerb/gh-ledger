@@ -242,7 +242,7 @@ public sealed class CodexSessionLogSource : ISessionLogSource
             return true;
         }
 
-        internal void OnOversized(long number, long offset) =>
+        internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset) =>
             Malformed(ImportDiagnosticCode.OversizedLine, ImportEventKind.Unknown, null, number, offset);
 
         internal void OnUnterminated(long number, long offset) =>

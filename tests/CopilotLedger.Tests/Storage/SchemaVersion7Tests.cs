@@ -175,6 +175,7 @@ public sealed class SchemaVersion7Tests
     {
         await new SqliteLedgerStore(path).InitializeAsync();
         await LedgerSql.ExecuteAsync(path, """
+            DROP INDEX IF EXISTS ix_spans_conversation_live;
             DROP INDEX ix_span_links_import_span;
             ALTER TABLE spans DROP COLUMN list_cost_usd_pico;
             ALTER TABLE spans DROP COLUMN charge_source;

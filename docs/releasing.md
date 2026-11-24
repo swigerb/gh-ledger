@@ -19,15 +19,15 @@ Releases are GitHub Releases of this repository. They make `gh extension install
    - the tests that expect it: in `ReportCommandTests` (including `StatusText`), `RatesCommandTests`, `RatesUpdateTests`, `RateOverlayTests`, and `JsonRateCardCalculatorTests`, and in `TestSupport/PublishedRates.cs`. `RatesUpdateTests` downloads versions before, equal to, and after the old date; keep each in the same place relative to the new one.
 
    `GuideSamplesTests` and the other tests fail until they match.
-3. Optional: run the Release workflow on `main` from the Actions tab. A manual run builds all six binaries, smoke-tests the three that GitHub's runners can run (`win-x64`, `linux-x64`, and `osx-arm64`), checks `ratesVersion`, and uploads the six binaries as workflow artifacts. It never creates a release, even when it's started from a tag.
+3. Optional: run the Release workflow on `main` from the Actions tab. A manual run builds all six binaries, smoke-tests the three that GitHub's runners can run (`win-x64`, `linux-x64`, and `osx-arm64`), checks `ratesVersion`, and uploads the six binaries as workflow artifacts. It never creates a release or an attestation, even when it's started from a tag: only the release job, which runs for a pushed tag, has the `id-token: write` and `attestations: write` permissions that attesting needs.
 4. Tag the merged commit and push the tag:
 
    ```shell
-   git tag v0.5.0
-   git push origin v0.5.0
+   git tag v0.6.0
+   git push origin v0.6.0
    ```
 
-When a `v*` tag is pushed, the Release workflow checks that the tag equals `v` plus the project version, builds a single-file binary for each platform, smoke-tests the same three, checks `ratesVersion` against the latest release's rates, and creates the release with these assets:
+When a `v*` tag is pushed, the Release workflow checks that the tag equals `v` plus the project version, builds a single-file binary for each platform, smoke-tests the same three, checks `ratesVersion` against the latest release's rates, attests the six binaries, `rates.json`, and `rates.v2.json` with `actions/attest-build-provenance`, and creates the release with these assets:
 
 | Asset | Platform |
 |---|---|
@@ -42,6 +42,17 @@ When a `v*` tag is pushed, the Release workflow checks that the tag equals `v` p
 | `gh-ledger-checksums.txt` | SHA-256 checksums of the files above |
 
 GitHub CLI picks a release asset by the `<os>-<arch>` suffix of its name, so keep these names. A tag with a hyphen, such as `v0.5.0-rc.1`, makes a prerelease, which `gh extension install` and `rates update` ignore because they use the latest release.
+
+## Verify a release
+
+Each release's binaries, `rates.json`, and `rates.v2.json` have a build provenance attestation: a signed statement, stored by GitHub and recorded in Sigstore's public log, that the Release workflow of this repository built the file with that SHA-256 digest from the tagged commit. gh-ledger 0.5.0 and earlier have none. To check a release's assets:
+
+```shell
+gh release download <tag> --repo swigerb/gh-ledger --dir gh-ledger-<tag>
+gh attestation verify gh-ledger-<tag>/gh-ledger-linux-amd64 --repo swigerb/gh-ledger --signer-workflow swigerb/gh-ledger/.github/workflows/release.yml --source-ref refs/tags/<tag>
+```
+
+Repeat the second command for each asset. `gh-ledger-checksums.txt` isn't attested: it's computed from the attested files. The Windows binaries aren't signed with Authenticode.
 
 ## Update the pinned actions
 

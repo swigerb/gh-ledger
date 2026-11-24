@@ -86,6 +86,38 @@ public sealed class UpgradeDocsTests
         Assert.Contains($"format {version}", ledgerFormat, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void UD5_TheUpgradeFrom050_CanBeRolledBackWithThePinAndTheCopy()
+    {
+        string[] cliLines = Steps("cli.md", "**Upgrading or removing the extension.**", "## The daemon");
+        string upgrade = Assert.Single(
+            cliLines,
+            line => line.StartsWith("**Upgrading from 0.5.0.**", StringComparison.Ordinal));
+        int upgradeLine = Array.IndexOf(cliLines, upgrade);
+        int format = Array.FindIndex(cliLines, line => line.StartsWith("**Ledger format.**", StringComparison.Ordinal));
+        int firstBlock = Array.FindIndex(cliLines, line => line.StartsWith("```", StringComparison.Ordinal));
+
+        Assert.True(upgradeLine > format && upgradeLine < firstBlock);
+        Assert.Contains("format 6", upgrade, StringComparison.Ordinal);
+        Assert.Contains("format 7", upgrade, StringComparison.Ordinal);
+        Assert.Contains("stop the daemon", upgrade, StringComparison.Ordinal);
+        Assert.Contains("copy your data directory", upgrade, StringComparison.Ordinal);
+        Assert.Contains("gh ledger import --all", upgrade, StringComparison.Ordinal);
+        Assert.Contains("gh extension install swigerb/gh-ledger --pin v0.5.0", upgrade, StringComparison.Ordinal);
+
+        string[] guideLines = Steps("guide.md", "## Upgrade or uninstall", "To remove gh-ledger, undo `install`:");
+        int repair = Array.FindIndex(guideLines, line => line == "gh ledger import --all");
+        int rollback = Array.FindIndex(
+            guideLines,
+            line => line.Contains(
+                "gh extension install swigerb/gh-ledger --pin v0.5.0",
+                StringComparison.Ordinal));
+
+        Assert.True(repair >= 0 && rollback > repair);
+        Assert.DoesNotContain(CopilotLedger.Cli.GhLedgerCli.Version, upgrade, StringComparison.Ordinal);
+        Assert.DoesNotContain(CopilotLedger.Cli.GhLedgerCli.Version, guideLines[rollback], StringComparison.Ordinal);
+    }
+
     // The lines of docs/<file> from the first line that starts with start up to, not including, the next line that starts
     // with end.
     private static string[] Steps(string file, string start, string end)

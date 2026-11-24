@@ -19,6 +19,14 @@ gh downloads the release binary for your platform to:
 
 When `XDG_DATA_HOME` is set, gh uses `$XDG_DATA_HOME/gh/extensions/gh-ledger/` instead. The path stays the same when you upgrade, so the sign-in item and an MCP registration keep working.
 
+**Verify the binary.** Releases have a build provenance attestation for each binary, which shows that this repository's Release workflow built it. To check the one gh installed, run, with the path above for your platform:
+
+```shell
+gh attestation verify "<path to gh-ledger>" --repo swigerb/gh-ledger --signer-workflow swigerb/gh-ledger/.github/workflows/release.yml
+```
+
+It exits with 0 when an attestation matches the file's SHA-256 digest, and fails otherwise. gh-ledger 0.5.0 and earlier have no attestations, and the Windows binaries aren't signed with Authenticode. See [Verify a release](releasing.md#verify-a-release).
+
 To build from source instead, publish one single-file, self-contained binary for your runtime identifier:
 
 ```shell
@@ -52,7 +60,9 @@ It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTele
 
 **Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server.
 
-**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 7, for `gh ledger import`, the first time its daemon or any command opens it. Format 7 keeps each request's list price beside the amount it was charged. After upgrading, run `gh ledger import --all` once so that requests imported before, and live requests whose session logs report their charge, are repaired (see [Repairs](#repairs)). That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
+**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 7, for `gh ledger import`, the first time its daemon or any command opens it. Opening a format 7 ledger also adds an index that import uses to match its requests with live ones, when it's missing; on a large ledger that can take a moment once, and it doesn't change the format. Format 7 keeps each request's list price beside the amount it was charged. After upgrading, run `gh ledger import --all` once so that requests imported before, and live requests whose session logs report their charge, are repaired (see [Repairs](#repairs)). That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
+
+**Upgrading from 0.5.0.** gh-ledger 0.5.0 uses ledger format 6, and this version upgrades it to format 7 the first time it opens it, and 0.5.0 can't open it after that. Follow the steps below in order: close the Copilot sessions and apps that use the MCP server and stop the daemon, copy your data directory, upgrade, start the daemon, and run `gh ledger import --all` once. To go back, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy in place of your data directory, and start the daemon.
 
 To upgrade, close the Copilot sessions and apps that use the MCP server, and stop the daemon:
 
@@ -79,6 +89,8 @@ Then upgrade the extension, and start the daemon:
 gh extension upgrade ledger
 gh ledger daemon start
 ```
+
+Then run `gh ledger import --all` once; see [Repairs](#repairs).
 
 If `gh ledger daemon start` then says that the daemon did not start, run `gh ledger rates validate`. A new release can build in a model name that your rates overlay also lists, such as `claude-haiku-4-5-20251001`, which gh-ledger 0.5.0 builds in and earlier versions priced only through an overlay. Such an overlay is invalid, and the daemon doesn't start until you remove the entry that the message names; see [Which model prices a request](configuration.md#which-model-prices-a-request).
 
@@ -110,7 +122,7 @@ gh ledger import (--repo <path> | --all) [--source copilot|codex]... [--since <p
 - `--repo <path>` imports only requests made in the Git repository at `<path>`, a working-tree path such as `.`, unlike the reports' repository key. A session is in the repository when the repository root it recorded is that repository's root, or, when it recorded none, when its working directory is in that repository and not in another repository nested inside it. For that, import finds the working directory's repository on disk now, and leaves the session out when it can't, such as when the folder is gone. `--all` imports requests from every repository and from outside any. Use one of the two.
 - `--source copilot`, the default, reads Copilot's session logs, `session-state/<session>/events.jsonl` under `~/.copilot`, or under `COPILOT_HOME` when it's set. `--source codex` reads Codex's rollouts under `sessions` and `archived_sessions` in `~/.codex`, or in `CODEX_HOME` when it's set. Repeat `--source` to read both. `--source claude` is refused: Claude Code's session-log format is internal and undocumented, so gh-ledger doesn't read it.
 - `--since` takes the reports' periods and defaults to `all`. Logs last written before the period starts aren't read, by the last-write time the file system reports, and requests that started before it aren't recorded.
-- `--dry-run` reads the logs and reports what the import would record. It never creates, upgrades, or writes the ledger. It stops with an error when the ledger has a `-wal` or `-shm` file without the other, because reading the ledger then could create the missing file.
+- `--dry-run` reads the logs and reports what the import would record. It never creates, upgrades, or writes the ledger. It stops with an error when the ledger has a `-wal` or `-shm` file without the other, because reading the ledger then could create the missing file. Because it never writes the ledger, it doesn't add the index that the paragraph on the ledger format describes, so until the daemon or another command has opened the ledger with this version, a dry run of a large session can take much longer than the import itself; its results are the same.
 - `--include-active` also reads Copilot sessions that are still open, which have an `inuse.*.lock` file in their folder. Without it, they're skipped, and you can import them after they end.
 - `--json` writes the report as JSON.
 
@@ -161,7 +173,7 @@ The table has a column for each source:
 | Overlap-skipped | Requests that live spans recorded |
 | Ambiguous-overlap | Requests deferred because their session's live spans can't be matched to them |
 | Superseded, unmatched | Imported requests in scope that live spans superseded without matching them, from any run; they no longer count, and the live spans may not cover them all |
-| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete |
+| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete. A longer Copilot line counts as a skipped event instead when its first 64 KiB show a top-level `type` that isn't one of the events import reads, the same rule as for shorter lines. A longer Codex line is always malformed |
 | Unsupported usage shapes | Usage records with a missing or invalid field |
 | Cost out of range | Requests whose cost is beyond the ledger's range of about $9.2 million |
 | Unpriced | Recorded requests without a price; see [Pricing statuses](configuration.md#pricing-statuses) |
@@ -175,7 +187,7 @@ The next line totals the recorded requests' AI credits, GitHub USD, and API-equi
 
 `--json` writes no warnings; it lists them as `diagnostics`. Its fields are `dryRun`, `period`, `from`, `repository` (the `owner/repo` slug, or the root when the repository has none) and `repositoryRoot` (both `null` with `--all`), `coverage`, and:
 
-- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `unreadableStoreEntries` (folders and files of the source's store that couldn't be listed), `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `supersededUnmatched`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, `toolLinksRelinked`, `toolLinksRemoved`, `toolLinksFallback` (tool calls linked to the latest request of their agent because their `apiCallId` couldn't be followed), `repriced`, `liveRepriced`, `reportedChargesRejected`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
+- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `unreadableStoreEntries` (folders and files of the source's store that couldn't be listed), `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `supersededUnmatched`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types, including Copilot events longer than 8 MiB whose type shows in their first 64 KiB), `unpriced`, `toolLinksRecorded`, `toolLinksRelinked`, `toolLinksRemoved`, `toolLinksFallback` (tool calls linked to the latest request of their agent because their `apiCallId` couldn't be followed), `repriced`, `liveRepriced`, `reportedChargesRejected`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
 - `totals`: `recorded` and the same amounts over every source.
 - `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`. `log` is empty for `unreadableStore`, which is about the source's store rather than one log, and is the session ID for `supersededUnmatched`. Codes include `reportedChargeRejected`.
 
@@ -395,7 +407,7 @@ The ZIP holds exactly seven files: `manifest.json`, `report.html` (the same byte
 {
   "schemaVersion": 1,
   "tool": "gh-ledger",
-  "toolVersion": "0.5.0",
+  "toolVersion": "0.6.0",
   "generatedAtUtc": "2026-11-21T21:30:00.0000000+00:00",
   "ratesVersions": ["2026-11-23"],
   "apiRateCards": [{ "ratesVersion": "2026-11-23", "sha256": "<64 hexadecimal digits>" }],
@@ -495,13 +507,14 @@ gh ledger audit [--repo <key>] [--branch <name>] [--pr <n>] [--since <period>] [
 | `context_bloat` | Requests of at least 50,000 input tokens with at least 200 times as much input as output, or no output: one finding for each agent invocation and model (or prompt chain, agent, and model when the invocation is unknown), and a separate one for its requests without output | Info only | | None |
 | `context_growth` | One agent invocation's requests to one model whose input grew at least 4 times over 10 or more requests | Info only | | None |
 | `cache_miss_streak` | Requests in a row, of one agent invocation and model, each with at least 20,000 input tokens and less than 10% of them read from the prompt cache | 5 requests | 10 requests | What the uncached input cost above the cached input price |
-| `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
+| `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day, leaving out requests charged at least 5% below their list price | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
 | `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity, unless the breaker recorded a credit velocity trip for it. Only the daemon trips the breaker, and only on live spans, so an imported chain, or one recorded before the breaker or under other settings, can be reported above 100% | Info only | | None |
 <!-- /audit-rules -->
 
 - **One lens.** Estimated impacts are billed USD: GitHub AI credits at $0.01 each, and Foundry BYOK. Repriced impacts use the rates in use, your overlay included. A local request's impact is $0. An impact that would include a request without a billed price is unknown (`-` in the table, `null` in JSON), never $0. Findings can overlap, so their impacts aren't added together, and there's no total.
 - **Agent invocations.** `turn_velocity`, `tool_loop`, `failed_tool_retry`, `context_growth`, and `cache_miss_streak` follow one agent invocation at a time. A live request's invocation is its nearest `invoke_agent` span. An imported Copilot request without an agent name belongs to its prompt's main agent, as does a sub-agent's request that import recorded without a name (import warns about those). Imported requests of named sub-agents and Codex requests have no invocation that the ledger can tell apart, so those rules skip them, and the summary counts them. Another invocation's tool calls never join or end a run. A tool call whose invocation is unknown may belong to any invocation of its trace with the same agent name, so when it starts between two calls of such an invocation, it ends that run or streak, as an unknown outcome would; an imported named sub-agent's tool calls never end the main agent's.
 - **Tool calls.** A tool call belongs to the latest request of its invocation that started before it. gh-ledger keeps tool calls for 7 days, so the tool rules can't see older ones, and older live requests have unknown tool counts: `premium_model_trivial_turn` leaves them out rather than count them as requests without tool calls. An imported request's tool count is its session log's: unknown for every Codex request, for a Copilot request whose `numToolCalls` is missing or invalid, and for a compaction that an earlier build imported; 0 for a compaction, which makes no tool calls. The ledger doesn't record which requests are compactions, so `premium_model_trivial_turn` counts a short one as it counts any request without tool calls. As in export, tool history is the 7 days before the audit, but it starts no earlier than the earliest tool call or agent link the ledger keeps, because the daemon deletes older ones by its own clock; a ledger that keeps none has no tool history, so every request may be missing its tool calls. The summary says the tool history is insufficient exactly when export says the tool calls aren't complete: when requests started before it, imported requests made tool calls whose detail the ledger doesn't keep, or imported requests have no tool-call count.
+- **Routed requests.** With Auto or Copilot Fusion, GitHub picks the model for each request and charges less than its list price: 10% less for Auto on paid plans, and 30% less for Fusion through November 30, 2026. gh-ledger knows a request's list price when Copilot reported its charge, so `premium_model_trivial_turn` leaves out requests charged at least 5% below their list price: you didn't choose their model. A routed request without a reported charge, or one charged at the list price, counts like any other.
 - **Cache counters.** A request that reported no cache counters is never a miss; it ends a streak.
 - **Top quarter of output prices.** A model is in it when its first tier's output price is at least the nearest-rank 75th percentile of the first-tier output prices of every GitHub AI credits model in the rates on the request's date, of at least 4 models.
 

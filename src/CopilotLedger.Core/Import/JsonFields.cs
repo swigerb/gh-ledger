@@ -67,6 +67,57 @@ internal sealed class JsonFields
         }
     }
 
+    // The index in types of the top-level "type" string in a JSON object prefix, -1 for another string, or null when the
+    // prefix doesn't contain a complete type value. The first top-level "type" decides.
+    internal static int? ReadTypePrefix(ReadOnlySpan<byte> prefix, IReadOnlyList<string> types)
+    {
+        Utf8JsonReader reader = new(prefix, isFinalBlock: false, new JsonReaderState(Options));
+        try
+        {
+            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+            {
+                return null;
+            }
+
+            while (true)
+            {
+                if (!reader.Read() || reader.TokenType == JsonTokenType.EndObject)
+                {
+                    return null;
+                }
+
+                if (TextEquals(ref reader, "type"))
+                {
+                    break;
+                }
+
+                if (!reader.Read() || !reader.TrySkip())
+                {
+                    return null;
+                }
+            }
+
+            if (!reader.Read() || reader.TokenType != JsonTokenType.String)
+            {
+                return null;
+            }
+
+            for (int index = 0; index < types.Count; index++)
+            {
+                if (TextEquals(ref reader, types[index]))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     // The allowlisted values of a line that ReadType accepted.
     internal static JsonFields Read(ReadOnlySpan<byte> line, PathTree paths)
     {
