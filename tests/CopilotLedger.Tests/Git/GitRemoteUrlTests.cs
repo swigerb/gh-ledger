@@ -17,6 +17,10 @@ public sealed class GitRemoteUrlTests
         { @"C:\src\mirror.git", @"C:\src\mirror.git", null },
         { "file:///srv/git/mirror.git", "file:///srv/git/mirror.git", null },
         { "/srv/git/mirror.git", "/srv/git/mirror.git", null },
+        { "https://git.example/o/r.git?token=CANARY-TOKEN-7c1d", "https://git.example/o/r.git?token=CANARY-TOKEN-7c1d", "o/r" },
+        { "https://git.example/o/r#CANARY-TOKEN-7c1d", "https://git.example/o/r#CANARY-TOKEN-7c1d", "o/r" },
+        { "git@git.example:o/r.git?token=CANARY-TOKEN-7c1d", "git@git.example:o/r.git?token=CANARY-TOKEN-7c1d", "o/r" },
+        { "https://git.example/o/r%3Ftoken.git", "https://git.example/o/r%3Ftoken.git", null },
     };
 
     [Theory]

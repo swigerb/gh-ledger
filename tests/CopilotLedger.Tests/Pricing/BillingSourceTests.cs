@@ -140,6 +140,27 @@ public sealed class BillingSourceTests
         Assert.Equal(0.45m, other.ApiEquivalent.UsdCost);
     }
 
+    // A provider-billed request is local only by its provider name: a known local model without an endpoint makes a live
+    // span local, but never a Foundry BYOK or another provider's imported request.
+    [Theory]
+    [InlineData("azure.ai.inference", BillingChannel.FoundryByok, PricingStatus.ByokUnpriced)]
+    [InlineData("openai", BillingChannel.Unpriced, PricingStatus.OtherProvider)]
+    [InlineData("ollama", BillingChannel.Local, PricingStatus.LocalOffload)]
+    public void BI8_AProviderBilledRequestIsLocalOnlyByItsProviderName(
+        string provider,
+        BillingChannel channel,
+        PricingStatus status)
+    {
+        JsonRateCardCalculator builtIn = JsonRateCardCalculator.LoadEmbedded();
+
+        CreditCalculationResult result = builtIn.Calculate(Span(provider, "qwen3.8-27b", 100_000, 10_000));
+        CreditCalculationResult live = builtIn.Calculate(
+            Span(provider, "qwen3.8-27b", 100_000, 10_000) with { BillingSource = BillingSource.Endpoint, ProviderName = null });
+
+        Assert.Equal((channel, status), (result.Channel, result.Status));
+        Assert.Equal((BillingChannel.Local, PricingStatus.LocalOffload), (live.Channel, live.Status));
+    }
+
     private static NormalizedGenAiSpan Span(string? provider, string model, long input, long output) =>
         TestSpans.Chat(
             startTime: DateTimeOffset.Parse("2026-11-20T12:00:00Z", CultureInfo.InvariantCulture),

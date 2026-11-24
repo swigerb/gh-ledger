@@ -373,6 +373,50 @@ public sealed class CopilotRecordTests
         AssertNoCanary(result);
     }
 
+    // A call that would have started before the first instant can't be recorded; it's an unsupported shape, not an error.
+    [Fact]
+    public async Task CU13_ARecordThatWouldStartBeforeTheFirstInstantIsUnsupported()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId, start: DateTimeOffset.MinValue)
+            .Usage("msg_1", S1, duration: 2_000)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Empty(result.Records);
+        Assert.Equal((1, 1), (result.RecordsParsed, result.UnsupportedUsageShapes));
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(
+            (ImportDiagnosticCode.UnsupportedUsageShape, "data.usage.duration"),
+            (diagnostic.Code, diagnostic.Field));
+    }
+
+    // A credential in the recorded repository's query or fragment is dropped with them, and a slug with one is no slug.
+    [Theory]
+    [InlineData("https://user:" + CopilotSessionLogs.Canary + "@git.example/o/r.git?token=" + CopilotSessionLogs.Canary + "#" + CopilotSessionLogs.Canary, "o/r")]
+    [InlineData("git@git.example:o/r.git?token=" + CopilotSessionLogs.Canary, "o/r")]
+    [InlineData("o/r?token=" + CopilotSessionLogs.Canary, null)]
+    public async Task CU14_AQueryOrFragmentOfTheRepositoryIsNeverKept(string repository, string? slug)
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(
+                SessionId,
+                context: new JsonObject
+                {
+                    ["cwd"] = CopilotSessionLogs.DefaultWorkingDirectory,
+                    ["gitRoot"] = CopilotSessionLogs.DefaultWorkingDirectory,
+                    ["repository"] = repository,
+                })
+            .Usage("msg_1", S1)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(slug, Assert.Single(result.Records).Git!.RepositorySlug);
+        AssertNoCanary(result);
+    }
+
     internal static async Task<SessionLogReadResult> ReadAsync(string home) =>
         await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
 

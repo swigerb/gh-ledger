@@ -320,10 +320,19 @@ public sealed class CodexSessionLogSource : ISessionLogSource
             }
         }
 
-        // A token_usage_record: one completed response. A record of another thread, inherited by a fork, is skipped.
+        // A token_usage_record: one completed response. A record of another thread, inherited by a fork, is skipped; a record
+        // that gives an allowlisted field twice is unsupported before its thread is read, so it can't pass for inherited.
         private void Usage(JsonFields fields, long number, long offset)
         {
             const ImportEventKind kind = ImportEventKind.TokenUsageRecord;
+            if (fields.Duplicate is not null)
+            {
+                _parsed++;
+                _unsupported++;
+                _diagnostics.Add(ImportDiagnosticCode.UnsupportedUsageShape, kind, fields.Duplicate, number, offset);
+                return;
+            }
+
             string? threadId = SessionLogs.Uuid(fields.String("payload.thread_id"));
             if (threadId is not null && threadId != _threadId)
             {
@@ -348,8 +357,7 @@ public sealed class CodexSessionLogSource : ISessionLogSource
             long? written = writes ? Count(fields.Integer("payload.usage.cache_write_input_tokens")) : 0;
             string? model = (turnId is not null ? _modelByTurn.GetValueOrDefault(turnId) : null) ?? _latestModel;
             string? failed =
-                fields.Duplicate
-                ?? (time is null ? "timestamp"
+                time is null ? "timestamp"
                 : threadId is null ? "payload.thread_id"
                 : SessionLogs.Uuid(fields.String("payload.session_id")) != _sessionId ? "payload.session_id"
                 : responseId is null ? "payload.response_id"
@@ -360,7 +368,7 @@ public sealed class CodexSessionLogSource : ISessionLogSource
                 : written is null ? "payload.usage.cache_write_input_tokens"
                 : cached + written > input ? "payload.usage.input_tokens"
                 : model is null ? "turn_context.model"
-                : null);
+                : null;
             if (failed is not null)
             {
                 _unsupported++;

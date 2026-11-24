@@ -158,7 +158,9 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         }
 
         LocalModelRate? localModel = model is null ? null : _localModels.FirstOrDefault(item => item.Matches(model));
-        bool localByKnownModel = string.IsNullOrWhiteSpace(host) && localModel is not null;
+        bool localByKnownModel = span.BillingSource == BillingSource.Endpoint &&
+                                 string.IsNullOrWhiteSpace(host) &&
+                                 localModel is not null;
         if (IsLoopback(host) ||
             MatchesValue(host, _localHosts) ||
             MatchesValue(span.ProviderName, _localProviders) ||

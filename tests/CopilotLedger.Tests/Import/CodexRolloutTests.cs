@@ -330,6 +330,47 @@ public sealed class CodexRolloutTests
         AssertNoCanary(result);
     }
 
+    // A credential in a URL's query or fragment is dropped with them: the slug comes from the path alone.
+    [Theory]
+    [InlineData("https://git.example/o/r.git?token=" + CopilotSessionLogs.Canary)]
+    [InlineData("https://git.example/o/r#" + CopilotSessionLogs.Canary)]
+    public async Task CX13_AQueryOrFragmentOfTheRepositoryUrlIsNeverKept(string url)
+    {
+        using TempDirectory temp = new();
+        new CodexRollouts(Thread, git: new JsonObject { ["repository_url"] = url })
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_1", "turn-1")
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal("o/r", Assert.Single(result.Records).Git!.RepositorySlug);
+        AssertNoCanary(result);
+    }
+
+    // A record that gives thread_id twice is an unsupported shape, whichever thread its first value names.
+    [Fact]
+    public async Task CX14_ARecordThatGivesAFieldTwiceIsUnsupportedNotInherited()
+    {
+        using TempDirectory temp = new();
+        new CodexRollouts(Thread)
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Raw(
+                """{"timestamp":"2026-11-20T12:00:02.000Z","type":"token_usage_record","payload":{"thread_id":"FORK","thread_id":"THREAD","turn_id":"turn-1","session_id":"THREAD","root_turn_id":"turn-1","response_id":"resp_1","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":100}}}"""
+                    .Replace("FORK", Fork, StringComparison.Ordinal)
+                    .Replace("THREAD", Thread, StringComparison.Ordinal))
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Empty(result.Records);
+        Assert.Equal((1, 1), (result.RecordsParsed, result.UnsupportedUsageShapes));
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(
+            (ImportDiagnosticCode.UnsupportedUsageShape, "payload.thread_id", 3L),
+            (diagnostic.Code, diagnostic.Field, diagnostic.FirstLine));
+    }
+
     private static async Task<SessionLogReadResult> ReadAsync(string home) =>
         await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
 

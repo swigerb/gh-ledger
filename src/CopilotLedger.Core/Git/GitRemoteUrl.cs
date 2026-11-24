@@ -28,10 +28,19 @@ public static class GitRemoteUrl
             : value;
     }
 
+    // The "owner/repo" of a remote URL or an SCP-style address: its path, without a query, a fragment, a trailing "/", or
+    // ".git", when that path is exactly two parts of 1 to 100 ASCII letters, digits, '.', '_', or '-'. Anything else is null,
+    // so a credential in a query or a fragment is never kept.
     public static string? GetRepositorySlug(string remoteUrl)
     {
         ArgumentNullException.ThrowIfNull(remoteUrl);
         string value = remoteUrl.Trim();
+        int query = value.IndexOfAny(['?', '#']);
+        if (query >= 0)
+        {
+            value = value[..query];
+        }
+
         if (value.EndsWith('/'))
         {
             value = value[..^1];
@@ -74,8 +83,12 @@ public static class GitRemoteUrl
         }
 
         string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return segments.Length == 2 ? $"{segments[0]}/{segments[1]}" : null;
+        return segments.Length == 2 && segments.All(IsSlugPart) ? $"{segments[0]}/{segments[1]}" : null;
     }
+
+    private static bool IsSlugPart(string part) =>
+        part.Length is >= 1 and <= 100 &&
+        part.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-');
 
     private static bool IsWindowsDrivePath(string value, int colon) =>
         colon == 1 &&

@@ -394,6 +394,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             bool? cacheReported = fields.Boolean("data.usage.cacheDetailsReported");
             bool? byok = fields.Boolean("data.usage.isByok");
             string? serviceRequestId = UsageIdentity.NormalizeServiceRequestId(fields.String("data.usage.serviceRequestId"));
+            long duration = Duration(fields.Integer("data.usage.duration")) ?? 0;
             string? failed =
                 usageId is null ? "data.usage.accounting.usageId"
                 : model is null ? "data.usage.model"
@@ -403,6 +404,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 : byok is null ? "data.usage.isByok"
                 : byok == false && fields.String("data.usage.provider.kind") != "copilot" ? "data.usage.provider.kind"
                 : byok == false && serviceRequestId is null ? "data.usage.serviceRequestId"
+                : StartsBeforeTime(end, duration) ? "data.usage.duration"
                 : null);
             if (failed is not null)
             {
@@ -429,7 +431,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 RecordKey = usageId!,
                 TurnKey = _turnKey,
                 ServiceRequestId = byok == true ? null : serviceRequestId,
-                StartTime = end.AddMilliseconds(-(Duration(fields.Integer("data.usage.duration")) ?? 0)),
+                StartTime = end.AddMilliseconds(-duration),
                 EndTime = end,
                 RequestModel = model!,
                 ResponseModel = responseModel,
@@ -479,9 +481,11 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             long output = 0;
             long cacheRead = 0;
             long cacheWrite = 0;
+            long duration = Duration(fields.Integer("data.compactionTokensUsed.duration")) ?? 0;
             failed ??= Tokens(fields, "data.compactionTokensUsed.", out input, out output, out cacheRead, out cacheWrite)
                 ?? (fields.String("data.compactionTokensUsed.provider.kind") != "copilot"
                     ? "data.compactionTokensUsed.provider.kind"
+                    : StartsBeforeTime(end!.Value, duration) ? "data.compactionTokensUsed.duration"
                     : null);
             if (failed is not null)
             {
@@ -498,7 +502,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 RecordKey = serviceRequestId!,
                 TurnKey = _turnKey,
                 ServiceRequestId = serviceRequestId,
-                StartTime = end!.Value.AddMilliseconds(-(Duration(fields.Integer("data.compactionTokensUsed.duration")) ?? 0)),
+                StartTime = end!.Value.AddMilliseconds(-duration),
                 EndTime = end.Value,
                 RequestModel = model!,
                 ProviderName = UsageIdentity.GitHubProviderName,
@@ -645,6 +649,10 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         private static long? Count(long? value) => value is >= 0 and <= ImportLimits.MaxTokenCount ? value : null;
 
         private static long? Duration(long? value) => value is >= 0 and <= ImportLimits.MaxDurationMilliseconds ? value : null;
+
+        // A call that ended at end and lasted duration milliseconds would have started before the first instant.
+        private static bool StartsBeforeTime(DateTimeOffset end, long duration) =>
+            end - DateTimeOffset.MinValue < TimeSpan.FromMilliseconds(duration);
 
         // The envelope timestamp, in UTC.
         private static DateTimeOffset? Time(JsonFields fields) =>

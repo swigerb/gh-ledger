@@ -176,4 +176,23 @@ public sealed class CopilotCompactionTests
         Assert.Single(result.Records);
         CopilotRecordTests.AssertNoCanary(result);
     }
+
+    // A compaction that would have started before the first instant is an unsupported shape, not an error.
+    [Fact]
+    public async Task CC7_ACompactionThatWouldStartBeforeTheFirstInstantIsUnsupported()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId, "1.0.114", start: DateTimeOffset.MinValue)
+            .Compaction(S9, duration: 5_000)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await CopilotRecordTests.ReadAsync(temp.Path);
+
+        Assert.Empty(result.Records);
+        Assert.Equal((1, 1), (result.RecordsParsed, result.UnsupportedUsageShapes));
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(
+            (ImportDiagnosticCode.UnsupportedUsageShape, ImportEventKind.CompactionComplete, "data.compactionTokensUsed.duration"),
+            (diagnostic.Code, diagnostic.Event, diagnostic.Field));
+    }
 }
