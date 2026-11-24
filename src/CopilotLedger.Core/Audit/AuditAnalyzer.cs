@@ -9,6 +9,8 @@ public static class AuditAnalyzer
     public static IReadOnlyList<IAuditRule> Rules { get; } =
     [
         new TurnVelocityRule(),
+        new ToolLoopRule(),
+        new FailedToolRetryRule(),
         new ContextBloatRule(),
         new ContextGrowthRule(),
         new CacheMissStreakRule(),
