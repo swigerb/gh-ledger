@@ -77,6 +77,22 @@ public sealed class LedgerMcpServerTests
           "additionalProperties": false
         }
         """;
+    private const string AuditSchema =
+        """
+        {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Defaults to the current repository." },
+            "branch": { "type": "string", "minLength": 1, "description": "Only this branch, or (none)." },
+            "pullRequest": { "type": "integer", "minimum": 1, "description": "Only this pull request number." },
+            "since": { "type": "string", "default": "7d", "description": "Period: today, all, Nd (1 to 3650 days), or yyyy-MM-dd." },
+            "minSeverity": { "type": "string", "enum": ["info", "warning", "high"], "default": "info", "description": "Leave out findings below this severity." },
+            "rules": { "type": "array", "minItems": 1, "items": { "type": "string", "enum": ["turn_velocity", "tool_loop", "failed_tool_retry", "context_bloat", "context_growth", "cache_miss_streak", "premium_model_trivial_turn", "velocity_near_breaker"] }, "description": "Only these rules; all of them by default." },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Number of findings, most severe first." }
+          },
+          "additionalProperties": false
+        }
+        """;
     private const string Branch =
         """
         {
@@ -158,6 +174,15 @@ public sealed class LedgerMcpServerTests
                 "Cache efficiency",
                 "Prompt-cache efficiency in one repository, grouped by model, branch, pull request, or agent: the cache hit ratio, input read from and written to the cache, uncached input, and the largest prompt. Spans that reported no cache counters count as unknown, never as misses. Uses the current repository unless you pass one.",
                 CacheSchema,
+                readOnly: true,
+                destructive: null,
+                idempotent: null),
+            tool => AssertTool(
+                tool,
+                "get_audit_findings",
+                "Audit findings",
+                "Ranked review signals of wasted AI spend in one repository, from recorded metadata only: request bursts, tool loops, repeated failed tool calls, context bloat and growth, prompt-cache miss streaks, premium models on short tool-free requests, and prompts near the circuit breaker, each with an estimated billed-USD impact. Findings can overlap and aren't proof of waste. Uses the current repository unless you pass one.",
+                AuditSchema,
                 readOnly: true,
                 destructive: null,
                 idempotent: null),
@@ -419,7 +444,19 @@ public sealed class LedgerMcpServerTests
         { "get_cache_efficiency", """{"by":"channel"}""", "by must be model, branch, pr, or agent." },
         { "get_cache_efficiency", """{"limit":0}""", "limit must be an integer from 1 to 50." },
         { "get_cache_efficiency", """{"limit":51}""", "limit must be an integer from 1 to 50." },
+        { "get_audit_findings", """{"by":"model"}""", "Unknown argument: by." },
+        { "get_audit_findings", """{"repository":""}""", "repository must be a non-empty string." },
+        { "get_audit_findings", """{"pullRequest":0}""", "pullRequest must be an integer of at least 1." },
+        { "get_audit_findings", """{"since":"0d"}""", "since must be today, all, <N>d (1-3650), or yyyy-MM-dd." },
+        { "get_audit_findings", """{"minSeverity":"High"}""", "minSeverity must be info, warning, or high." },
+        { "get_audit_findings", """{"rules":[]}""", AuditRulesMessage },
+        { "get_audit_findings", """{"rules":["tool_loop","nope"]}""", AuditRulesMessage },
+        { "get_audit_findings", """{"rules":"tool_loop"}""", AuditRulesMessage },
+        { "get_audit_findings", """{"limit":51}""", "limit must be an integer from 1 to 50." },
     };
+
+    private const string AuditRulesMessage =
+        "rules must be a non-empty array of rule IDs: turn_velocity, tool_loop, failed_tool_retry, context_bloat, context_growth, cache_miss_streak, premium_model_trivial_turn, or velocity_near_breaker.";
 
     [Theory]
     [MemberData(nameof(InvalidArguments))]
@@ -551,7 +588,7 @@ public sealed class LedgerMcpServerTests
                     Version = "1.0",
                 },
             });
-        Assert.Equal(5, (await client.ListToolsAsync()).Count);
+        Assert.Equal(6, (await client.ListToolsAsync()).Count);
         Implementation? serverInfo = client.ServerInfo;
         Assert.NotNull(serverInfo);
         Assert.Equal(GhLedgerCli.Version, serverInfo.Version);

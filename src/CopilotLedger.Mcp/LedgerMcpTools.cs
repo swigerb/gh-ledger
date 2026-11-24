@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CopilotLedger.Core.Audit;
 using CopilotLedger.Core.Breaker;
 using CopilotLedger.Core.Git;
 using CopilotLedger.Core.Pricing;
@@ -67,10 +68,27 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
           "additionalProperties": false
         }
         """;
+    private const string AuditSchemaJson =
+        """
+        {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1, "description": "Repository key: owner/repo, a repository root, or (none). Defaults to the current repository." },
+            "branch": { "type": "string", "minLength": 1, "description": "Only this branch, or (none)." },
+            "pullRequest": { "type": "integer", "minimum": 1, "description": "Only this pull request number." },
+            "since": { "type": "string", "default": "7d", "description": "Period: today, all, Nd (1 to 3650 days), or yyyy-MM-dd." },
+            "minSeverity": { "type": "string", "enum": ["info", "warning", "high"], "default": "info", "description": "Leave out findings below this severity." },
+            "rules": { "type": "array", "minItems": 1, "items": { "type": "string", "enum": ["turn_velocity", "tool_loop", "failed_tool_retry", "context_bloat", "context_growth", "cache_miss_streak", "premium_model_trivial_turn", "velocity_near_breaker"] }, "description": "Only these rules; all of them by default." },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Number of findings, most severe first." }
+          },
+          "additionalProperties": false
+        }
+        """;
     private static readonly JsonElement BranchSchema = ParseSchema(BranchSchemaJson);
     private static readonly JsonElement PromptSchema = ParseSchema(PromptSchemaJson);
     private static readonly JsonElement BudgetSchema = ParseSchema(BudgetSchemaJson);
     private static readonly JsonElement CacheSchema = ParseSchema(CacheSchemaJson);
+    private static readonly JsonElement AuditSchema = ParseSchema(AuditSchemaJson);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -127,6 +145,18 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         },
         new()
         {
+            Name = "get_audit_findings",
+            Title = "Audit findings",
+            Description = "Ranked review signals of wasted AI spend in one repository, from recorded metadata only: request bursts, tool loops, repeated failed tool calls, context bloat and growth, prompt-cache miss streaks, premium models on short tool-free requests, and prompts near the circuit breaker, each with an estimated billed-USD impact. Findings can overlap and aren't proof of waste. Uses the current repository unless you pass one.",
+            InputSchema = AuditSchema.Clone(),
+            Annotations = new ToolAnnotations
+            {
+                ReadOnlyHint = true,
+                OpenWorldHint = false,
+            },
+        },
+        new()
+        {
             Name = "set_branch_budget",
             Title = "Set branch budget",
             Description = "Sets a soft AI-credit budget for one Git branch. CopilotLedger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
@@ -158,6 +188,8 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 ["repository", "branch", "limit", "orderBy"],
             "get_cache_efficiency" =>
                 ["repository", "branch", "pullRequest", "since", "by", "limit"],
+            "get_audit_findings" =>
+                ["repository", "branch", "pullRequest", "since", "minSeverity", "rules", "limit"],
             "set_branch_budget" => ["repository", "branch", "aiCredits"],
             _ => throw new McpProtocolException(
                 $"Unknown tool: {name}",
@@ -176,10 +208,11 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             return invalid;
         }
 
-        // get_cache_efficiency reports one repository, the current one by default, and warns about the current branch.
+        // get_cache_efficiency and get_audit_findings report one repository, the current one by default, and warn about the
+        // current branch.
         GitWorkspaceContext? current = null;
         ScopeResult scope;
-        if (name == "get_cache_efficiency")
+        if (name is "get_cache_efficiency" or "get_audit_findings")
         {
             (string directory, current) = ResolveCurrent();
             string? repository = values.Repository ?? current?.RepositorySlug ?? current?.RepositoryRoot;
@@ -196,6 +229,19 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             if (scope.Error is not null)
             {
                 return Error(scope.Error);
+            }
+        }
+
+        IAuditPricing? pricing = null;
+        if (name == "get_audit_findings")
+        {
+            try
+            {
+                pricing = _context.LoadAuditPricing();
+            }
+            catch (InvalidDataException exception)
+            {
+                return Error($"Invalid rates overlay: {exception.Message}");
             }
         }
 
@@ -226,6 +272,13 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                     scope.Repository!,
                     current,
                     values,
+                    cancellationToken),
+                "get_audit_findings" => await AuditFindingsAsync(
+                    store,
+                    scope.Repository!,
+                    current,
+                    values,
+                    pricing!,
                     cancellationToken),
                 "set_branch_budget" => await SetBudgetAsync(
                     store,
@@ -288,7 +341,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             branch = branchElement.GetString();
         }
 
-        bool cacheTool = name == "get_cache_efficiency";
+        bool cacheTool = name is "get_cache_efficiency" or "get_audit_findings";
         if (!cacheTool && (repository is null) != (branch is null))
         {
             return Error("Pass repository and branch together, or neither.");
@@ -354,9 +407,9 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         }
 
         LedgerPeriod? period = null;
+        string since = name == "get_audit_findings" ? "7d" : "30d";
         if (cacheTool)
         {
-            string since = "30d";
             if (arguments.TryGetValue("since", out JsonElement sinceElement))
             {
                 since = sinceElement.ValueKind == JsonValueKind.String
@@ -368,6 +421,29 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             {
                 return Error("since must be today, all, <N>d (1-3650), or yyyy-MM-dd.");
             }
+        }
+
+        AuditSeverity minSeverity = AuditSeverity.Info;
+        if (arguments.TryGetValue("minSeverity", out JsonElement severityElement)
+            && (severityElement.ValueKind != JsonValueKind.String
+                || !AuditSeverities.TryParse(severityElement.GetString(), out minSeverity)))
+        {
+            return Error("minSeverity must be info, warning, or high.");
+        }
+
+        IReadOnlyList<string> rules = AuditRuleIds.All;
+        if (arguments.TryGetValue("rules", out JsonElement rulesElement))
+        {
+            if (rulesElement.ValueKind != JsonValueKind.Array
+                || rulesElement.GetArrayLength() == 0
+                || rulesElement.EnumerateArray().Any(rule =>
+                    rule.ValueKind != JsonValueKind.String || !AuditRuleIds.IsKnown(rule.GetString())))
+            {
+                return Error(
+                    $"rules must be a non-empty array of rule IDs: {string.Join(", ", AuditRuleIds.All.SkipLast(1))}, or {AuditRuleIds.All[^1]}.");
+            }
+
+            rules = [.. rulesElement.EnumerateArray().Select(rule => rule.GetString()!).Distinct(StringComparer.Ordinal)];
         }
 
         string by = "model";
@@ -384,7 +460,12 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
             by = requested;
         }
 
-        values = new ToolArguments(repository, branch, limit, orderBy, aiCredits, pullRequest, period, by);
+        values = new ToolArguments(repository, branch, limit, orderBy, aiCredits, pullRequest, period, by)
+        {
+            Since = since.Trim(),
+            MinSeverity = minSeverity,
+            Rules = rules,
+        };
         return null;
     }
 
@@ -725,6 +806,66 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         };
     }
 
+    // The audit of repository at the clock's time in one snapshot, as gh ledger audit --json writes it, with the circuit
+    // breaker and warnings of the current branch. The economy model is the rates' local baseline.
+    private async Task<JsonObject> AuditFindingsAsync(
+        SqliteLedgerStore store,
+        string repository,
+        GitWorkspaceContext? current,
+        ToolArguments values,
+        IAuditPricing pricing,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset generatedAt =
+            DateTimeOffset.FromUnixTimeMilliseconds(_context.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds());
+        AuditInput input;
+        await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
+        {
+            input = await snapshot.GetAuditInputAsync(
+                new LedgerFilter
+                {
+                    From = values.Period!.From,
+                    To = generatedAt,
+                    Repository = repository,
+                    Branch = values.Branch,
+                    PullRequestNumber = values.PullRequest,
+                },
+                generatedAt,
+                cancellationToken);
+        }
+
+        AuditReport report = AuditAnalyzer.Report(
+            input with
+            {
+                Pricing = pricing,
+                EconomyModel = pricing.BaselineModel,
+                TimeZone = _context.TimeProvider.LocalTimeZone,
+                Rules = values.Rules,
+            },
+            generatedAt,
+            new AuditReportFilter
+            {
+                Repository = repository,
+                Branch = values.Branch,
+                PullRequestNumber = values.PullRequest,
+                Since = values.Since,
+                Period = values.Period.Label,
+                FromUtc = values.Period.From,
+                ToUtc = generatedAt,
+            },
+            values.MinSeverity,
+            values.Limit);
+        WarningResult warnings = await WarningsAsync(
+            store,
+            current is null ? null : current.RepositorySlug ?? current.RepositoryRoot,
+            current is null ? null : current.BranchName ?? "(none)",
+            cancellationToken);
+        JsonObject result = JsonNode.Parse(AuditJson.Serialize(report))!.AsObject();
+        result["circuitBreaker"] = warnings.CircuitBreaker;
+        result["warnings"] = new JsonArray(warnings.Warnings.Select(message => JsonValue.Create(message)).ToArray());
+        return result;
+    }
+
     private async Task<JsonObject> SetBudgetAsync(
         SqliteLedgerStore store,
         string repository,
@@ -934,6 +1075,10 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
     {
         public static ToolArguments Empty { get; } =
             new(null, null, 5, "cost", decimal.Zero, null, null, "model");
+
+        public string Since { get; init; } = "30d";
+        public AuditSeverity MinSeverity { get; init; } = AuditSeverity.Info;
+        public IReadOnlyList<string> Rules { get; init; } = AuditRuleIds.All;
     }
 
     private sealed record ScopeResult(

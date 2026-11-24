@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using CopilotLedger.Cli.Rates;
 using CopilotLedger.Core.Git;
 using CopilotLedger.Mcp;
 
@@ -31,6 +32,7 @@ internal static class McpCommand
                 GitResolver = new FileSystemGitContextResolver(),
                 TimeProvider = context.TimeProvider,
                 Version = GhLedgerCli.Version,
+                LoadAuditPricing = () => RateCardFiles.Load(RateCardFiles.LoadBase(context), RateCardFiles.OverlayPath(context)),
             },
             context.StandardInput ?? Console.OpenStandardInput(),
             context.StandardOutput ?? Console.OpenStandardOutput(),
