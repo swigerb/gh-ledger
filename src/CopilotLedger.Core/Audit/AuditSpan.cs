@@ -3,7 +3,7 @@ using CopilotLedger.Core.Telemetry;
 
 namespace CopilotLedger.Core.Audit;
 
-// One effective inference span (a model request). Money is billed USD, what cost_usd_pico holds.
+// One effective inference span (a model request), with its list price when known to identify routed requests.
 public sealed record AuditSpan
 {
     public required string TraceId { get; init; }
@@ -25,6 +25,7 @@ public sealed record AuditSpan
     public required BillingChannel Channel { get; init; }
     public required PricingStatus PricingStatus { get; init; }
     public required decimal CostUsd { get; init; }          // GitHub AI credits or Foundry BYOK; 0 otherwise
+    public decimal? ListCostUsd { get; init; }              // the rate card's price beside a reported charge; null: the same as CostUsd
     public required decimal AiCredits { get; init; }        // CostUsd / 0.01 on GitHub AI credits; 0 otherwise
     public decimal? ApiEquivalentUsd { get; init; }         // not used by the billed lens
     public long? ToolCallCount { get; init; }               // the tool calls it asked for; null when unknown

@@ -3,9 +3,11 @@ using CopilotLedger.Core.Pricing;
 namespace CopilotLedger.Core.Audit;
 
 // premium_model_trivial_turn: many short, tool-free GitHub AI credits requests to a model in the top quartile of output
-// rates, per agent, model, and local day. Only candidates for a cheaper model: a short answer can still need a strong one.
+// rates, per agent, model, and local day. Routed requests are left out; others are candidates: a short answer can need a strong one.
 internal sealed class PremiumModelTrivialTurnRule : IAuditRule
 {
+    private const decimal RoutedChargeRatio = 0.95m;   // charged at least 5% below list: Auto (10%) or Fusion (30%) routed it
+
     public string Id => AuditRuleIds.PremiumModelTrivialTurn;
 
     public IEnumerable<AuditFinding> Evaluate(AuditInput input)
@@ -23,6 +25,11 @@ internal sealed class PremiumModelTrivialTurnRule : IAuditRule
             if (span.Channel != BillingChannel.GitHubAiCredits ||
                 span.OutputTokens > thresholds.TrivialOutputTokens ||
                 span.ToolCallCount != 0)
+            {
+                continue;
+            }
+
+            if (span.ListCostUsd is decimal list && list > 0m && span.CostUsd <= list * RoutedChargeRatio)
             {
                 continue;
             }

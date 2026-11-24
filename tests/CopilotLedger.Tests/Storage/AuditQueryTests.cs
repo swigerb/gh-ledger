@@ -46,6 +46,7 @@ public sealed class AuditQueryTests
                 Channel = BillingChannel.GitHubAiCredits,
                 PricingStatus = PricingStatus.Priced,
                 CostUsd = 0.0272m,
+                ListCostUsd = 0.0272m,
                 AiCredits = 2.72m,
                 ApiEquivalentUsd = 0.0272m,
                 ToolCallCount = 1,

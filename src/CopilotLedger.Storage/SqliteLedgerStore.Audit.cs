@@ -106,7 +106,7 @@ public sealed partial class SqliteLedgerStore
                    agent_span_id, COALESCE(model_id, '(none)'), request_model, input_tokens, cache_read_input_tokens,
                    cache_write_input_tokens, output_tokens, cache_read_state, cache_write_state, billing_channel, pricing_status,
                    cost_usd_pico, api_equivalent_usd_pico, imported_tool_call_count, COALESCE(repo_slug, repo_root, '(none)'),
-                   COALESCE(branch_name, '(none)'), pull_request_number, ingest_source
+                   COALESCE(branch_name, '(none)'), pull_request_number, ingest_source, list_cost_usd_pico
             FROM spans
             WHERE {FilterSql}
             ORDER BY start_time_unix_ms, trace_id, span_id;
@@ -165,6 +165,7 @@ public sealed partial class SqliteLedgerStore
                 Channel = channel,
                 PricingStatus = ToPricingStatus(rows.GetString(17)),
                 CostUsd = cost,
+                ListCostUsd = rows.IsDBNull(25) ? null : PicoUsd.ToUsd(rows.GetInt64(25)),
                 AiCredits = channel == BillingChannel.GitHubAiCredits ? AiCreditMath.UsdToAiCredits(cost) : 0m,
                 ApiEquivalentUsd = rows.IsDBNull(19) ? null : PicoUsd.ToUsd(rows.GetInt64(19)),
                 ToolCallCount = toolCount,
