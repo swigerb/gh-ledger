@@ -15,13 +15,15 @@ internal static class WindowsDetachedProcess
     private const int StartfUseStdHandles = 0x00000100;
     private const uint CreateNoWindow = 0x08000000;
     private const uint ExtendedStartupInfoPresent = 0x00080000;
+    private const uint CreateBreakawayFromJob = 0x01000000;
     private const int ErrorInsufficientBuffer = 122;
     private static readonly IntPtr ProcThreadAttributeHandleList = 0x00020002;
 
     public static int Start(
         string fileName,
         IReadOnlyList<string> arguments,
-        string workingDirectory)
+        string workingDirectory,
+        bool breakawayFromJob)
     {
         using SafeFileHandle nul = File.OpenHandle(
             @"\\.\NUL",
@@ -73,13 +75,16 @@ internal static class WindowsDetachedProcess
                 },
                 AttributeList = attributeList,
             };
+            // A job that kills on close would otherwise stop the daemon with the caller (#78).
             if (!CreateProcess(
                     null,
                     commandLine,
                     IntPtr.Zero,
                     IntPtr.Zero,
                     true,
-                    CreateNoWindow | ExtendedStartupInfoPresent,
+                    CreateNoWindow
+                    | ExtendedStartupInfoPresent
+                    | (breakawayFromJob ? CreateBreakawayFromJob : 0),
                     IntPtr.Zero,
                     workingDirectory,
                     ref startupInfo,
