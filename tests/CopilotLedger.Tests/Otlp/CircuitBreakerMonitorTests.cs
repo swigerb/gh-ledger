@@ -77,6 +77,25 @@ public sealed class CircuitBreakerMonitorTests
     }
 
     [Fact]
+    public async Task BA2_Monitor_PassesItsCommand()
+    {
+        using TempDirectory temp = new();
+        Harness harness = await Harness.CreateAsync(temp, command: "gh ledger");
+
+        for (int request = 1; request <= 5; request++)
+        {
+            await harness.Ingestor.IngestAsync(TraceHRequest(request));
+        }
+
+        await harness.Ingestor.IngestAsync(TraceHRequest(6));
+
+        Assert.EndsWith(
+            "Run: gh ledger breaker status",
+            Assert.Single(harness.Sink.Alerts).Body,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BM2_NewCommitResetsTheCount()
     {
         using TempDirectory temp = new();
@@ -541,7 +560,8 @@ public sealed class CircuitBreakerMonitorTests
         public static async Task<Harness> CreateAsync(
             TempDirectory temp,
             BreakerSettings? settings = null,
-            bool monitor = true)
+            bool monitor = true,
+            string command = BreakerMessages.DefaultCommand)
         {
             string databasePath = Path.Combine(temp.Path, "data", "ledger.db");
             SqliteLedgerStore store = new(databasePath, new ManualTimeProvider(NOW));
@@ -561,7 +581,7 @@ public sealed class CircuitBreakerMonitorTests
             Directory.CreateDirectory(Path.GetDirectoryName(workspace)!);
             File.WriteAllText(workspace, $"cwd: {repo}\n");
             RecordingAlertSink sink = new();
-            CircuitBreakerMonitor breaker = new(store, sink);
+            CircuitBreakerMonitor breaker = new(store, sink, command);
             IGitContextResolver resolver =
                 new FileSystemGitContextResolver(ceilingDirectory: temp.Path);
             LedgerIngestor ingestor = monitor

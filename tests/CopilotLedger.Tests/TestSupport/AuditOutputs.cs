@@ -245,6 +245,11 @@ public static class AuditOutputs
               "windowEnd": "2026-11-21T17:00:02.0000000+00:00",
               "metrics": [
                 {
+                  "name": "requests",
+                  "value": 1,
+                  "unit": "requests"
+                },
+                {
                   "name": "inputTokens",
                   "value": 260000,
                   "unit": "tokens"
@@ -271,6 +276,7 @@ public static class AuditOutputs
     public static readonly string Table = """
         Audit of all repositories (last 7 days)
         4 findings: 1 high, 2 warning, 1 info.
+        By rule: failed_tool_retry 1, context_bloat 1, cache_miss_streak 1, premium_model_trivial_turn 1.
 
         Severity  Rule                        Scope                                                         Window                  Key metrics                                          Est. impact
         High      failed_tool_retry           swigerb/copilot-ledger @ feature/ledger, explore, bash        2026-11-21 10:00-10:01  4 failures in a row                                        $0.01

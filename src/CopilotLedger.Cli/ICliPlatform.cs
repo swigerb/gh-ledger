@@ -23,6 +23,7 @@ public interface ICliPlatform
     TimeZoneInfo? FindTimeZone(string id);                                 // a time zone by IANA ID (on Windows also by Windows ID), or null
     Task<ProcessRunResult> RunAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken);
     int StartDetached(string fileName, IReadOnlyList<string> arguments, string workingDirectory);   // returns the new process id; its standard input, output, and error are the null device; on Windows it inherits no other handle
+    JobState GetJobState();                                                // Windows: this process's job (IsProcessInJob, then QueryInformationJobObject with a NULL job); (false, 0) on other platforms; throws Win32Exception when a call fails
     bool IsProcessRunning(int processId);
     void KillProcess(int processId);
 }

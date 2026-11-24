@@ -177,13 +177,20 @@ public sealed class SystemCliPlatform : ICliPlatform
     {
         if (OperatingSystem.IsWindows())
         {
-            return WindowsDetachedProcess.Start(fileName, arguments, workingDirectory);
+            return WindowsDetachedProcess.Start(
+                fileName,
+                arguments,
+                workingDirectory,
+                DetachedLaunchPolicy.Decide(GetJobState()) == DetachedLaunch.BreakawayFromJob);
         }
 
         using Process process = new() { StartInfo = UnixDetachedStartInfo(fileName, arguments, workingDirectory) };
         process.Start();
         return process.Id;
     }
+
+    public JobState GetJobState() =>
+        OperatingSystem.IsWindows() ? WindowsJobObjects.GetCurrent() : default;
 
     // /bin/sh first checks that fileName can be executed: if not, it says so on the caller's standard error and exits
     // with 126, because a failed exec would report to the null device. Otherwise exec keeps the process id, and the

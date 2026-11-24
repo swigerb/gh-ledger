@@ -19,10 +19,13 @@ internal sealed class ToolLoopRule : IAuditRule
                 }
 
                 List<AuditSpan> requests = ToolSequences.Between(input.Spans, run);
+                decimal? impact = AuditMath.SumBilled(requests);
+                // High only when the run is long and costs something known; a free or unpriced loop is routine exploration (#80).
+                AuditSeverity severity = run.Count >= 2L * trigger && impact is > 0m ? AuditSeverity.High : AuditSeverity.Warning;
                 yield return new AuditFinding
                 {
                     RuleId = Id,
-                    Severity = AuditMath.Severity(run.Count, trigger),
+                    Severity = severity,
                     Scope = ToolSequences.Scope(run),
                     WindowStart = run[0].StartTime,
                     WindowEnd = run[^1].StartTime,
@@ -31,7 +34,7 @@ internal sealed class ToolLoopRule : IAuditRule
                         new AuditMetric("calls", run.Count, AuditUnits.Calls),
                         new AuditMetric("requests", requests.Count, AuditUnits.Requests),
                     ],
-                    EstimatedImpactUsd = AuditMath.SumBilled(requests),
+                    EstimatedImpactUsd = impact,
                     RecommendationKey = Id,
                 };
             }

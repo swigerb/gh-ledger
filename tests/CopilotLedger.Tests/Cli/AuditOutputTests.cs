@@ -119,6 +119,7 @@ public sealed class AuditOutputTests
             """
             Audit of all repositories (last 7 days)
             4 findings: 1 high, 2 warning, 1 info. Showing 1.
+            By rule: failed_tool_retry 1, context_bloat 1, cache_miss_streak 1, premium_model_trivial_turn 1.
 
             Severity  Rule               Scope                                                   Window                  Key metrics          Est. impact
             High      failed_tool_retry  swigerb/copilot-ledger @ feature/ledger, explore, bash  2026-11-21 10:00-10:01  4 failures in a row        $0.01
@@ -200,6 +201,9 @@ public sealed class AuditOutputTests
         { "failed_tool_retry", "4 failures in a row" },
         { "context_bloat", "100,000 in, 300 out (333:1)" },
         { "context_bloat zero output", "80,000 in, no output" },
+        { "context_bloat aggregated", "20 requests, 2,400,000 in, 3,000 out (800:1)" },
+        { "context_bloat aggregated zero output", "3 requests, 240,000 in, no output" },
+        { "context_bloat one request", "260,000 in, 1,000 out (260:1)" },
         { "context_growth", "20,000 to 92,000 input in 12 requests (4.6x)" },
         { "cache_miss_streak", "5 requests, 7.5% cache hits, 175,000 uncached" },
         { "premium_model_trivial_turn", "12 tool-free requests of 200 or fewer output tokens" },
@@ -219,6 +223,9 @@ public sealed class AuditOutputTests
             "failed_tool_retry" => (AuditRuleIds.FailedToolRetry, AuditToolOutcome.Failure, [("failures", 4m), ("requests", 3m)]),
             "context_bloat" => (AuditRuleIds.ContextBloat, null, [("inputTokens", 100_000m), ("outputTokens", 300m), ("inputOutputRatio", 100_000m / 300m)]),
             "context_bloat zero output" => (AuditRuleIds.ContextBloat, null, [("inputTokens", 80_000m), ("outputTokens", 0m), ("zeroOutput", 1m)]),
+            "context_bloat aggregated" => (AuditRuleIds.ContextBloat, null, [("requests", 20m), ("inputTokens", 2_400_000m), ("outputTokens", 3_000m), ("inputOutputRatio", 800m)]),
+            "context_bloat aggregated zero output" => (AuditRuleIds.ContextBloat, null, [("requests", 3m), ("inputTokens", 240_000m), ("outputTokens", 0m), ("zeroOutput", 1m)]),
+            "context_bloat one request" => (AuditRuleIds.ContextBloat, null, [("requests", 1m), ("inputTokens", 260_000m), ("outputTokens", 1_000m), ("inputOutputRatio", 260m)]),
             "context_growth" => (AuditRuleIds.ContextGrowth, null, [("requests", 12m), ("firstInputTokens", 20_000m), ("lastInputTokens", 92_000m), ("peakInputTokens", 95_000m), ("growthRatio", 4.6m)]),
             "cache_miss_streak" => (AuditRuleIds.CacheMissStreak, null, [("requests", 5m), ("inputTokens", 200_000m), ("cacheReadInputTokens", 15_000m), ("uncachedInputTokens", 175_000m), ("cacheHitRatio", 0.075m)]),
             "premium_model_trivial_turn" => (AuditRuleIds.PremiumModelTrivialTurn, null, [("requests", 12m), ("outputTokens", 1_440m)]),
@@ -262,6 +269,35 @@ public sealed class AuditOutputTests
             ],
             AuditRuleIds.All.Select(AuditText.RuleTitle));
         Assert.Equal(["High", "Warning", "Info"], new[] { AuditSeverity.High, AuditSeverity.Warning, AuditSeverity.Info }.Select(AuditText.Severity));
+    }
+
+    [Fact]
+    public void AO8_ByRule_CountsEveryFindingInRuleOrder()
+    {
+        AuditSpan Agentic(int k) => AuditFixtures.Span(k, TimeSpan.FromMinutes(k)) with
+        {
+            InputTokens = 120_000,
+            CacheReadInputTokens = 114_000,
+            CacheReadState = CacheCounterState.Reported,
+            OutputTokens = 150,
+        };
+        AuditInput input = AuditFixtures.Input(
+            Enumerable.Range(1, 20).Select(k =>
+                k % 2 == 0 ? Agentic(k) with { AgentInvocationId = "b0000000000000b0" } : Agentic(k)),
+            Enumerable.Range(0, 8).Select(k =>
+                AuditFixtures.Tool(k + 1, TimeSpan.FromSeconds(10 * k + 5)))) with
+        {
+            Rules = [AuditRuleIds.ContextBloat, AuditRuleIds.ToolLoop],
+        };
+        AuditReport report = AuditAnalyzer.Report(
+            input,
+            AuditSeeds.GeneratedAt,
+            new AuditReportFilter { Since = "all", Period = "all time", ToUtc = AuditSeeds.GeneratedAt },
+            AuditSeverity.Info,
+            1);
+
+        string[] lines = Write(report).ReplaceLineEndings("\n").Split('\n');
+        Assert.Equal("By rule: tool_loop 1, context_bloat 2.", lines[2]);
     }
 
     // Tool history is worded as export words its start: the retention, the earliest span link the ledger keeps when that's

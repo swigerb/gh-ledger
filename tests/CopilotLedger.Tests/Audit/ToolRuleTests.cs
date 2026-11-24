@@ -20,6 +20,9 @@ public sealed class ToolRuleTests
         { "parallel batch", "warning [calls=8 calls, requests=0 requests] 0 tool_loop" },
         { "unpriced request", "warning [calls=8 calls, requests=7 requests] null tool_loop" },
         { "high", "high [calls=16 calls, requests=15 requests] 0.15 tool_loop" },
+        { "high local", "warning [calls=16 calls, requests=15 requests] 0 tool_loop" },
+        { "high unpriced", "warning [calls=16 calls, requests=15 requests] null tool_loop" },
+        { "high parallel batch", "warning [calls=16 calls, requests=0 requests] 0 tool_loop" },
     };
 
     [Theory]
@@ -45,6 +48,21 @@ public sealed class ToolRuleTests
                 Interleaved(8, _ => ("view", null, 1)),
                 span => span.SpanId.EndsWith('4') ? span with { PricingStatus = PricingStatus.UnknownModel } : span),
             "high" => Interleaved(16, _ => ("view", null, 1)),
+            "high local" => MapSpans(
+                Interleaved(16, _ => ("view", null, 1)),
+                span => span with
+                {
+                    Channel = BillingChannel.Local,
+                    PricingStatus = PricingStatus.LocalOffload,
+                    CostUsd = 0m,
+                    AiCredits = 0m,
+                }),
+            "high unpriced" => MapSpans(
+                Interleaved(16, _ => ("view", null, 1)),
+                span => span.SpanId.EndsWith('4') ? span with { PricingStatus = PricingStatus.UnknownModel } : span),
+            "high parallel batch" => AuditFixtures.Input(
+                [AuditFixtures.Span(1)],
+                Calls(16, _ => 5, _ => ("view", null, 1))),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
 

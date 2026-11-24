@@ -120,7 +120,9 @@ public sealed class ExportAuditTests
         AuditSeeds.LiveTrace bloat = new("b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", "conv-bloat", null);
         for (int k = 0; k < 101; k++)
         {
-            bloat.Request(1 + k, null, AuditSeeds.At("19:00:00").AddSeconds(20 * k), "claude-sonnet-5.5", 60_000, 50_000, 100);
+            DateTimeOffset start = AuditSeeds.At("19:00:00").AddSeconds(20 * k);
+            string agent = bloat.Agent(k, start);
+            bloat.Request(1 + k, agent, start, "claude-sonnet-5.5", 60_000, 50_000, 100);
         }
 
         await bloat.RecordAsync(store);
