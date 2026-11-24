@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Reflection;
+using CopilotLedger.Cli.Audit;
 using CopilotLedger.Cli.Breaker;
 using CopilotLedger.Cli.Daemon;
 using CopilotLedger.Cli.Export;
@@ -51,6 +52,7 @@ public static class GhLedgerCli
 
         root.Add(ReceiptCommands.Create(context));
         root.Add(ExportCommands.Create(context));
+        root.Add(AuditCommands.Create(context));
         root.Add(ImportCommands.Create(context));
         root.Add(McpCommand.Create(context));
 
