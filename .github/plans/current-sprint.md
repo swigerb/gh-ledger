@@ -11,18 +11,18 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–5 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–6 are sequential, and each builds on the ones before it.
 
 This sprint ships as one pull request, and nobody in it tags, releases, or runs the Release workflow: the coordinator does that after the pull request merges. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-10.md` and the product-name wording of `.github/copilot-instructions.md` and the two `.github/agents` files (see "Edits outside the tasks"), then each task as its own commit, `Sprint 11 Task N: <Title>`, on branch `swigerb-sprint-11-release-0-5-0`, and opens one pull request titled exactly "Sprint 11: Release readiness, gh-ledger naming & version 0.5.0", whose body says `Refs #72` and uses no closing keyword. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
-All of this plan's code, tests, and docs are **copy exactly**. The architect generated every block from the files at `5f4f4c5`, applying the edits in order, so each "replace" block is the text the file holds when you reach it. A script then applied the plan's blocks task by task, in order, to a fresh `git archive 5f4f4c5` with Windows line endings (as a `core.autocrlf=true` checkout has them), and built and tested after each task: 0 warnings, and 1732, 1732, 1733, 1734, and 1735 tests passed. Copy each block character for character, including every comment line, blank line, and line of Markdown. Don't add argument checks, logging, or fast paths that the code doesn't show, and don't tidy code or reword docs.
+All of this plan's code, tests, and docs are **copy exactly**. The architect generated every block from the files at `5f4f4c5`, applying the edits in order, so each "replace" block is the text the file holds when you reach it. A script then applied the plan's blocks task by task, in order, to a fresh `git archive 5f4f4c5` with Windows line endings (as a `core.autocrlf=true` checkout has them), and built and tested after each task: 0 warnings, and 1732, 1732, 1733, 1734, and 1735 tests passed. Task 6, which the coordinator's review added, was generated the same way from the files at `9fecd4f` and applied to a fresh `git archive 9fecd4f`: 0 warnings, and 1740 tests passed. Copy each block character for character, including every comment line, blank line, and line of Markdown. Don't add argument checks, logging, or fast paths that the code doesn't show, and don't tidy code or reword docs.
 
 Each task's specification lists its files, says what changes and why, and then gives its code under "Code (copy exactly)". The summaries aren't code to write; the code section is. It has two kinds of blocks:
 
 - **New file `<path>`:** write the block as the whole file, with `\n` line breaks, one `\n` at the end, and no byte order mark.
-- **Edit k of m in `<path>`, replace: … with: …:** make a file's edits in the order given. Each "replace" block occurs exactly once in the file at the moment you make that edit, and no line before it is the block's first line, so search for it as an exact string. Blocks are shown with `\n` line breaks. The repository stores every text file with `\n` line breaks, but a `core.autocrlf=true` checkout gives them CRLF in the working tree, so match and write each block with the file's own line endings, and keep them; that includes `.github/workflows/ci.yml` (Task 5). None of the 33 files this sprint edits has a byte order mark. A block that holds Markdown fences is fenced with four backticks.
+- **Edit k of m in `<path>`, replace: … with: …:** make a file's edits in the order given. Each "replace" block occurs exactly once in the file at the moment you make that edit, and no line before it is the block's first line, so search for it as an exact string. Blocks are shown with `\n` line breaks. The repository stores every text file with `\n` line breaks, but a `core.autocrlf=true` checkout gives them CRLF in the working tree, so match and write each block with the file's own line endings, and keep them; that includes `.github/workflows/ci.yml` (Task 5). None of the 34 files this sprint edits has a byte order mark. A block that holds Markdown fences is fenced with four backticks.
 
-Tests are code too: write every test file and test edit exactly as given, in the order given. Don't drop an assertion because it looks redundant, and don't turn an exact comparison into `Contains` or `StartsWith`. Never normalize the product's output in a test; `CliHarness` already turns `\r\n` into `\n` in `Out` and `Error`. The only `ReplaceLineEndings("\n")` this sprint adds is in `VersionPlacesTests`, on repository files, whose line endings depend on the checkout.
+Tests are code too: write every test file and test edit exactly as given, in the order given. Don't drop an assertion because it looks redundant, and don't turn an exact comparison into `Contains` or `StartsWith`. Never normalize the product's output in a test; `CliHarness` already turns `\r\n` into `\n` in `Out` and `Error`. The only `ReplaceLineEndings("\n")` calls this sprint adds are in `VersionPlacesTests`, on repository files, and in `UpgradeDocsTests`, on a constant that spans two lines; the line endings of both depend on the checkout.
 
 Most of this sprint changes text that tests pin. A string in `src`, the tests that expect it, and the guide sample that shows it change in the same task, so every task builds and passes on its own. No task edits `.github/copilot-instructions.md`, `.github/agents/`, or `.github/plans/` beyond its own checkbox, and no task adds a package or a project item: new test files are picked up by the SDK's globs. No test opens a socket, starts a process, runs `git`, or reads a home directory.
 
@@ -39,6 +39,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 3: gh-ledger in Alerts, MCP, and Receipts (CopilotLedger.Cli, CopilotLedger.Mcp, CopilotLedger.Otlp, docs & tests). Breaker and budget alerts, the MCP server's instructions, `set_branch_budget`'s description, MCP's `WARNING:` line, the receipt's heading, and `export-pr`'s hint, which names the PR receipt action; and `ProductNameTests.PN1`, which keeps CopilotLedger out of `src` except as an identifier.
 - [x] Task 4: gh-ledger in the README and the Docs (docs & tests). The README describes gh-ledger as a local AI-spend ledger for GitHub Copilot and an independent open-source project, not a GitHub product; the guide, the reference, the configuration page, and the release steps name the product gh-ledger and the action "the PR receipt action"; and `PN2` checks them.
 - [x] Task 5: Version 0.5.0, Where `docs/releasing.md` Lists It (CopilotLedger.Cli, CI, docs & tests). The project version, the fallback, CI's smoke test, the tests and samples that show the version, and the tag example move to 0.5.0; `docs/releasing.md` lists every place; and `VersionPlacesTests.VR1` checks the places that no other test reads.
+- [ ] Task 6: The Upgrade Steps Copy the Data Directory First, and Every Version Mention Is Listed (docs & tests). Review fixes C1–C3 from the coordinator's review of PR #73: the guide's and the reference's upgrade steps copy the whole data directory after `gh ledger daemon stop` and before `gh extension upgrade ledger`, say that the format upgrade can't be undone, and put the reference's "Ledger format" before its steps (UD1, UD2); VR1 accepts a prerelease version (VR2), and EP10 no longer depends on the version's length; and step 1 of `docs/releasing.md` lists every mention of the version to leave, which the new VR3 checks.
 
 ## Starting point
 
@@ -90,12 +91,19 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - **U1's overlay.** With `main`'s build and an overlay whose `githubAiCredits.models[0].id` is `claude-haiku-4-5-20251001`: `daemon start` prints `gh-ledger daemon did not start; see <path of daemon.log>.` and exits 1, and `daemon.log` gets `Invalid rates overlay: <path>: githubAiCredits.models[0].id: duplicate model identity in the merged rates: claude-haiku-4-5-20251001 (built-in model claude-haiku-4.5)`; `rates validate`, `import`, and `audit` print that message and exit 1; `status` shows it on its `Rates:` line and exits 0; `branch` works. The built-in GitHub models of 0.4.1 have no aliases; `main`'s have 11 vendor and dated ids on ten models (`claude-opus-5-5`, `claude-sonnet-5-5`, `gpt-5.4-nano-2026-03-17`, `claude-haiku-4-5`, `claude-haiku-4-5-20251001`, `claude-haiku-5-5`, `claude-sonnet-4-20250514`, `claude-sonnet-4-6`, `claude-opus-4-8`, `claude-fable-5-1`, and `claude-fable-5-2`), any of which an overlay may list.
 - **The backfill's write lock.** `rates backfill-api-equivalent` on a format 6 ledger with 200,000 spans without a result priced them all in 2.15 s, the process start included: well inside the daemon's 5-second busy timeout.
 
+### Copying the data directory (checked 2026-11-24, for Task 6)
+
+- **Where the data is.** The data directory is `COPILOT_LEDGER_HOME` when it's set and not blank, and `~/.copilot-ledger` otherwise (`CliContext.cs:30` and `:37–44`, `LedgerPaths.cs`). It holds the ledger, `ledger.db`, with the overlay, the downloaded rates, and `install.json`. The ledger runs in WAL mode, so `ledger.db-wal` and `ledger.db-shm` sit beside it while it's open and after an unclean exit (`docs/configuration.md`, "Where gh-ledger keeps its files"; `LedgerSnapshot.cs:34–46`).
+- **The copy commands.** Run in scratch on 2026-11-24 with a fake home directory whose `.copilot-ledger` held `ledger.db`, `ledger.db-wal`, `ledger.db-shm`, `rates.json`, and a hidden file: Task 6's two PowerShell lines, in PowerShell 7 and in Windows PowerShell 5.1, each created `<home>\copilot-ledger-backup-<yyyyMMdd-HHmmss>` holding all five files, and with `COPILOT_LEDGER_HOME` set to another directory, with a trailing `\`, they copied that directory instead. Task 6's shell line did the same in Git for Windows' bash, with and without `COPILOT_LEDGER_HOME`. `Copy-Item -Recurse` and `cp -R` make the destination a copy of the source because the timestamped destination doesn't exist yet. The shell line wasn't run on macOS (A3).
+- **Going back.** `gh extension install --help`, gh 2.103.3: "The `--pin` flag may be used to specify a tag or commit for binary and script extensions respectively, the latest version is used otherwise." Release v0.4.1 has the six binaries that a pinned install downloads.
+
 ### Assumptions (not verified)
 
 | # | Assumption | If it's wrong |
 |---|---|---|
 | A1 | Copilot CLI 1.0.115 exports the `gen_ai` attributes that 1.0.114 does, as its notes suggest | Its live spans could be priced differently; the coordinator's live check after the release would show it |
 | A2 | A fork of a GitHub Copilot app session doesn't copy the parent's usage records, with their IDs, into the fork's own log (Sprint 8's A11; S8-13) | Importing such a fork could record a call again when the parent's live row of it has no canonical ID: a row that 0.4.1 recorded, or a BYOK span |
+| A3 | On macOS, zsh and BSD `cp` run Task 6's shell line as Git for Windows' bash and GNU `cp` did: `${VAR:-default}` is POSIX, and `cp -R` to a destination that doesn't exist makes it a copy of the source | The copy would fail, or land in another folder, and the user would see it before upgrading |
 
 ## Release triage
 
@@ -281,6 +289,16 @@ After Task 5 and the plan commit, these 31 lines outside `.github/plans/` say Co
 | `tests/CopilotLedger.Tests/TestSupport/ManualTimeProvider.cs`, `tests/CopilotLedger.Tests/Cli/ExportTimelineTests.cs` | 6, and 140 | `CopilotLedger-Test-0500`, the ID of a test's custom time zone, never shown to users |
 | `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs` | 341 | A code comment about the guide's example ("before CopilotLedger was installed") |
 | `tests/CopilotLedger.Tests/Docs/ProductNameTests.cs` | 5, 6, 11, 14, 15, 16, 24, 27, 36, 37, 60, 61 | The guard itself: what it allows, and what it looks for |
+
+## Review fixes (Task 6)
+
+The coordinator's independent review of PR #73 (`5f4f4c5..9fecd4f`), on 2026-11-24, found the build clean, all 1,735 tests passing, the identifiers intact (`uninstall` still finds 0.4.1's sign-in items and profile block, the Linux `.desktop` file changed only `Name=` and `Comment=`, and the receipt's marker, JSON, and `schemaVersion` are unchanged), and every remaining CopilotLedger an identifier. It asked for three fixes, C1–C3, as one task before it merges the pull request. Task 6 makes them on top of Task 5 and of `9fecd4f`, the commit that recorded the architect's review; Tasks 1–5 don't change. Each new test fails without its fix, as "Tests" under Task 6 says. The architect generated Task 6's blocks from the files at `9fecd4f`, and `apply-plan.py` applied them to a fresh `git archive 9fecd4f` with Windows line endings: 0 warnings, and 1740 tests passed.
+
+| Finding | Problem | Fix | Task |
+|---|---|---|---|
+| C1 (medium) | The upgrade steps never copy the ledger before the one-way format upgrade. The guide's "Upgrade or uninstall" has no copy, and `docs/cli.md` says to copy `ledger.db` only in "Ledger format", after its commands, so someone who runs the commands as they read them upgrades the ledger with no copy, and 0.4.1 can't open it after that | Both documents copy the whole data directory, `~/.copilot-ledger` or the one that `COPILOT_LEDGER_HOME` names, with any `ledger.db-wal` and `ledger.db-shm` files, to a new folder in the home directory, after `gh ledger daemon stop` and before `gh extension upgrade ledger`, in PowerShell and in a macOS or Linux shell, and say that the format upgrade can't be undone. `docs/cli.md`'s "Ledger format" comes before its steps and says how to go back with the copy. UD1 and UD2 | 6 |
+| C2 (low) | VR1 required `<Version>` to match `^\d+\.\d+\.\d+$`, but `docs/releasing.md` allows prerelease tags such as `v0.5.0-rc.1`, and the Release workflow requires the tag to be `v` plus `<Version>`, so a prerelease failed VR1 with every place updated. The architect found a second obstacle when it ran the suite with a prerelease version: EP10 pinned the receipt's size, 68,090 bytes, and the receipt shows the version twice, so a version of another length failed EP10 | VR1 allows a suffix, `^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`, and VR2 runs VR1's checks on a prerelease of the version. EP10 computes the receipt's size from the version's length | 6 |
+| C3 (low) | Step 1 of `docs/releasing.md` doesn't say to leave Task 1's mentions of 0.5.0, in `docs/cli.md`, `docs/guide.md`, and the comment on `GuideSamplesTests.HaikuOverlay`, so the next bump finds three matches that step 1 neither changes nor leaves. The architect found a fourth: the prerelease tag `v0.5.0-rc.1` in the example after the table of assets | Step 1 lists all four. VR3 fails when a line of the README, the docs, the workflows, `src`, or `tests` names the version and is neither a place to change nor a mention to leave that `VersionPlacesTests` lists, and when step 1's list of the versions to leave doesn't name each mention to leave | 6 |
 
 ## Task 1 specification: The Upgrade Steps Check the Rates Overlay
 
@@ -2311,9 +2329,478 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 6 specification: The Upgrade Steps Copy the Data Directory First, and Every Version Mention Is Listed
+
+Review fixes C1–C3 (see "Review fixes (Task 6)"). gh-ledger 0.5.0 upgrades the ledger to format 6 the first time anything opens it, and 0.4.1 can't open it after that, so the upgrade steps must copy the ledger before `gh extension upgrade ledger`, not mention a copy afterward. And the list of where the version is written, which Task 5 completed, misses Task 1's mentions and rejects a prerelease.
+
+### Files
+
+| File | Change |
+|---|---|
+| `docs/cli.md` | "Upgrading or removing the extension": "Ledger format" comes before the steps, says that the format upgrade can't be undone, and says how to go back; the steps copy the data directory between `gh ledger daemon stop` and `gh extension upgrade ledger` (C1) |
+| `docs/guide.md` | "Upgrade or uninstall": the same copy, after the `daemon-stop` sample and before `gh extension upgrade ledger` (C1) |
+| `docs/releasing.md` | Step 1 names VR3 and lists every mention of the version to leave (C3) |
+| `tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs` | VR1's checks move to `AssertTheListedPlacesShow`, whose pattern allows a prerelease suffix (C2); new VR2 (C2) and VR3 (C3) |
+| `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs` | EP10 computes the oversized receipt's size from the version's length (C2) |
+| `tests/CopilotLedger.Tests/Docs/UpgradeDocsTests.cs` | New: UD1 and UD2 (C1) |
+
+### What changes
+
+1. **C1, the copy.** After the Copilot sessions that run the MCP server are closed and the daemon has stopped, and before `gh extension upgrade ledger`, both documents copy the whole data directory to a new folder in the home directory, `copilot-ledger-backup-<yyyyMMdd-HHmmss>`, outside the data directory. The two PowerShell lines and the macOS and Linux line are the same in both documents, and, like gh-ledger, they use `COPILOT_LEDGER_HOME` when it's set. Copying the directory, not only `ledger.db`, keeps a `ledger.db-wal` file, which can hold the latest changes, with the ledger, and the overlay and `install.json` that go with it. Both documents say the format upgrade can't be undone. In `docs/cli.md`, "Ledger format" moves above the steps and says how to go back: stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin <tag>`, put the copy in place of the data directory, and start the daemon. The guide points there. The new commands are plain blocks, not guide samples, so `GuideSamplesTests` doesn't change, and they name no version.
+2. **C2, prereleases.** VR1's checks move to `AssertTheListedPlacesShow(version, text)`, whose pattern is `^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`. VR2 runs them on `<Version>-rc.1`, reading each file with the version replaced by that prerelease, as a release of it would write them. EP10's oversized receipt shows the version twice, in its footer and in its JSON's `generator`, so its size, 68,090 bytes with a version of five characters, is `68_080 + 2 * GhLedgerCli.Version.Length`; a pinned 68090 failed with any version of another length, such as a prerelease.
+3. **C3, the mentions to leave.** Step 1's list of versions to leave adds the prerelease tag in the example after the table of assets; the versions that the upgrade steps' rates overlay example names, in `docs/cli.md` and `docs/guide.md`, and in the comment on `GuideSamplesTests.HaikuOverlay` (all from Task 1); and the mentions to leave that `VersionPlacesTests` lists. "Leave the earlier versions" becomes "Leave the versions", because an example tag isn't an earlier version.
+4. **VR3.** Every line of README.md, `docs/*.md`, `.github/workflows/*.yml`, `src`, and `tests` (without `bin`, `obj`, and `TestResults` folders, and without `VersionPlacesTests.cs` itself, which writes the mentions out) that names `GhLedgerCli.Version` as a whole version, not as part of a longer one, holds the text of one of `Places` for its file. `Places` has the 14 texts of the places to change, with `{version}` for the version, and the 4 mentions to leave, with the version they name written out, so that changing one at the next bump fails VR3. Step 1's list of versions to leave must also name each mention to leave, in the words that `Places` gives. At 0.5.0, 19 lines name the version: 15 places to change and the 4 mentions to leave.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+````markdown
+**Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server. To upgrade:
+
+```shell
+gh ledger daemon stop
+gh extension upgrade ledger
+gh ledger daemon start
+```
+
+If `gh ledger daemon start` then says that the daemon did not start, run `gh ledger rates validate`. A new release can build in a model name that your rates overlay also lists, such as `claude-haiku-4-5-20251001`, which gh-ledger 0.5.0 builds in and earlier versions priced only through an overlay. Such an overlay is invalid, and the daemon doesn't start until you remove the entry that the message names; see [Which model prices a request](configuration.md#which-model-prices-a-request).
+
+**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 6, for `gh ledger import`, the first time its daemon or any command opens it. To keep the option of going back to an earlier version, copy `ledger.db` while the daemon is stopped, before you upgrade.
+````
+
+with:
+
+````markdown
+**Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server.
+
+**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 6, for `gh ledger import`, the first time its daemon or any command opens it. That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
+
+To upgrade, close the Copilot sessions and apps that use the MCP server, and stop the daemon:
+
+```shell
+gh ledger daemon stop
+```
+
+Copy your data directory to a new folder outside it: all of it, not only `ledger.db`, so that a `ledger.db-wal` file, which can hold the latest changes, comes with it. The data directory is `~/.copilot-ledger` (`%USERPROFILE%\.copilot-ledger` on Windows), or the directory that `COPILOT_LEDGER_HOME` names. In PowerShell:
+
+```powershell
+$data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
+Copy-Item -LiteralPath $data -Destination "$HOME\copilot-ledger-backup-$(Get-Date -Format yyyyMMdd-HHmmss)" -Recurse
+```
+
+On macOS and Linux:
+
+```shell
+cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
+```
+
+Then upgrade the extension, and start the daemon:
+
+```shell
+gh extension upgrade ledger
+gh ledger daemon start
+```
+
+If `gh ledger daemon start` then says that the daemon did not start, run `gh ledger rates validate`. A new release can build in a model name that your rates overlay also lists, such as `claude-haiku-4-5-20251001`, which gh-ledger 0.5.0 builds in and earlier versions priced only through an overlay. Such an overlay is invalid, and the daemon doesn't start until you remove the entry that the message names; see [Which model prices a request](configuration.md#which-model-prices-a-request).
+````
+
+Edit 1 of 1 in `docs/guide.md`, replace:
+
+````markdown
+<!-- sample: daemon-stop -->
+```shell
+gh ledger daemon stop
+```
+
+```text
+gh-ledger daemon stopped.
+```
+<!-- /sample -->
+
+```shell
+gh extension upgrade ledger
+```
+````
+
+with:
+
+````markdown
+<!-- sample: daemon-stop -->
+```shell
+gh ledger daemon stop
+```
+
+```text
+gh-ledger daemon stopped.
+```
+<!-- /sample -->
+
+A new release can upgrade the ledger's format the first time it opens the ledger, and that can't be undone: an earlier release can't open the ledger afterward. So before you upgrade, copy your data directory to a new folder outside it: all of it, not only `ledger.db`, so that a `ledger.db-wal` file, which can hold the latest changes, comes with it. The data directory is `C:\Users\you\.copilot-ledger` here, or `~/.copilot-ledger` on macOS and Linux, unless `COPILOT_LEDGER_HOME` names another one. In PowerShell:
+
+```powershell
+$data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
+Copy-Item -LiteralPath $data -Destination "$HOME\copilot-ledger-backup-$(Get-Date -Format yyyyMMdd-HHmmss)" -Recurse
+```
+
+On macOS and Linux:
+
+```shell
+cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
+```
+
+Keep the copy until you're sure you'll stay on the new release; [Upgrading or removing the extension](cli.md#install-and-uninstall) says how to go back with it. Upgrade the extension:
+
+```shell
+gh extension upgrade ledger
+```
+````
+
+Edit 1 of 1 in `docs/releasing.md`, replace:
+
+```markdown
+   `VersionPlacesTests.VR1` fails until the comment, the fallback, the smoke test, the manifest sample, and the tag show the `<Version>`. Everything else reads the version as it runs: `--version`, `status`, `daemon.json` and the daemon's log, receipts, exports, the MCP server, and the `User-Agent` that `rates update` and `audit --local-llm` send. Leave the earlier versions that the docs and tests name on purpose: "gh-ledger 0.4.1 and earlier" in `docs/configuration.md` and in the table of assets below, the comments in `ModelResolutionTests` and `RatesUpdateTests`, and the earlier daemon's `daemon.json` in `ImportCommandTests`.
+```
+
+with:
+
+```markdown
+   `VersionPlacesTests.VR1` fails until the comment, the fallback, the smoke test, the manifest sample, and the tag show the `<Version>`, and `VersionPlacesTests.VR3` fails while a line names it that isn't one of these places or a mention to leave that `VersionPlacesTests` lists. Everything else reads the version as it runs: `--version`, `status`, `daemon.json` and the daemon's log, receipts, exports, the MCP server, and the `User-Agent` that `rates update` and `audit --local-llm` send. Leave the versions that the docs and tests name on purpose: "gh-ledger 0.4.1 and earlier" in `docs/configuration.md` and in the table of assets below; the prerelease tag in the example after that table; the versions that the upgrade steps' rates overlay example names, in `docs/cli.md` and `docs/guide.md`, and in the comment on `GuideSamplesTests.HaikuOverlay`; the comments in `ModelResolutionTests` and `RatesUpdateTests`; the earlier daemon's `daemon.json` in `ImportCommandTests`; and the mentions to leave that `VersionPlacesTests` lists.
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs`, replace:
+
+```csharp
+using CopilotLedger.Cli;
+
+namespace CopilotLedger.Tests.Docs;
+
+// Step 1 of docs/releasing.md lists every place that writes the version. The places that no other test reads must show the
+// project's <Version> too, so a release that misses one fails here.
+public sealed class VersionPlacesTests
+{
+    [Fact]
+    public void VR1_TheListedPlacesShowTheProjectVersion()
+    {
+        string version = GhLedgerCli.Version;
+        string cli = Text("src", "CopilotLedger.Cli", "GhLedgerCli.cs");
+
+        Assert.Matches(@"^\d+\.\d+\.\d+$", version);
+        Assert.Contains($"    // AssemblyInformationalVersionAttribute: \"{version}\"\n", cli);
+        Assert.Contains($"        ?? \"{version}\";\n", cli);
+        Assert.Contains($"--version | tr -d '\\r')\" = \"{version}\"\n", Text(".github", "workflows", "ci.yml"));
+        Assert.Contains($"  \"toolVersion\": \"{version}\",\n", Text("docs", "cli.md"));
+        Assert.Contains($"   git tag v{version}\n   git push origin v{version}\n", Text("docs", "releasing.md"));
+    }
+```
+
+with:
+
+```csharp
+using System.Text.RegularExpressions;
+using CopilotLedger.Cli;
+
+namespace CopilotLedger.Tests.Docs;
+
+// Step 1 of docs/releasing.md lists every place that writes the version. The places that no other test reads must show the
+// project's <Version> too, so a release that misses one fails here, and every other line that names the version must be a
+// mention that step 1 says to leave.
+public sealed class VersionPlacesTests
+{
+    // The lines that may name the version: each one's file, and text that the line holds. First the places to change, with
+    // {version} for the version, which VR1 and the tests that step 1 names check. Then the mentions to leave, with the
+    // version they name written out, so that changing one fails VR3, and the words that step 1's list of them uses.
+    private static readonly (string File, string Text, string? Step1)[] Places =
+    [
+        (".github/workflows/ci.yml", "--version | tr -d '\\r')\" = \"{version}\"", null),
+        ("docs/cli.md", "  \"toolVersion\": \"{version}\",", null),
+        ("docs/guide.md", "gh-ledger {version} (GitHub CLI extension)", null),
+        ("docs/guide.md", " UTC by gh-ledger {version}", null),
+        ("docs/guide.md", "  \"generator\": \"gh-ledger {version}\",", null),
+        ("docs/releasing.md", "   git tag v{version}", null),
+        ("docs/releasing.md", "   git push origin v{version}", null),
+        ("src/CopilotLedger.Cli/CopilotLedger.Cli.csproj", "<Version>{version}</Version>", null),
+        ("src/CopilotLedger.Cli/GhLedgerCli.cs", "// AssemblyInformationalVersionAttribute: \"{version}\"", null),
+        ("src/CopilotLedger.Cli/GhLedgerCli.cs", "?? \"{version}\";", null),
+        ("tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs", "Assert.Equal(\"{version}\", root.GetProperty(\"version\").GetString());", null),
+        ("tests/CopilotLedger.Tests/Cli/ExportBundleTests.cs", "(1, \"gh-ledger\", \"{version}\")", null),
+        ("tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs", "\"2026-11-20 22:00 by gh-ledger {version}\"", null),
+        ("tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs", "gh-ledger {version}", null),
+        ("docs/cli.md", "which gh-ledger 0.5.0 builds in", "`docs/cli.md`"),
+        ("docs/guide.md", "and gh-ledger 0.5.0 builds it in", "`docs/guide.md`"),
+        ("docs/releasing.md", "such as `v0.5.0-rc.1`", "the prerelease tag"),
+        ("tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs", "gh-ledger 0.5.0 builds the name in", "`GuideSamplesTests.HaikuOverlay`"),
+    ];
+
+    [Fact]
+    public void VR1_TheListedPlacesShowTheProjectVersion() => AssertTheListedPlacesShow(GhLedgerCli.Version, Text);
+
+    // docs/releasing.md allows a prerelease, whose <Version> and tag end in a suffix such as -rc.1. When every place shows a
+    // prerelease of this version, VR1's checks pass too.
+    [Fact]
+    public void VR2_APrereleaseVersionPassesTheSameChecks()
+    {
+        string prerelease = GhLedgerCli.Version + "-rc.1";
+
+        AssertTheListedPlacesShow(prerelease, parts => Text(parts).Replace(GhLedgerCli.Version, prerelease, StringComparison.Ordinal));
+    }
+
+    // Every line of the README, the docs, the workflows, src, and tests that names the version is one of Places, so a new
+    // mention fails here until step 1 of docs/releasing.md and Places list it, and step 1's list of the versions to leave
+    // names each mention to leave. This file writes those mentions out, so VR3 skips it.
+    [Fact]
+    public void VR3_EveryLineThatNamesTheVersionIsListed()
+    {
+        string version = GhLedgerCli.Version;
+        Regex names = new($@"(?<![0-9.]){Regex.Escape(version)}(?![0-9]|\.[0-9])");
+        string root = RepositoryFile();
+        string[] files =
+        [
+            RepositoryFile("README.md"),
+            .. Directory.GetFiles(RepositoryFile("docs"), "*.md"),
+            .. Directory.GetFiles(RepositoryFile(".github", "workflows"), "*.yml"),
+            .. FilesUnder(RepositoryFile("src")),
+            .. FilesUnder(RepositoryFile("tests")),
+        ];
+        string[] unlisted =
+        [
+            .. files.Select(file => Path.GetRelativePath(root, file).Replace('\\', '/'))
+                .Where(file => file != "tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs")
+                .Order(StringComparer.Ordinal)
+                .SelectMany(file => File.ReadAllLines(Path.Combine(root, file))
+                    .Select((line, index) => (Text: line, Number: index + 1))
+                    .Where(line => names.IsMatch(line.Text) && !Places.Any(place => place.File == file
+                        && line.Text.Contains(place.Text.Replace("{version}", version, StringComparison.Ordinal), StringComparison.Ordinal)))
+                    .Select(line => $"{file}:{line.Number}")),
+        ];
+        string releasing = Text("docs", "releasing.md");
+        int leave = releasing.IndexOf("that the docs and tests name on purpose:", StringComparison.Ordinal);
+
+        Assert.Empty(unlisted);
+        Assert.True(leave >= 0, "docs/releasing.md doesn't list the versions to leave.");
+        Assert.All(
+            Places.Where(place => place.Step1 is not null),
+            place => Assert.Contains(place.Step1!, releasing[leave..releasing.IndexOf('\n', leave)], StringComparison.Ordinal));
+    }
+
+    // VR1's checks of version: it's a version, with or without a prerelease suffix, and the places that no other test reads
+    // show it. text reads a repository file, given its path's parts.
+    private static void AssertTheListedPlacesShow(string version, Func<string[], string> text)
+    {
+        string cli = text(["src", "CopilotLedger.Cli", "GhLedgerCli.cs"]);
+
+        Assert.Matches(@"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", version);
+        Assert.Contains($"    // AssemblyInformationalVersionAttribute: \"{version}\"\n", cli);
+        Assert.Contains($"        ?? \"{version}\";\n", cli);
+        Assert.Contains($"--version | tr -d '\\r')\" = \"{version}\"\n", text([".github", "workflows", "ci.yml"]));
+        Assert.Contains($"  \"toolVersion\": \"{version}\",\n", text(["docs", "cli.md"]));
+        Assert.Contains($"   git tag v{version}\n   git push origin v{version}\n", text(["docs", "releasing.md"]));
+    }
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs`, replace:
+
+```csharp
+    // A repository file's text with \n line breaks, whatever the checkout's.
+    private static string Text(params string[] parts)
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CopilotLedger.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine([directory.FullName, .. parts])).ReplaceLineEndings("\n");
+    }
+```
+
+with:
+
+```csharp
+    // A repository file's text with \n line breaks, whatever the checkout's.
+    private static string Text(params string[] parts) =>
+        File.ReadAllText(RepositoryFile(parts)).ReplaceLineEndings("\n");
+
+    private static string RepositoryFile(params string[] parts)
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CopilotLedger.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        return Path.Combine([directory.FullName, .. parts]);
+    }
+
+    // The files under folder, recursively, skipping bin, obj, and TestResults folders.
+    private static IEnumerable<string> FilesUnder(string folder) =>
+        Directory.GetFiles(folder).Concat(Directory.GetDirectories(folder)
+            .Where(directory => Path.GetFileName(directory) is not ("bin" or "obj" or "TestResults"))
+            .SelectMany(FilesUnder));
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs`, replace:
+
+```csharp
+        const string Error =
+            "The receipt for feature/ledger is 68090 bytes; a receipt can be at most 65536 bytes.\n";
+
+        CliRun file = await harness.RunInAsync(repo, "export-pr");
+        CliRun stdout = await harness.RunInAsync(repo, "export-pr", "--stdout");
+        CliRun json = await harness.RunInAsync(repo, "export-pr", "--json");
+
+        Assert.Equal(1, file.ExitCode);
+        Assert.Equal(string.Empty, file.Out);
+        Assert.Equal(Error, file.Error);
+        Assert.Equal(1, stdout.ExitCode);
+        Assert.Equal(string.Empty, stdout.Out);
+        Assert.Equal(Error, stdout.Error);
+```
+
+with:
+
+```csharp
+        // The receipt shows the version twice, so its size depends on the version's length: 68,090 bytes for a version of
+        // five characters.
+        string error =
+            $"The receipt for feature/ledger is {68_080 + (2 * GhLedgerCli.Version.Length)} bytes; a receipt can be at most 65536 bytes.\n";
+
+        CliRun file = await harness.RunInAsync(repo, "export-pr");
+        CliRun stdout = await harness.RunInAsync(repo, "export-pr", "--stdout");
+        CliRun json = await harness.RunInAsync(repo, "export-pr", "--json");
+
+        Assert.Equal(1, file.ExitCode);
+        Assert.Equal(string.Empty, file.Out);
+        Assert.Equal(error, file.Error);
+        Assert.Equal(1, stdout.ExitCode);
+        Assert.Equal(string.Empty, stdout.Out);
+        Assert.Equal(error, stdout.Error);
+```
+
+New file `tests/CopilotLedger.Tests/Docs/UpgradeDocsTests.cs`:
+
+```csharp
+namespace CopilotLedger.Tests.Docs;
+
+// The upgrade steps in docs/guide.md and docs/cli.md copy the data directory after the daemon stops and before gh upgrades
+// the extension: a new release can upgrade the ledger's format the first time it opens the ledger, and an earlier release
+// can't open it after that.
+public sealed class UpgradeDocsTests
+{
+    // The copy, in PowerShell and in a macOS or Linux shell: the whole data directory, so that a ledger.db-wal file comes
+    // with the ledger, to a new folder in the home directory, outside the data directory.
+    private static readonly string PowerShellCopy = """
+        $data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
+        Copy-Item -LiteralPath $data -Destination "$HOME\copilot-ledger-backup-$(Get-Date -Format yyyyMMdd-HHmmss)" -Recurse
+        """.ReplaceLineEndings("\n");
+
+    private const string ShellCopy = """
+        cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
+        """;
+
+    // Each document's upgrade steps: the line they start with, and the line after them.
+    public static TheoryData<string, string, string> UpgradeSteps => new()
+    {
+        { "guide.md", "## Upgrade or uninstall", "To remove gh-ledger, undo `install`:" },
+        { "cli.md", "**Upgrading or removing the extension.**", "## The daemon" },
+    };
+
+    [Theory]
+    [MemberData(nameof(UpgradeSteps))]
+    public void UD1_TheUpgradeStepsCopyTheDataDirectoryBeforeTheUpgrade(string file, string start, string end)
+    {
+        string[] lines = Steps(file, start, end);
+        (int Line, string Language, string Text)[] blocks = Blocks(lines);
+        int[] order =
+        [
+            Array.FindIndex(blocks, block => block.Language == "shell" && block.Text.StartsWith("gh ledger daemon stop", StringComparison.Ordinal)),
+            Array.FindIndex(blocks, block => block.Language == "powershell" && block.Text == PowerShellCopy),
+            Array.FindIndex(blocks, block => block.Language == "shell" && block.Text == ShellCopy),
+            Array.FindIndex(blocks, block => block.Language == "shell" && block.Text.StartsWith("gh extension upgrade ledger", StringComparison.Ordinal)),
+        ];
+
+        Assert.DoesNotContain(-1, order);
+        Assert.Equal(order.Order(), order);
+        Assert.Contains("can't be undone", string.Join('\n', lines[..blocks[order[1]].Line]), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UD2_TheReferenceExplainsTheLedgerFormatBeforeItsUpgradeSteps()
+    {
+        string[] lines = Steps("cli.md", "**Upgrading or removing the extension.**", "## The daemon");
+        int format = Array.FindIndex(lines, line => line.StartsWith("**Ledger format.**", StringComparison.Ordinal));
+        int firstBlock = Array.FindIndex(lines, line => line.StartsWith("```", StringComparison.Ordinal));
+
+        Assert.InRange(format, 0, firstBlock);
+    }
+
+    // The lines of docs/<file> from the first line that starts with start up to, not including, the next line that starts
+    // with end.
+    private static string[] Steps(string file, string start, string end)
+    {
+        string[] lines = File.ReadAllLines(RepositoryFile("docs", file));
+        int first = Array.FindIndex(lines, line => line.StartsWith(start, StringComparison.Ordinal));
+        int last = first < 0 ? -1 : Array.FindIndex(lines, first + 1, line => line.StartsWith(end, StringComparison.Ordinal));
+
+        Assert.True(first >= 0 && last > first, $"docs/{file} has no {start} followed by {end}.");
+        return lines[first..last];
+    }
+
+    // The fenced blocks in lines, in order: each one's opening line, its language, and its lines joined with \n.
+    private static (int Line, string Language, string Text)[] Blocks(string[] lines)
+    {
+        List<(int Line, string Language, string Text)> blocks = [];
+        for (int index = 0; index < lines.Length; index++)
+        {
+            if (lines[index].StartsWith("```", StringComparison.Ordinal))
+            {
+                int close = Array.IndexOf(lines, "```", index + 1);
+                Assert.True(close > index, $"The block at line {index} has no end.");
+                blocks.Add((index, lines[index][3..], string.Join('\n', lines[(index + 1)..close])));
+                index = close;
+            }
+        }
+
+        return [.. blocks];
+    }
+
+    private static string RepositoryFile(params string[] parts)
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CopilotLedger.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        return Path.Combine([directory.FullName, .. parts]);
+    }
+}
+```
+
+### Tests
+
+New: UD1 (two cases, `guide.md` and `cli.md`), UD2, VR2, and VR3. Changed: VR1, which calls `AssertTheListedPlacesShow`, and EP10. Measured in the scratch tree, each new test fails without its fix: with the docs of `9fecd4f`, both UD1 cases fail (no copy) and UD2 fails ("Ledger format" after the steps), and VR3 fails because step 1 doesn't name the four mentions to leave; with VR1's old pattern, VR2 fails; and without the `docs/cli.md` mention in `Places`, VR3 fails on that line. Two bumps were simulated on Task 6's tree, changing only the places that step 1 lists: to 0.5.1, all 1740 tests pass with no change to `VersionPlacesTests`, and changing the `docs/cli.md` mention to leave as well fails VR3 on that line; to the prerelease 0.5.1-rc.1, all 1740 tests pass, and with EP10's old constant, EP10 fails.
+
+### Acceptance criteria
+
+- In the guide's "Upgrade or uninstall" and in `docs/cli.md`'s "Upgrading or removing the extension", the data directory is copied after `gh ledger daemon stop` and before `gh extension upgrade ledger`, with the same PowerShell and macOS and Linux commands, and the text before the copy says the format upgrade can't be undone. `docs/cli.md`'s "Ledger format" comes before its first command.
+- A prerelease `<Version>`, such as `0.5.0-rc.1`, passes VR1's checks when every place shows it, and EP10 passes with a version of any length.
+- Every line outside `.github/plans/` that names 0.5.0 is a place that step 1 of `docs/releasing.md` says to change or one that it says to leave.
+- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes 1740 tests, 0 failed, 0 skipped.
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
-Every test is hermetic: temporary directories, `ManualTimeProvider`, `FakeCliPlatform`, `CliHarness`, `McpTestHarness`, and `GuideWorld` only. No test opens a socket, starts a process, runs `git`, or reads `~/.copilot`, `~/.codex`, or `~/.copilot-ledger`. PN1, PN2, and VR1 read the repository's own files, as `ExportPrivacyTests.EP6` and `AuditDocsTests` do, and money is untouched.
+Every test is hermetic: temporary directories, `ManualTimeProvider`, `FakeCliPlatform`, `CliHarness`, `McpTestHarness`, and `GuideWorld` only. No test opens a socket, starts a process, runs `git`, or reads `~/.copilot`, `~/.codex`, or `~/.copilot-ledger`. PN1, PN2, VR1–VR3, UD1, and UD2 read the repository's own files, as `ExportPrivacyTests.EP6` and `AuditDocsTests` do, and money is untouched.
 
 | Task | New tests | Changed tests | Total after |
 |---|---|---|---:|
@@ -2323,13 +2810,14 @@ Every test is hermetic: temporary directories, `ManualTimeProvider`, `FakeCliPla
 | 3 | PN1 | BR4, AD1–AD3, BM1, BM4, BM11, EP1–EP3, EP5, EP10, AM3, MC1, MC3, MC14, GS2 (`export-pr`), GS5, GS6, GS7 | 1,733 |
 | 4 | PN2 | — | 1,734 |
 | 5 | VR1 | DM1, RP1, RP10, RP12, RP13, EC5, EB2, GS2 (`status-first`, `status`), GS6 | 1,735 |
+| 6 | UD1 (`guide.md`, `cli.md`), UD2, VR2, VR3 | VR1, EP10 | 1,740 |
 
 Exact values used across tasks:
 
 | Value | What | Where |
 |---|---|---|
 | `claude-haiku-4-5-20251001` | The name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5, an alias of the built-in `claude-haiku-4.5` since Sprint 7 Task 12 | Task 1: GS8, the guide, `docs/cli.md` |
-| `68090` | EP10's oversized receipt in bytes, 4 fewer with `gh-ledger` in its heading | Task 3 |
+| `68090` | EP10's oversized receipt in bytes, 4 fewer with `gh-ledger` in its heading; Task 6 computes it, as 68,080 plus twice the version's length | Tasks 3 and 6 |
 | `0.5.0` | The version | Task 5 |
 
 ## Final step: the pull request (orchestrator, not a builder task)
@@ -2346,13 +2834,18 @@ After Task 5, the orchestrator:
 4. Waits for CI on `ubuntu-latest` and `windows-latest`, whose smoke test now expects `--version` to print `0.5.0`. If a job fails only with the dry-run race that "How to use this plan" describes, it reruns the job.
 5. Asks `ledger-architect` to review the branch.
 
+The orchestrator did steps 1–5 and opened PR #73, and the architect's review, recorded in `9fecd4f`, was clean. The coordinator's review of the pull request then added Task 6 ("Review fixes (Task 6)"). After Task 6, the orchestrator:
+
+6. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1740 passed, 0 failed, 0 skipped), and checks that Task 6 changes only the files it lists.
+7. Pushes Task 6 to the same pull request and updates its body. `## Changes` adds `9fecd4f`, the plan commit that added Task 6, and Task 6, with C1–C3 and how it fixes each. `## Verification` adds 1740 tests after Task 6, CI, and Task 6's byte check. `## Risks` says, under no downgrade, that the upgrade steps now copy the data directory first, and that going back to 0.4.1 means putting that copy back. Then it waits for CI and asks `ledger-architect` to review Task 6.
+
 Nobody in this sprint creates a tag or a release or runs the Release workflow. After the pull request merges, the coordinator runs issue #72's remaining checks: the receipt end to end, through a draft smoke pull request and swigerb/copilot-ledger-action; a manual Release workflow run on `main` (the dry run); the tag `v0.5.0`; and the assets, the checksums, `rates.v2.json`, the derived `rates.json`, and `rates update` on 0.4.1 and 0.5.0. When the sprint closes, `ledger-architect` archives this plan with its amendments.
 
 ## Deferred to later sprints
 
 None of these is a release blocker; "Release triage" gives each one's reason.
 
-- **Upgrades:** a `gh ledger upgrade` that stops and restarts what holds the binary (from Sprint 5); a later migration that repeats migration 4's state updates and migration 6's reconciliation for rows that an old daemon wrote after the upgrade (S6-10.2, S8-10); and backup advice in `docs/cli.md` "Ledger format" that also names `ledger.db-wal`, which holds the latest writes while a Copilot session's MCP server keeps the ledger open, with a pointer to it from the guide's "Upgrade or uninstall", which doesn't mention the one-way format (for 0.5.0, the release notes say it).
+- **Upgrades:** a `gh ledger upgrade` that stops and restarts what holds the binary (from Sprint 5), and could make the copy of the data directory that the upgrade steps make by hand since Task 6; and a later migration that repeats migration 4's state updates and migration 6's reconciliation for rows that an old daemon wrote after the upgrade (S6-10.2, S8-10).
 - **Rates and pricing:** re-pricing unpriced rows (S7-4); MAI list prices and GPT-5.6 Sol's price after 2026-11-30 (S7-5); re-billing rows recorded as `unknown_model` (S7-6); more dated ids (S7-7); longer cache lifetimes (S7-8); a `--pricing` sample in the guide (S7-9); the backfill's discoverability and wording (S7-10); what the API rate card hash covers (S7-11); and what-if fidelity (S7-12).
 - **Import:** a Claude Code adapter (S8-1); local BYOK classification (S8-2); wider version windows, now including Copilot CLI 1.0.115 (S8-3); compactions of more than one request, and Codex's compressed rollouts and tool calls (S8-4); VS Code and JetBrains stores (S8-5); re-scanning, incremental parsing, and the unchanged check's cost (S8-6, S8-18); agent grouping for imported spans (S8-7); unmatched supersession, and matching superseded rows later (S8-11, S8-14); a census of fork copies (S8-13, A2); a dedicated exception type (S8-15); `MAJOR.MINOR.PATCH` in warnings (S8-16); a test of a dry run beside a running daemon (S8-17); and session facts that make large sessions linear (S8-19).
 - **Export:** a hash-based CSP (S9-1); IANA IDs on Windows 10 1703–1809 (S9-4); every prompt chain, night hours, and PDF or PNG output (S9-5); the ZIP container's bytes across operating systems (S9-6); a distinct color for failed tool calls (S9-7); telling same-named repositories apart (S9-8); a record of the daemon's deletions (S9-9); a migration that clears non-strict slugs (S9-10); axis lines at every zoom and padding at the axis's ends (S9-11, S9-13); and copying, rather than moving, the replaced ZIP (S9-12).
