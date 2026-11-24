@@ -40,7 +40,7 @@ Global rules for every task:
 - [x] Task 1: Reported-Charge Primitives (CopilotLedger.Core & tests). `ReportedChargeState`, `ReportedCharge`, and `NanoAiu`: exact validation of a nano-AIU count from a JSON number or an IEEE-754 double's bits, and its exact conversion to USD, AI credits, and pico-USD.
 - [x] Task 2: The Calculator Bills the Reported Charge, Keeps the List Price, and Prices Local BYOK by Model (CopilotLedger.Core, docs & tests). `NormalizedGenAiSpan.ReportedCharge`; `CreditCalculationResult.ListUsdCost` and `ChargeSource`; the reported charge replaces the rate-card charge for priced GitHub AI-credit requests, and a malformed or inapplicable one is rejected; issue #79's `localOffload.models` rule for provider-billed requests.
 - [x] Task 3: OTLP Reads `github.copilot.nano_aiu` (CopilotLedger.Otlp & tests). An exact integer from `doubleValue` in JSON and protobuf, and the normalizer's reported charge on inference spans only.
-- [ ] Task 4: Ledger Format 7 (CopilotLedger.Storage & tests). `spans.list_cost_usd_pico`, `spans.charge_source`, `import_sessions.import_revision`, and a partial index on imported tool links; the store writes and validates the new columns.
+- [ ] Task 4: Ledger Format 7 (CopilotLedger.Storage, docs & tests). `spans.list_cost_usd_pico`, `spans.charge_source`, `import_sessions.import_revision`, and a partial index on imported tool links; the store writes and validates the new columns, and `docs/cli.md`'s import allowlist lists them.
 - [ ] Task 5: Live Spans Record the Charged Amount (CopilotLedger.Otlp, CopilotLedger.Storage, docs & tests). End to end from OTLP to the ledger; `IngestResult.RejectedReportedCharges`; budgets, the breaker, and receipts use the charged amount.
 - [ ] Task 6: Import Reads `totalNanoAiu`, and the Report Gains Its Sprint 12 Counts (CopilotLedger.Core, CopilotLedger.Storage, CopilotLedger.Cli, docs & tests). Usage records and compactions bill their reported charge; `ReportedChargeRejected` diagnostics; six new report counts, table rows, and JSON fields.
 - [ ] Task 7: Import BYOK and Failed Compactions (CopilotLedger.Core, docs & tests). Issue #82's seven classification rules and `compactionAttemptId` as a BYOK compaction's record key.
@@ -330,6 +330,9 @@ public const string NanoAiu = "github.copilot.nano_aiu";
 - `src/CopilotLedger.Storage/LedgerSnapshot.cs` (checkpoint read on format < 7)
 - New `tests/CopilotLedger.Tests/Storage/SchemaVersion7Tests.cs`
 - Tests that pin `user_version` 6 or "the supported version 6": `SchemaVersion6Tests`, `ApiEquivalentStoreTests`, `SpanLinkStoreTests`, `LedgerSnapshotTests`, `SqliteLedgerStoreTests` (change 6 to 7 where they assert the latest version; a test that **sets** `user_version = 6` to simulate a format-6 ledger keeps 6)
+- `docs/cli.md` (the import allowlist between `<!-- import-allowlist -->` and `<!-- /import-allowlist -->` only; see "Docs" below)
+
+> **The import allowlist changes with the schema.** `ImportPrivacyTests.IP2` requires every column of the created schema to be listed in `docs/cli.md`'s import allowlist (or in its "left empty" set), and `IP3` requires every column an import fills to be listed. Import fills all three new columns as soon as this task's store writes them (`list_cost_usd_pico` and `charge_source` on every insert, `import_revision` on every checkpoint, all non-NULL). So this task adds them to the allowlist in the same commit as the migration; a schema column is never added in one task and documented in a later one. The wording below is true at this task (every imported row is charged at the rate card until Task 6 reads `totalNanoAiu`); Task 6 replaces the `spans.charge_source` Copilot cell.
 
 **DDL (migration 7, exactly):**
 
@@ -367,7 +370,20 @@ with the comment above it: `// Charged amounts (Sprint 12). cost_usd_pico stays 
 | SV7-6 | `LedgerSnapshot` on a format-6 ledger with a checkpoint | `GetImportSessionAsync` returns it with `ImportRevision == 0`; the ledger's `user_version` stays 6 |
 | SV7-7 | insert by SQL, as a format-6 daemon would, a span without the two new columns | the row has `list_cost_usd_pico` NULL and `charge_source` `rate_card` |
 
-**Acceptance:** SV7-1–SV7-7 pass; tests that assert the latest version now say 7 (`Database user_version 99 is newer than the supported version 7.`); no Sprint 13 file is edited.
+**Docs (`docs/cli.md` import allowlist, exactly):**
+
+1. Insert these two rows immediately after the row whose first cell begins `` `spans.model_id` `` ("Priced from the fields above, as for live spans"):
+
+   ```markdown
+   | `spans.list_cost_usd_pico` | The rate card's price, from the fields above | Priced from the fields above |
+   | `spans.charge_source` | `rate_card` | `rate_card` |
+   ```
+
+2. In the row whose cells read "The import's own results", append `` , `import_sessions.import_revision` `` to the first cell, after `` `import_sessions.imported_at_unix_ms` ``.
+
+Change nothing else in `docs/cli.md`. No test is added for the docs; `ImportPrivacyTests` already enforces them.
+
+**Acceptance:** SV7-1–SV7-7 pass; tests that assert the latest version now say 7 (`Database user_version 99 is newer than the supported version 7.`); `ImportPrivacyTests` (including `IP2` and `IP3`) passes with the two new rows and the added `import_revision` column; no Sprint 13 file is edited.
 
 ---
 
@@ -497,10 +513,10 @@ public required long ReportedChargesRejected { get; init; }  // requests priced 
 
 - `docs/cli.md` report table: after `Unpriced`, rows `Charges rejected` ("Requests charged at the rate card because the charge their log reported isn't valid or can't apply"), `Repriced` ("Requests imported before whose pricing changed, which this import rewrote; see [Repairs](#repairs)"), `Live repriced` ("Live requests that this import gave the charge their log reported; see [Repairs](#repairs)"), `Tool links relinked` ("Imported tool calls moved to the request that asked for them; see [Repairs](#repairs)"). (Task 12 adds the "Repairs" heading; until then the anchor is a forward reference, which is fine.)
 - JSON field list: after `toolLinksRecorded`, add `toolLinksRelinked`, `toolLinksRemoved`, `toolLinksFallback` (tool calls linked to the latest request of their agent because their `apiCallId` couldn't be followed), `repriced`, `liveRepriced`, `reportedChargesRejected`; the diagnostic codes gain `reportedChargeRejected`.
-- Allowlist table: add rows `spans.list_cost_usd_pico` ("The rate card's price, from the fields above"), `spans.charge_source` (`reported` when `data.usage.copilotUsage.totalNanoAiu`, or a compaction's `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, is a valid charge for a priced GitHub request; `rejected` when it's present but not; else `rate_card`), and add `spans.cost_usd_pico`'s note: "the reported charge when `charge_source` is `reported`". Add `import_sessions.import_revision` to the "The import's own results" row. Codex column: `rate_card` / "Priced from the fields above".
+- Allowlist table (Task 4 already added the `spans.list_cost_usd_pico` and `spans.charge_source` rows and `import_sessions.import_revision`; don't add them again, or `DocumentedColumns` fails with "listed twice"): replace the `spans.charge_source` row's Copilot cell, `` `rate_card` ``, with: `reported` when `data.usage.copilotUsage.totalNanoAiu`, or a compaction's `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, is a valid charge for a priced GitHub request; `rejected` when it's present but not; else `rate_card`. Its Codex cell stays `` `rate_card` ``, and the `spans.list_cost_usd_pico` row is unchanged. Add `spans.cost_usd_pico`'s note: "the reported charge when `charge_source` is `reported`".
 - `docs/guide.md`: update the import samples' tables (the four new rows) so `GuideSamplesTests` passes.
 
-**Acceptance:** IRC1–IRC7 and every updated exact-output test pass; `ImportPrivacyTests` passes with the new allowlist rows.
+**Acceptance:** IRC1–IRC7 and every updated exact-output test pass; `ImportPrivacyTests` passes with the updated allowlist.
 
 ---
 
