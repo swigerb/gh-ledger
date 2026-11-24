@@ -51,6 +51,7 @@ The ledger stays on your machine, and gh-ledger never stores prompt or response 
 - [Configuration](docs/configuration.md): pricing, the rates overlay, and data files
 - [PR receipt action](https://github.com/swigerb/copilot-ledger-action): posting receipts on pull requests
 - [Releasing](docs/releasing.md): for maintainers
+- [Test reports](docs/test-reports/): live end-to-end test results
 
 ## Build from source
 
