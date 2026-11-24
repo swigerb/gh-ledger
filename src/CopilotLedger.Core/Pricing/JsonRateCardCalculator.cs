@@ -6,11 +6,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using CopilotLedger.Core.Audit;
 using CopilotLedger.Core.Telemetry;
 
 namespace CopilotLedger.Core.Pricing;
 
-public sealed class JsonRateCardCalculator : ICreditCalculator
+public sealed class JsonRateCardCalculator : ICreditCalculator, IAuditPricing
 {
     public const string EmbeddedResourceName = "CopilotLedger.Core.Pricing.rates.json";
 
@@ -340,6 +341,53 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
             selection.Tier.Name,
             Price(request, selection.Tier, uncached));
     }
+
+    // IAuditPricing: localOffload.baselineModel, a githubAiCredits model.
+    public string BaselineModel => _baselineCard.ModelId;
+
+    // IAuditPricing: the canonical id of the githubAiCredits model that model names (an id or an alias), or null.
+    public string? FindGitHubModel(string model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        string? normalized = NormalizeModel(model);
+        return normalized is null ? null : FindModel(_githubModels, normalized)?.ModelId;
+    }
+
+    // IAuditPricing: the tier that bills a request of channel as Calculate selects it, or null.
+    public RateTier? FindBilledTier(
+        BillingChannel channel,
+        string? model,
+        string? requestModel,
+        DateTimeOffset instant,
+        long inputTokens)
+    {
+        IReadOnlyList<ModelRateCard>? models = channel switch
+        {
+            BillingChannel.GitHubAiCredits => _githubModels,
+            BillingChannel.FoundryByok => _foundryModels,
+            _ => null,
+        };
+        if (models is null)
+        {
+            return null;
+        }
+
+        string? normalized = NormalizeModel(model);
+        string? normalizedRequest = NormalizeModel(requestModel);
+        ModelRateCard? card = normalized is null
+            ? normalizedRequest is null ? null : FindModel(models, normalizedRequest)
+            : FindModel(models, normalized, normalizedRequest);
+        return card is null ? null : Select(card, instant, inputTokens)?.Tier;
+    }
+
+    // IAuditPricing: the first tier's outputPer1M of each githubAiCredits model with a window covering instant.
+    public IReadOnlyList<decimal> GitHubOutputRates(DateTimeOffset instant) =>
+    [
+        .. _githubModels
+            .Select(card => Select(card, instant, 0))
+            .OfType<PricedSelection>()
+            .Select(selection => selection.Tier.OutputPer1M),
+    ];
 
     // Whether any section of this card has model as an id or alias.
     private bool IsKnown(string model) =>

@@ -492,6 +492,7 @@ public sealed class LedgerImporterTests
         log.Write(CopilotHome(temp), active: true);
         ImportSourceReport first = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
         log.ToolComplete("toolu-1", false, exitCode: 3).Write(CopilotHome(temp), active: true);
+        SqliteConnection.ClearAllPools();
 
         ImportSourceReport dry = Copilot(await RunAsync(temp, request => request with { IncludeActive = true, DryRun = true }));
         ImportSourceReport second = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
@@ -533,6 +534,7 @@ public sealed class LedgerImporterTests
         await store.RecordAsync([ImportEntries.Live("s-a", null), ImportEntries.Live("s-b", S3)]);
 
         ImportReport report = await RunAsync(temp);
+        SqliteConnection.ClearAllPools();
         ImportReport dry = await RunAsync(temp, request => request with { DryRun = true });
         ImportReport repo = await RunAsync(temp, request => request with { RepositoryRoot = root });
         ImportReport otherRepo = await RunAsync(

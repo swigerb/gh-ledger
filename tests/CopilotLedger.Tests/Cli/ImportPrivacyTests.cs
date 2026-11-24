@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using CopilotLedger.Storage;
 using CopilotLedger.Tests.TestSupport;
+using Microsoft.Data.Sqlite;
 
 namespace CopilotLedger.Tests.Cli;
 
@@ -58,6 +59,7 @@ public sealed partial class ImportPrivacyTests
         Assert.Contains("Warning: Copilot session s-canary, line ", text.Error);
         Assert.Equal(6L, await LedgerSql.ScalarAsync(harness.Context.DatabasePath, "SELECT COUNT(*) FROM spans;"));
         Assert.Equal(3L, await LedgerSql.ScalarAsync(harness.Context.DatabasePath, "SELECT COUNT(*) FROM span_links;"));
+        SqliteConnection.ClearAllPools();
         List<(string Name, byte[] Bytes)> stored = [];
         foreach (string suffix in new[] { "", "-wal", "-shm" })
         {
