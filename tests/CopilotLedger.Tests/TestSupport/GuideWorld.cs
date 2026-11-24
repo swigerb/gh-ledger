@@ -150,6 +150,7 @@ public sealed class GuideWorld : IAsyncDisposable
                 endpoint = "http://localhost:4318",
                 version = GhLedgerCli.Version,
                 databasePath = Harness.Context.DatabasePath,
+                importRules = 1,
             }));
         _ = FileRetry.ReadAllText(Path.Combine(data, "daemon.json"));
         CancellationTokenSource stop = new();

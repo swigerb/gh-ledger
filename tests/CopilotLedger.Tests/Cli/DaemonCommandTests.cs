@@ -25,6 +25,7 @@ public sealed class DaemonCommandTests
         Assert.Equal(
             Path.Combine(temp.Path, "data", "ledger.db"),
             root.GetProperty("databasePath").GetString());
+        Assert.Equal(1, root.GetProperty("importRules").GetInt32());
 
         CliRun start = await harness.RunAsync("daemon", "start");
         Assert.Equal(0, start.ExitCode);

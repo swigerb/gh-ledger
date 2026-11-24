@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using CopilotLedger.Cli.Daemon;
+using CopilotLedger.Cli.Install;
 using CopilotLedger.Cli.Rates;
 using CopilotLedger.Cli.Reporting;
 using CopilotLedger.Core.Git;
@@ -198,14 +199,23 @@ internal static class ImportCommands
             return 1;
         }
 
-        // A daemon of another version records live spans by its own rules, so a request it records later might not
-        // supersede an imported one.
+        // A daemon without the import rules (DaemonState.ImportRules) records live spans without superseding imported rows,
+        // so a request it records after the import could be charged twice. An import stops before it opens the ledger; a
+        // dry run, which writes nothing, warns.
         if (DaemonFiles.IsHeld(context) &&
-            DaemonFiles.TryReadState(context)?.Version is string version &&
-            version != GhLedgerCli.Version)
+            (DaemonFiles.TryReadState(context)?.ImportRules ?? 0) < DaemonState.CurrentImportRules)
         {
+            string command = GhExtension.CommandName(context.Platform);
+            string restart = $"Restart it with {command} daemon stop and {command} daemon start";
+            if (!dryRun)
+            {
+                context.Error.WriteLine(
+                    $"Import stopped: the running daemon doesn't follow the import rules, so a request it records later could be charged twice. {restart}, then run the import again.");
+                return 1;
+            }
+
             context.Error.WriteLine(
-                $"Warning: the daemon runs gh-ledger {version}; restart it so live spans follow this version's import rules.");
+                $"Warning: the running daemon doesn't follow the import rules, so a request it records after an import could be charged twice. {restart} before you import.");
         }
 
         ImportRequest request = new()

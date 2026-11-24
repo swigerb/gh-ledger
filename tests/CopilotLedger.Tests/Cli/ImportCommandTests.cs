@@ -419,54 +419,87 @@ public sealed class ImportCommandTests
              json.RootElement.GetProperty("topModel").GetString()));
     }
 
+    // Only SQLite's own messages are kept, and they never quote a bound value; every other exception's message is dropped.
     [Fact]
-    public void IC9_TheIngestFailureLogWritesOnlyTheTypeOfOtherExceptions()
+    public async Task IC9_TheIngestFailureLogKeepsOnlySqliteMessages()
     {
         List<string> lines = [];
         ManualTimeProvider clock = new(Now);
         IngestFailureLog log = new(lines.Add, clock);
+        SqliteException constraint;
+        await using (SqliteConnection connection = new("Data Source=:memory:"))
+        {
+            await connection.OpenAsync();
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE t (v TEXT UNIQUE); INSERT INTO t (v) VALUES (@v); INSERT INTO t (v) VALUES (@v);";
+            command.Parameters.AddWithValue("@v", CopilotSessionLogs.Canary);
+            constraint = await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
+        }
 
-        log.Report(new JsonException(CopilotSessionLogs.Canary));
-        clock.Advance(TimeSpan.FromMinutes(1));
-        log.Report(new SqliteException("SQLite Error 5: 'database is locked'.", 5));
-        clock.Advance(TimeSpan.FromMinutes(1));
-        log.Report(new IOException("There is not enough space on the disk."));
-        clock.Advance(TimeSpan.FromMinutes(1));
-        log.Report(new ArgumentException(CopilotSessionLogs.Canary));
+        foreach (Exception exception in new Exception[]
+                 {
+                     constraint,
+                     new IOException(CopilotSessionLogs.Canary),
+                     new UnauthorizedAccessException(CopilotSessionLogs.Canary),
+                     new JsonException(CopilotSessionLogs.Canary),
+                     new ArgumentException(CopilotSessionLogs.Canary),
+                 })
+        {
+            log.Report(exception);
+            clock.Advance(TimeSpan.FromMinutes(1));
+        }
 
         Assert.Equal(
             [
+                "Warning: could not record spans: SqliteException: SQLite Error 19: 'UNIQUE constraint failed: t.v'.",
+                "Warning: could not record spans: IOException",
+                "Warning: could not record spans: UnauthorizedAccessException",
                 "Warning: could not record spans: JsonException",
-                "Warning: could not record spans: SqliteException: SQLite Error 5: 'database is locked'.",
-                "Warning: could not record spans: IOException: There is not enough space on the disk.",
                 "Warning: could not record spans: ArgumentException",
             ],
             lines);
     }
 
     [Fact]
-    public async Task IC10_ADaemonOfAnotherVersionIsReported()
+    public async Task IC10_ADaemonWithoutTheImportRulesStopsAnImport()
     {
         using TempDirectory temp = new();
         await using CliHarness harness = Harness(temp);
         string data = harness.Context.DataDirectory;
         Directory.CreateDirectory(data);
-        await File.WriteAllTextAsync(
-            Path.Combine(data, "daemon.json"),
-            """{"schemaVersion":1,"processId":4242,"startedAt":"2026-11-23T11:00:00+00:00","endpoint":"http://localhost:4318","version":"0.4.0","databasePath":"ledger.db"}""");
-        CliRun run;
+        new CopilotSessionLogs("s-a").Usage("u1", S1).Write(harness.Context.CopilotHome);
+        const string State =
+            """{"schemaVersion":1,"processId":4242,"startedAt":"2026-11-23T11:00:00+00:00","endpoint":"http://localhost:4318","version":"0.4.1","databasePath":"ledger.db"}""";
+        await File.WriteAllTextAsync(Path.Combine(data, "daemon.json"), State);
+        CliRun refused;
+        CliRun dry;
+        CliRun capable;
+        bool createdBeforeCapable;
         await using (FileStream held = new(Path.Combine(data, "daemon.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
         {
-            run = await harness.RunAsync("import", "--all");
+            refused = await harness.RunAsync("import", "--all");
+            dry = await harness.RunAsync("import", "--all", "--dry-run");
+            createdBeforeCapable = File.Exists(harness.Context.DatabasePath);
+            await File.WriteAllTextAsync(Path.Combine(data, "daemon.json"), State.Replace("}", ",\"importRules\":1}"));
+            capable = await harness.RunAsync("import", "--all");
         }
 
         CliRun released = await harness.RunAsync("import", "--all");
 
-        Assert.Equal(0, run.ExitCode);
+        Assert.Equal((1, ""), (refused.ExitCode, refused.Out));
+        Assert.False(createdBeforeCapable);
         Assert.Equal(
-            "Warning: the daemon runs gh-ledger 0.4.0; restart it so live spans follow this version's import rules.\n",
-            run.Error);
-        Assert.Equal("", released.Error);
+            "Import stopped: the running daemon doesn't follow the import rules, so a request it records later could be charged twice. Restart it with gh-ledger daemon stop and gh-ledger daemon start, then run the import again.\n",
+            refused.Error);
+        Assert.Equal(0, dry.ExitCode);
+        Assert.Equal(
+            "Warning: the running daemon doesn't follow the import rules, so a request it records after an import could be charged twice. Restart it with gh-ledger daemon stop and gh-ledger daemon start before you import.\n",
+            dry.Error);
+        Assert.EndsWith("\nImporting would record 1 request: 0.15 AI credits ($0.00), API equivalent $0.00.\nDry run: nothing was written.\n", dry.Out);
+        Assert.Equal((0, ""), (capable.ExitCode, capable.Error));
+        Assert.EndsWith("\nRecorded 1 request: 0.15 AI credits ($0.00), API equivalent $0.00.\n", capable.Out);
+        Assert.Equal((0, ""), (released.ExitCode, released.Error));
+        Assert.EndsWith("\nNothing new to record.\n", released.Out);
     }
 
     [Fact]

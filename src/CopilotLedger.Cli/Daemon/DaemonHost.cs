@@ -144,6 +144,7 @@ internal static class DaemonHost
                 Endpoint = $"http://localhost:{port}",
                 Version = GhLedgerCli.Version,
                 DatabasePath = context.DatabasePath,
+                ImportRules = DaemonState.CurrentImportRules,
             };
             await DaemonFiles.WriteStateAsync(context, state, cancellationToken);
             WriteLog(

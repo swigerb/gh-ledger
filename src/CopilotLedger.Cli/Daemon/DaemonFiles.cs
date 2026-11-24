@@ -5,12 +5,17 @@ namespace CopilotLedger.Cli.Daemon;
 
 internal sealed record DaemonState
 {
+    // The import rules this build's daemon applies to the live spans it records (UsageAuthority). gh ledger import needs
+    // them: a daemon whose daemon.json lacks importRules (an earlier build) could record a request twice.
+    public const int CurrentImportRules = 1;
+
     public required int SchemaVersion { get; init; }
     public required int ProcessId { get; init; }
     public required DateTimeOffset StartedAt { get; init; }
     public required string Endpoint { get; init; }
     public required string Version { get; init; }
     public required string DatabasePath { get; init; }
+    public int ImportRules { get; init; }            // 0 when daemon.json has no importRules
 }
 
 internal static class DaemonFiles

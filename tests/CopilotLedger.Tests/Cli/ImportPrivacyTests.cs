@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -70,6 +72,12 @@ public sealed partial class ImportPrivacyTests
         }
 
         Assert.Contains(stored, file => file.Name == "ledger.db");
+        string daemonLog = Path.Combine(harness.Context.DataDirectory, "daemon.log");
+        if (File.Exists(daemonLog))
+        {
+            stored.Add(("daemon.log", await File.ReadAllBytesAsync(daemonLog)));
+        }
+
         string output = string.Concat(
             claude.Out, claude.Error, dryRun.Out, dryRun.Error, text.Out, text.Error, json.Out, json.Error);
         foreach (string canary in Canaries)
@@ -136,6 +144,47 @@ public sealed partial class ImportPrivacyTests
             }
 
             Assert.Equal(documented[table], filled);
+        }
+    }
+
+    // While the ledger can't record a canary-bearing live span, after an import, the daemon's log names the failure and keeps
+    // nothing of the span. The in-process daemon writes to DaemonOutput what it writes to daemon.log when it's started.
+    [Fact]
+    public async Task IP4_TheDaemonLogKeepsNoCanaryWhenItCantRecordASpan()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        WriteFixtures(temp, harness);
+        CliRun import = await harness.RunAsync("import", "--all", "--source", "copilot", "--source", "codex");
+        await harness.StartInProcessDaemonAsync();
+        await LedgerSql.ExecuteAsync(
+            harness.Context.DatabasePath,
+            "CREATE TRIGGER ip4_reject BEFORE INSERT ON spans BEGIN SELECT RAISE(ABORT, 'ip4 rejects spans'); END;");
+        string trace = OtlpFixtures.CopilotChatTraceJson
+            .Replace("0f8fad5b-d9cb-469f-a165-70867728950e", Canary("PROMPT"), StringComparison.Ordinal)
+            .Replace("\"stringValue\": \"stop\"", $"\"stringValue\": \"{Canary("RESPONSE")}\"", StringComparison.Ordinal);
+        HttpStatusCode status;
+        using (HttpClient client = harness.CreateDaemonClient())
+        using (ByteArrayContent content = new(Encoding.UTF8.GetBytes(trace)))
+        {
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            using HttpResponseMessage response = await client.PostAsync("/v1/traces", content);
+            status = response.StatusCode;
+        }
+
+        CliRun stop = await harness.RunAsync("daemon", "stop");
+        CliRun daemon = await harness.InProcessDaemon!;
+        string daemonLog = Path.Combine(harness.Context.DataDirectory, "daemon.log");
+        string log = harness.DaemonOutput + (File.Exists(daemonLog) ? await File.ReadAllTextAsync(daemonLog) : "");
+
+        Assert.Equal(2, import.ExitCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
+        Assert.Equal((0, 0), (stop.ExitCode, daemon.ExitCode));
+        Assert.Contains(" Warning: could not record spans: SqliteException: ", log);
+        Assert.Contains("ip4 rejects spans", log);
+        foreach (string canary in Canaries)
+        {
+            Assert.DoesNotContain(canary, log, StringComparison.Ordinal);
         }
     }
 

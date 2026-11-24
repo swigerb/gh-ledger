@@ -135,11 +135,18 @@ The next line totals the recorded requests' AI credits, GitHub USD, and API-equi
 |---|---|
 | 0 | Every source's coverage is complete. |
 | 2 | The import finished, but some coverage is incomplete; the warnings say why. Everything that could be imported was. |
-| 1 | The options are invalid, or an error stopped the import. |
+| 1 | The options are invalid, a running daemon doesn't follow the import rules, or an error stopped the import. |
 
 Skipped active, unchanged, and out-of-scope logs don't make coverage incomplete. A folder or file of a session store that exists but can't be listed does, with a warning such as `Copilot session logs: 1 folder or file couldn't be listed`; a store that doesn't exist only has no logs. So do `Superseded, unmatched` requests: those that started in the `--since` period and, with `--repo`, recorded that repository's root, or its `owner/repo` slug when they recorded no root. When the only gap is sessions from before Copilot 1.0.103, the report's last line suggests `--since`, which leaves them out. With `--repo`, logs of other repositories are read again on every run, because they may hold requests of this one.
 
-Imported requests count in every report and MCP tool, as live ones do, with the branch their log recorded. Tool calls are imported only from the last 7 days, as long as the ledger keeps tool calls; an older request keeps only the number of tool calls it made. A tool call that ended after its request was imported, such as in a session imported with `--include-active`, is added when a later import reads the session again. Imported requests have no agent-invocation span, so `status --cache --turns` shows their `Growth` as `n/a`, and the input-growth ranking of `--bloat` leaves them out. `import` warns when the daemon runs another gh-ledger version: restart the daemon, so that the live spans it records supersede imported rows by this version's rules.
+Imported requests count in every report and MCP tool, as live ones do, with the branch their log recorded. Tool calls are imported only from the last 7 days, as long as the ledger keeps tool calls; an older request keeps only the number of tool calls it made. A tool call that ended after its request was imported, such as in a session imported with `--include-active`, is added when a later import reads the session again. Imported requests have no agent-invocation span, so `status --cache --turns` shows their `Growth` as `n/a`, and the input-growth ranking of `--bloat` leaves them out.
+
+A daemon started by an earlier gh-ledger doesn't follow the import rules of [Overlap with live spans](#overlap-with-live-spans): a live span it records after an import wouldn't supersede the imported row of the same request, which would then count twice. So while the daemon that's running doesn't say in `daemon.json` that it follows them, `import` stops with exit code 1, and `--dry-run` only warns. Restart the daemon first:
+
+```shell
+gh ledger daemon stop
+gh ledger daemon start
+```
 
 ### What import reads and keeps
 
@@ -327,7 +334,7 @@ CopilotLedger stores no prompt or response content, working directories, or remo
 ## Troubleshooting
 
 - **Nothing is recorded.** Run `gh ledger status`, address its warnings, and restart Copilot.
-- **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example because the disk is full or the database is damaged, and Copilot is told to retry. The warning repeats at most once a minute; fix the cause shown after it. Only database and file errors show their message; any other error shows only its type, because its message could quote the request.
+- **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example because the disk is full or the database is damaged, and Copilot is told to retry. The warning repeats at most once a minute; fix the cause shown after it. Only database errors show their message, which never quotes a request's values; any other error shows only its type, because its message could quote the request or a path from it.
 - **`gh ledger import` exits with code 2.** Some coverage is incomplete, and the warnings say why; everything else was imported. A session from before Copilot 1.0.103 is never imported, so leave it out with `--since`. A malformed line or an unsupported usage record is skipped on every run, and the rest of its log is imported.
 - **`gh ledger import` defers requests (`Ambiguous-overlap`).** Their session has live spans that can't be matched to them, such as spans an earlier gh-ledger recorded, so import leaves them out rather than risk charging a request twice. The live spans still count.
 - **`gh ledger import` reports `Superseded, unmatched` requests.** Live spans that can't be matched to them arrived after they were imported and replaced them, as above. The live spans count, but they may not cover every request of the session, so import reports these on every run whose scope holds them; `--since` can leave older ones out.
