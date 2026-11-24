@@ -245,6 +245,11 @@ internal static class ExportCommands
 
         context.Out.WriteLine(
             $"Wrote {Path.GetFileName(htmlPath)}: {ExportRecords.Plural(model.Summary.Totals.SpanCount, "request", "requests")} in {model.Header.Scope} ({model.Header.Filter.Period}).");
+        if (model.Coverage.TimelineTruncated)
+        {
+            context.Out.WriteLine(ExportRecords.TimelineTruncation(model.Coverage));
+        }
+
         return 0;
     }
 

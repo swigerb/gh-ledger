@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -37,6 +38,17 @@ public static partial class ExportFiles
     // The header's description of term.
     public static string Meta(XDocument page, string term) =>
         page.Descendants("dt").Single(dt => dt.Value == term).ElementsAfterSelf("dd").First().Value;
+
+    // The report's one ledger-data block, parsed.
+    public static JsonDocument LedgerData(string html)
+    {
+        const string Start = "<script type=\"application/json\" id=\"ledger-data\">";
+        int start = html.IndexOf(Start, StringComparison.Ordinal);
+        Assert.True(start >= 0, "The report has no ledger-data block.");
+        Assert.Equal(start, html.LastIndexOf(Start, StringComparison.Ordinal));
+        start += Start.Length;
+        return JsonDocument.Parse(html[start..html.IndexOf("</script>", start, StringComparison.Ordinal)]);
+    }
 
     [GeneratedRegex(@"(<(?:style|script)\b[^>]*>).*?(</(?:style|script)>)", RegexOptions.Singleline)]
     private static partial Regex StyleOrScript();

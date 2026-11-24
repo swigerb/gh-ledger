@@ -1,5 +1,7 @@
 using System.Globalization;
 using CopilotLedger.Cli.Reporting;
+using CopilotLedger.Core.Pricing;
+using CopilotLedger.Storage;
 
 namespace CopilotLedger.Cli.Export;
 
@@ -38,4 +40,74 @@ internal static class ExportRecords
     // count with its noun: "1 request", "8 requests".
     public static string Plural(long count, string one, string many) =>
         $"{LedgerFormat.Count(count)} {(count == 1 ? one : many)}";
+
+    // The line that says the timeline doesn't draw every request or tool call.
+    public static string TimelineTruncation(ExportCoverage coverage) =>
+        $"The timeline draws the latest {LedgerFormat.Count(coverage.TimelineSpans)} of {Plural(coverage.Spans, "request", "requests")} and {LedgerFormat.Count(coverage.TimelineToolCalls)} of {Plural(coverage.ToolCalls, "tool call", "tool calls")}; the totals and tables include them all.";
+
+    // A request's shown repository: its slug, else its root's folder name (the root with includeLocalPaths), else (none).
+    public static string SpanRepository(string? slug, string? root, bool includeLocalPaths) =>
+        slug ?? (root is null ? "(none)" : includeLocalPaths ? root : FolderName(root));
+
+    public static ExportSpanRecord Span(ExportSpanRow row, bool includeLocalPaths) => new()
+    {
+        TraceId = row.TraceId,
+        SpanId = row.SpanId,
+        ParentSpanId = row.ParentSpanId,
+        OperationName = row.OperationName,
+        ConversationId = row.ConversationId,
+        Agent = row.AgentName,
+        Provider = row.ProviderName,
+        RequestModel = row.RequestModel,
+        ResponseModel = row.ResponseModel,
+        Model = row.ModelId,
+        StartTime = row.StartTime,
+        EndTime = row.EndTime,
+        InputTokens = row.InputTokens,
+        CacheReadInputTokens = row.CacheReadInputTokens,
+        CacheWriteInputTokens = row.CacheWriteInputTokens,
+        UncachedInputTokens = Math.Max(row.InputTokens - row.CacheReadInputTokens - row.CacheWriteInputTokens, 0),
+        OutputTokens = row.OutputTokens,
+        CacheReadState = ReportCommands.StateName(row.CacheReadState),
+        CacheWriteState = ReportCommands.StateName(row.CacheWriteState),
+        BillingChannel = row.BillingChannel,
+        PricingStatus = row.PricingStatus,
+        RatesVersion = row.RatesVersion,
+        CostUsd = row.CostUsd,
+        AiCredits = row.BillingChannel == BillingChannel.GitHubAiCredits ? AiCreditMath.UsdToAiCredits(row.CostUsd) : 0m,
+        SavedUsd = row.SavedUsd,
+        ApiEquivalentUsd = row.ApiEquivalentUsd,
+        ApiEquivalentStatus = row.ApiEquivalentStatus,
+        ApiRatesVersion = row.ApiRatesVersion,
+        ApiRateCardSha256 = row.ApiRateCardSha256,
+        Repository = SpanRepository(row.RepositorySlug, row.RepositoryRoot, includeLocalPaths),
+        RepositoryRoot = includeLocalPaths ? row.RepositoryRoot : null,
+        Branch = row.BranchName,
+        HeadCommit = row.HeadCommitSha,
+        PullRequest = row.PullRequestNumber,
+        IngestSource = row.IngestSource,
+    };
+
+    public static ExportToolCallRecord ToolCall(ExportToolCallRow row)
+    {
+        string status = row.StatusCode switch
+        {
+            1 => "ok",
+            2 => "error",
+            _ => "unset",
+        };
+        return new ExportToolCallRecord
+        {
+            TraceId = row.TraceId,
+            SpanId = row.SpanId,
+            ConversationId = row.ConversationId,
+            Agent = row.AgentName,
+            ToolName = row.ToolName,
+            StartTime = row.StartTime,
+            ExitCode = row.ToolExitCode,
+            Status = status,
+            Failed = row.ToolExitCode is not (null or 0) || status == "error",
+            IngestSource = row.IngestSource,
+        };
+    }
 }

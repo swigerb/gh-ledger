@@ -36,6 +36,7 @@ internal static class HtmlReportWriter
         Line(html, "<main>");
         WriteSummary(html, model);
         WriteCoverage(html, model.Coverage, header.TimeZone);
+        WriteTimeline(html, model, header.TimeZone);
         WriteCache(html, model);
         WritePromptChains(html, model, header.TimeZone);
         WriteRollups(html, model);
@@ -45,6 +46,9 @@ internal static class HtmlReportWriter
         Line(
             html,
             $"<footer><p>Written by gh-ledger {Text(header.ToolVersion)}. This report holds no prompts, responses, tool arguments or results, or file contents{(header.IncludeLocalPaths ? string.Empty : ", and no local paths")}. Times are in {Text(header.TimeZone.Id)}.</p></footer>");
+        html.Append("<script type=\"application/json\" id=\"ledger-data\">");
+        html.Append(Encoding.UTF8.GetString(ExportJson.LedgerData(model)));
+        Line(html, "</script>");
         Line(html, "</body>");
         Line(html, "</html>");
         return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(html.ToString());
@@ -128,6 +132,11 @@ internal static class HtmlReportWriter
                 ? "1 request reported no cache counters; cache hit ratios leave it out."
                 : $"{LedgerFormat.Count(unreported)} requests reported no cache counters; cache hit ratios leave them out.";
         }
+
+        if (coverage.TimelineTruncated)
+        {
+            yield return ExportRecords.TimelineTruncation(coverage);
+        }
     }
 
     private static void WriteHeader(StringBuilder html, ExportReportModel model)
@@ -180,6 +189,7 @@ internal static class HtmlReportWriter
     {
         yield return ("summary", "Summary");
         yield return ("coverage", "Coverage");
+        yield return ("timeline", "Timeline");
         yield return ("cache", "Cache efficiency");
         yield return ("prompt-chains", "Prompt chains");
         yield return ("rollups", "Spend tables");
@@ -282,6 +292,65 @@ internal static class HtmlReportWriter
         }
 
         Line(html, "</ul>");
+        Line(html, "</section>");
+    }
+
+    private static void WriteTimeline(StringBuilder html, ExportReportModel model, TimeZoneInfo zone)
+    {
+        ExportTimeline timeline = model.Timeline;
+        ExportCoverage coverage = model.Coverage;
+        SectionStart(html, "timeline", "Timeline");
+        string note = timeline.IsEmpty
+            ? "No requests or tool calls to draw."
+            : coverage.TimelineTruncated
+                ? ExportRecords.TimelineTruncation(coverage)
+                : $"All {ExportRecords.Plural(coverage.Spans, "request", "requests")} and {ExportRecords.Plural(coverage.ToolCalls, "tool call", "tool calls")}.";
+        Line(html, $"<p class=\"note\" id=\"timeline-note\">{Text(note)}</p>");
+        if (!timeline.IsEmpty)
+        {
+            Line(
+                html,
+                "<div class=\"timeline-controls\" id=\"timeline-controls\" hidden=\"hidden\"><button type=\"button\" id=\"timeline-reset\">Reset zoom</button>");
+            Line(
+                html,
+                "<p id=\"timeline-help\">Scroll or pinch to zoom and drag to pan, or focus the timeline and use the arrow keys, + and -, and 0. Drag across the overview to choose a range.</p></div>");
+            Line(html, "<figure class=\"chart\" id=\"timeline-figure\">");
+            ExportSvg.Timeline(html, timeline, zone);
+            html.Append("<figcaption>Requests by session. <ul class=\"legend\">");
+            for (int color = 0; color < timeline.Models.Count; color++)
+            {
+                html.Append($"<li><span class=\"swatch m{color.ToString(CultureInfo.InvariantCulture)}\"></span>{Text(timeline.Models[color])}</li>");
+            }
+
+            if (timeline.OtherModels)
+            {
+                html.Append("<li><span class=\"swatch m7\"></span>Other models</li>");
+            }
+
+            Line(html, "</ul></figcaption>");
+            Line(html, "<details class=\"chart-table\"><summary>Data table</summary>");
+            Table(
+                html,
+                "table-timeline",
+                "Sessions on the timeline",
+                ["#", "Session", "First request", "Last request", "Requests", "Models", "Tool calls", "Failed tool calls"],
+                [
+                    .. timeline.Rows.Select(row => (IReadOnlyList<Cell>)
+                    [
+                        Count(row.Index + 1),
+                        new Cell(Text(row.Title), row.Title),
+                        row.First is DateTimeOffset first ? TimeCell(first, zone) : new Cell("-", null),
+                        row.Last is DateTimeOffset last ? TimeCell(last, zone) : new Cell("-", null),
+                        Count(row.Requests),
+                        Name(row.Models.Count == 0 ? "-" : string.Join(", ", row.Models)),
+                        Count(row.ToolCalls),
+                        Count(row.FailedToolCalls),
+                    ]),
+                ]);
+            Line(html, "</details>");
+            Line(html, "</figure>");
+        }
+
         Line(html, "</section>");
     }
 

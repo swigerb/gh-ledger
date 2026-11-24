@@ -1475,7 +1475,7 @@ internal static class ReportCommands
                     ? "+" + LedgerFormat.Count(delta)
                     : LedgerFormat.Count(delta);
 
-    private static string StateName(CacheCounterState state) => state switch
+    internal static string StateName(CacheCounterState state) => state switch
     {
         CacheCounterState.Reported => "reported",
         CacheCounterState.Absent => "absent",

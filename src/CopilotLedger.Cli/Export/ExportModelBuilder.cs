@@ -36,6 +36,21 @@ internal static class ExportModelBuilder
         LedgerRollupRow totals = ReportCommands.Sum(byChannelModel);
         DateTimeOffset toolHistoryFrom = inputs.GeneratedAt - LedgerImporter.ToolLinkRetention;
         ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
+        IReadOnlyList<LedgerRollupRow> byModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken);
+
+        // The timeline draws the latest MaxTimelineSpans requests and, separately, tool calls, in start order.
+        ExportSpanRecord[] drawnSpans =
+        [
+            .. (await snapshot.GetLatestSpansAsync(filter, inputs.MaxTimelineSpans, cancellationToken))
+                .Reverse()
+                .Select(row => ExportRecords.Span(row, inputs.IncludeLocalPaths)),
+        ];
+        ExportToolCallRecord[] drawnToolCalls =
+        [
+            .. (await snapshot.GetLatestToolCallsAsync(filter, inputs.MaxTimelineSpans, cancellationToken))
+                .Reverse()
+                .Select(ExportRecords.ToolCall),
+        ];
         return new ExportReportModel
         {
             Header = new ExportHeader
@@ -74,9 +89,13 @@ internal static class ExportModelBuilder
                 ToolHistoryFromUtc = toolHistoryFrom,
                 SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
                 ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
+                ToolCalls = await snapshot.CountToolCallsAsync(filter, cancellationToken),
+                MaxTimelineSpans = inputs.MaxTimelineSpans,
+                TimelineSpans = drawnSpans.Length,
+                TimelineToolCalls = drawnToolCalls.Length,
             },
             AuditFindings = [],
-            ByModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken),
+            ByModel = byModel,
             ByAgent = await snapshot.GetRollupAsync(LedgerGrouping.Agent, filter, cancellationToken),
             ByBranch =
             [
@@ -104,6 +123,11 @@ internal static class ExportModelBuilder
                 .. (await snapshot.GetBudgetsAsync(filter, cancellationToken))
                     .Select(row => row with { Repository = Shown(row.Repository) }),
             ],
+            Timeline = TimelineLayout.Build(
+                drawnSpans,
+                drawnToolCalls,
+                [.. byModel.Select(row => row.Model ?? "(none)")],
+                inputs.TimeZone),
         };
 
         string Shown(string key) => ExportRecords.Repository(key, roots, inputs.IncludeLocalPaths);
