@@ -10,4 +10,5 @@ public enum PricingStatus
     UnrecognizedEndpoint,   // host isn't local, Foundry, or GitHub
     InvalidUsage,           // a negative token count, or cache read + cache write > input
     NotBillableOperation,   // not an inference operation (for example invoke_agent)
+    OtherProvider,          // an imported request billed by a provider that isn't GitHub, Foundry BYOK, or local
 }

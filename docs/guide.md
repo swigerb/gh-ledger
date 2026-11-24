@@ -2,9 +2,10 @@
 
 CopilotLedger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
 
-The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). After setup, every sample starts from the same state: a month of spend, a rates overlay with Foundry BYOK prices, a budget for `feature/search`, and an open circuit-breaker trip, so early samples show things that later sections explain. A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
+The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). After setup and backfill, every sample starts from the same state: a month of spend, a rates overlay with Foundry BYOK prices, a budget for `feature/search`, and an open circuit-breaker trip, so early samples show things that later sections explain. A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
 
 - [Set up CopilotLedger](#set-up-copilotledger)
+- [Backfill history after installing](#backfill-history-after-installing)
 - [See what you spent](#see-what-you-spent)
 - [Find the most expensive prompts](#find-the-most-expensive-prompts)
 - [Compare agents](#compare-agents)
@@ -71,6 +72,79 @@ Last 30 days      66.7%  1 of 1 span
 <!-- /sample -->
 
 If no spans appear, fix any warnings that `status` shows, and see [Troubleshooting](cli.md#troubleshooting).
+
+## Backfill history after installing
+
+**Goal:** add the Copilot requests you made before you installed CopilotLedger.
+
+CopilotLedger records requests from the moment its daemon runs, but Copilot CLI and the GitHub Copilot app also keep a log of each session on your machine. `gh ledger import` records the requests in those logs, prices each one for the date it was made, and attributes it to the branch its session was on. See what it would record for this repository first:
+
+<!-- sample: import-dry-run -->
+```shell
+gh ledger import --repo . --dry-run
+```
+
+```text
+Import from local session logs for contoso/webapp (all time, dry run)
+
+                           Copilot
+Sessions scanned                 4
+Skipped, unchanged               0
+Skipped, active                  1
+Skipped, out of scope            0
+Unsupported sessions             0
+Records parsed                   6
+Out of scope                     1
+Recorded                         5
+Duplicate                        0
+Overlap-skipped                  0
+Ambiguous-overlap                0
+Superseded, unmatched            0
+Malformed lines                  0
+Unsupported usage shapes         0
+Cost out of range                0
+Unpriced                         0
+Coverage                  complete
+
+Importing would record 5 requests: 38.70 AI credits ($0.39), API equivalent $0.39.
+Dry run: nothing was written.
+```
+<!-- /sample -->
+
+Two sessions from yesterday hold five requests, including one by the `explore` subagent and a compaction, the request that summarizes a long conversation. A session in `contoso/api` is out of scope, and the session you're in now is still open, so it's skipped: CopilotLedger records it live. Import the five:
+
+<!-- sample: import -->
+```shell
+gh ledger import --repo .
+```
+
+```text
+Import from local session logs for contoso/webapp (all time)
+
+                           Copilot
+Sessions scanned                 4
+Skipped, unchanged               0
+Skipped, active                  1
+Skipped, out of scope            0
+Unsupported sessions             0
+Records parsed                   6
+Out of scope                     1
+Recorded                         5
+Duplicate                        0
+Overlap-skipped                  0
+Ambiguous-overlap                0
+Superseded, unmatched            0
+Malformed lines                  0
+Unsupported usage shapes         0
+Cost out of range                0
+Unpriced                         0
+Coverage                  complete
+
+Recorded 5 requests: 38.70 AI credits ($0.39), API equivalent $0.39.
+```
+<!-- /sample -->
+
+They now count in every report. Importing again records nothing twice, and a request that the daemon also recorded is charged once. Import reads only what pricing and attribution need, never your prompts or Copilot's responses. Use `--all` for every repository and `--source codex` for Codex's logs; see [Import past sessions](cli.md#import-past-sessions).
 
 ## See what you spent
 

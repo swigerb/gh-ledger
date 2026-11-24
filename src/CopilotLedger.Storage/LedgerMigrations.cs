@@ -162,5 +162,51 @@ internal static class LedgerMigrations
             ALTER TABLE spans ADD COLUMN api_rates_version TEXT;
             ALTER TABLE spans ADD COLUMN api_rate_card_sha256 TEXT;
             """),
+
+        // Import provenance and live/import authority (gh ledger import). Rows recorded earlier are live ('otlp'), effective,
+        // and unidentified (no canonical_usage_id), and links recorded earlier have no owner. Only import rows are ever
+        // superseded, and only effective import rows must have distinct canonical IDs.
+        (6, """
+            ALTER TABLE spans ADD COLUMN ingest_source TEXT NOT NULL DEFAULT 'otlp'
+                CHECK (ingest_source IN ('otlp', 'import:copilot', 'import:claude', 'import:codex'));
+            ALTER TABLE spans ADD COLUMN canonical_usage_id TEXT
+                CHECK (canonical_usage_id IS NULL OR length(canonical_usage_id) = 64);
+            ALTER TABLE spans ADD COLUMN accounting_state TEXT NOT NULL DEFAULT 'effective'
+                CHECK (accounting_state IN ('effective', 'superseded'));
+            ALTER TABLE spans ADD COLUMN superseded_by INTEGER
+                CHECK ((accounting_state = 'effective') = (superseded_by IS NULL)
+                       AND (superseded_by IS NULL OR ingest_source <> 'otlp'));
+            ALTER TABLE spans ADD COLUMN imported_tool_call_count INTEGER
+                CHECK (imported_tool_call_count IS NULL OR (imported_tool_call_count >= 0 AND ingest_source <> 'otlp'));
+            ALTER TABLE span_links ADD COLUMN owner_span_row_id INTEGER;
+
+            CREATE INDEX ix_spans_canonical_usage ON spans (canonical_usage_id) WHERE canonical_usage_id IS NOT NULL;
+            CREATE UNIQUE INDEX ux_spans_effective_import_usage ON spans (canonical_usage_id)
+                WHERE canonical_usage_id IS NOT NULL AND accounting_state = 'effective' AND ingest_source <> 'otlp';
+
+            CREATE TABLE import_sessions (
+                source                 TEXT    NOT NULL CHECK (source IN ('copilot', 'claude', 'codex')),
+                log_id                 TEXT    NOT NULL,
+                log_size_bytes         INTEGER NOT NULL CHECK (log_size_bytes >= 0),
+                log_last_write_unix_ms INTEGER NOT NULL,
+                log_sha256             TEXT    NOT NULL CHECK (length(log_sha256) = 64),
+                complete               INTEGER NOT NULL CHECK (complete IN (0, 1)),
+                records_recorded       INTEGER NOT NULL CHECK (records_recorded >= 0),
+                records_duplicate      INTEGER NOT NULL CHECK (records_duplicate >= 0),
+                records_overlap        INTEGER NOT NULL CHECK (records_overlap >= 0),
+                records_ambiguous      INTEGER NOT NULL CHECK (records_ambiguous >= 0),
+                imported_at_unix_ms    INTEGER NOT NULL,
+                PRIMARY KEY (source, log_id)
+            ) STRICT, WITHOUT ROWID;
+
+            CREATE TABLE import_record_aliases (
+                source              TEXT    NOT NULL CHECK (source IN ('copilot', 'claude', 'codex')),
+                record_key_sha256   TEXT    NOT NULL CHECK (length(record_key_sha256) = 64),
+                span_row_id         INTEGER NOT NULL,
+                resolution          TEXT    NOT NULL CHECK (resolution IN ('recorded', 'live', 'duplicate')),
+                recorded_at_unix_ms INTEGER NOT NULL,
+                PRIMARY KEY (source, record_key_sha256)
+            ) STRICT, WITHOUT ROWID;
+            """),
     ];
 }

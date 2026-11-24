@@ -21,6 +21,8 @@ public sealed partial class GuideSamplesTests
     {
         ["install"] = GuideState.Fresh,
         ["status-first"] = GuideState.FirstPrompt,
+        ["import-dry-run"] = GuideState.Backfill,
+        ["import"] = GuideState.Backfill,
         ["status"] = GuideState.Month,
         ["branch"] = GuideState.Month,
         ["top-prompts"] = GuideState.Month,

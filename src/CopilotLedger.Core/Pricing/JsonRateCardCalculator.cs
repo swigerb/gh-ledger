@@ -148,8 +148,19 @@ public sealed class JsonRateCardCalculator : ICreditCalculator
         long uncached = span.InputTokens - span.CacheReadInputTokens - span.CacheWriteInputTokens;
         string host = NormalizeHost(span.ServerAddress);
 
+        // An imported request that its provider billed (a Copilot BYOK or Codex request) is local or Foundry BYOK only when
+        // the card lists its provider name; without an endpoint, it would otherwise be priced as GitHub's.
+        if (span.BillingSource == BillingSource.Provider &&
+            !MatchesValue(span.ProviderName, _localProviders) &&
+            !MatchesValue(span.ProviderName, _foundryProviders))
+        {
+            return Result(span, BillingChannel.Unpriced, PricingStatus.OtherProvider, model, uncachedInputTokens: uncached);
+        }
+
         LocalModelRate? localModel = model is null ? null : _localModels.FirstOrDefault(item => item.Matches(model));
-        bool localByKnownModel = string.IsNullOrWhiteSpace(host) && localModel is not null;
+        bool localByKnownModel = span.BillingSource == BillingSource.Endpoint &&
+                                 string.IsNullOrWhiteSpace(host) &&
+                                 localModel is not null;
         if (IsLoopback(host) ||
             MatchesValue(host, _localHosts) ||
             MatchesValue(span.ProviderName, _localProviders) ||

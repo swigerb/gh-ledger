@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 
 namespace CopilotLedger.Storage;
 
-public sealed class SqliteLedgerStore
+public sealed partial class SqliteLedgerStore
 {
     private const string InsertSql = """
         INSERT INTO spans (
@@ -18,7 +18,8 @@ public sealed class SqliteLedgerStore
             repo_root, repo_slug, branch_name, head_commit_sha, recorded_at_unix_ms,
             cache_read_state, cache_write_state, pull_request_number,
             api_equivalent_usd_pico, api_equivalent_status, api_rate_card_model_id,
-            api_rates_version, api_rate_card_sha256
+            api_rates_version, api_rate_card_sha256,
+            ingest_source, canonical_usage_id, imported_tool_call_count
         ) VALUES (
             @trace_id, @span_id, @parent_span_id, @operation_name, @conversation_id,
             @agent_name, @provider_name, @request_model, @response_model, @model_id,
@@ -29,11 +30,14 @@ public sealed class SqliteLedgerStore
             @repo_root, @repo_slug, @branch_name, @head_commit_sha, @recorded_at_unix_ms,
             @cache_read_state, @cache_write_state, @pull_request_number,
             @api_equivalent_usd_pico, @api_equivalent_status, @api_rate_card_model_id,
-            @api_rates_version, @api_rate_card_sha256
-        ) ON CONFLICT (trace_id, span_id) DO NOTHING;
+            @api_rates_version, @api_rate_card_sha256,
+            @ingest_source, @canonical_usage_id, @imported_tool_call_count
+        ) ON CONFLICT (trace_id, span_id) DO NOTHING
+        RETURNING id;
         """;
 
     // The conditions of a LedgerFilter, with parameters from AddFilterParameters. A null filter property matches every span.
+    // Only effective rows count: an imported row that a live row superseded is kept for diagnosis and never reported.
     private const string FilterSql = """
         (@from IS NULL OR start_time_unix_ms >= @from)
           AND (@to IS NULL OR start_time_unix_ms < @to)
@@ -41,6 +45,13 @@ public sealed class SqliteLedgerStore
           AND (@branch IS NULL OR COALESCE(branch_name, '(none)') = @branch)
           AND (@pull_request IS NULL OR pull_request_number = @pull_request)
           AND (@agent IS NULL OR COALESCE(agent_name, '(none)') = @agent)
+          AND accounting_state = 'effective'
+        """;
+
+    // An execute_tool link counts unless an imported row that was superseded owns it (its live twin's links count instead).
+    private const string EffectiveLinkSql = """
+        (owner_span_row_id IS NULL
+                 OR EXISTS (SELECT 1 FROM spans WHERE spans.id = span_links.owner_span_row_id AND spans.accounting_state = 'effective'))
         """;
 
     // CacheMetrics.IsReported: the span carried at least one cache counter.
@@ -162,18 +173,47 @@ public sealed class SqliteLedgerStore
         }
 
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
-        await using SqliteTransaction transaction =
-            (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        // BEGIN IMMEDIATE: the authority rules read and write under the write lock, so an import runs before or after this.
+        await using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
         int inserted = 0;
         long recordedAtUnixMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
 
         foreach (LedgerEntry entry in batch)
         {
-            await using SqliteCommand command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = InsertSql;
-            AddInsertParameters(command, entry, recordedAtUnixMs);
-            inserted += await command.ExecuteNonQueryAsync(cancellationToken);
+            RowProvenance provenance = LiveProvenance(entry);
+            if (await InsertSpanAsync(
+                    transaction,
+                    entry.Span,
+                    entry.Calculation,
+                    provenance,
+                    recordedAtUnixMs,
+                    cancellationToken) is not long id)
+            {
+                continue;
+            }
+
+            inserted++;
+
+            // A live row supersedes the imported row of the same call, wherever it is (I1), and the imported rows of its
+            // conversation that it can't be matched to (I2, I3).
+            if (provenance.CanonicalUsageId is not null)
+            {
+                await UsageAuthority.SupersedeCanonicalAsync(
+                    transaction,
+                    provenance.CanonicalUsageId,
+                    id,
+                    cancellationToken);
+            }
+
+            if (entry.Span.ConversationId is not null)
+            {
+                await UsageAuthority.ReconcileConversationAsync(
+                    transaction,
+                    entry.Span.ConversationId,
+                    id,
+                    cancellationToken);
+            }
         }
 
         await transaction.CommitAsync(cancellationToken);
@@ -205,7 +245,7 @@ public sealed class SqliteLedgerStore
                 SELECT id, operation_name, billing_channel, model_id, start_time_unix_ms,
                        input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, request_model
                 FROM spans
-                WHERE api_equivalent_status IS NULL
+                WHERE api_equivalent_status IS NULL AND accounting_state = 'effective'
                 ORDER BY id;
                 """;
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -562,7 +602,7 @@ public sealed class SqliteLedgerStore
         await using (SqliteCommand summary = connection.CreateCommand())
         {
             summary.CommandText = """
-                SELECT MAX(conversation_id), MAX(COALESCE(repo_slug, repo_root, '(none)')), MAX(COALESCE(branch_name, '(none)')), MAX(repo_root), COUNT(*) FROM spans WHERE trace_id = @trace;
+                SELECT MAX(conversation_id), MAX(COALESCE(repo_slug, repo_root, '(none)')), MAX(COALESCE(branch_name, '(none)')), MAX(repo_root), COUNT(*) FROM spans WHERE trace_id = @trace AND accounting_state = 'effective';
                 """;
             summary.Parameters.AddWithValue("@trace", traceId);
             await using SqliteDataReader reader = await summary.ExecuteReaderAsync(cancellationToken);
@@ -595,7 +635,7 @@ public sealed class SqliteLedgerStore
         await using (SqliteCommand query = connection.CreateCommand())
         {
             query.CommandText = """
-                SELECT span_id, end_time_unix_ms, cost_usd_pico FROM spans WHERE trace_id = @trace AND cost_usd_pico > 0 ORDER BY end_time_unix_ms, span_id;
+                SELECT span_id, end_time_unix_ms, cost_usd_pico FROM spans WHERE trace_id = @trace AND cost_usd_pico > 0 AND accounting_state = 'effective' ORDER BY end_time_unix_ms, span_id;
                 """;
             query.Parameters.AddWithValue("@trace", traceId);
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -611,8 +651,8 @@ public sealed class SqliteLedgerStore
         List<ToolCallEvent> toolCalls = [];
         await using (SqliteCommand query = connection.CreateCommand())
         {
-            query.CommandText = """
-                SELECT span_id, start_time_unix_ms, tool_name, tool_exit_code, status_code FROM span_links WHERE trace_id = @trace AND operation_name = 'execute_tool' ORDER BY start_time_unix_ms, span_id;
+            query.CommandText = $"""
+                SELECT span_id, start_time_unix_ms, tool_name, tool_exit_code, status_code FROM span_links WHERE trace_id = @trace AND operation_name = 'execute_tool' AND {EffectiveLinkSql} ORDER BY start_time_unix_ms, span_id;
                 """;
             query.Parameters.AddWithValue("@trace", traceId);
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -631,7 +671,7 @@ public sealed class SqliteLedgerStore
         await using (SqliteCommand query = connection.CreateCommand())
         {
             query.CommandText = """
-                SELECT span_id, start_time_unix_ms, head_commit_sha FROM spans WHERE trace_id = @trace AND head_commit_sha IS NOT NULL ORDER BY start_time_unix_ms, span_id;
+                SELECT span_id, start_time_unix_ms, head_commit_sha FROM spans WHERE trace_id = @trace AND head_commit_sha IS NOT NULL AND accounting_state = 'effective' ORDER BY start_time_unix_ms, span_id;
                 """;
             query.Parameters.AddWithValue("@trace", traceId);
             await using SqliteDataReader reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -906,7 +946,8 @@ public sealed class SqliteLedgerStore
             SELECT b.repository, b.branch, b.budget_usd_pico, b.set_at_unix_ms, b.alerted_at_unix_ms, b.notified_at_unix_ms,
                    (SELECT COALESCE(SUM(s.cost_usd_pico), 0) FROM spans AS s
                      WHERE COALESCE(s.repo_slug, s.repo_root, '(none)') = b.repository
-                       AND COALESCE(s.branch_name, '(none)') = b.branch) AS spent_usd_pico
+                       AND COALESCE(s.branch_name, '(none)') = b.branch
+                       AND s.accounting_state = 'effective') AS spent_usd_pico
             FROM branch_budgets AS b
             WHERE (@repository IS NULL OR b.repository = @repository) AND (@branch IS NULL OR b.branch = @branch) ORDER BY b.repository, b.branch;
             """;
@@ -926,7 +967,7 @@ public sealed class SqliteLedgerStore
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            UPDATE branch_budgets SET alerted_at_unix_ms = @now WHERE repository = @repository AND branch = @branch AND alerted_at_unix_ms IS NULL AND budget_usd_pico < (SELECT COALESCE(SUM(cost_usd_pico), 0) FROM spans WHERE COALESCE(repo_slug, repo_root, '(none)') = @repository AND COALESCE(branch_name, '(none)') = @branch);
+            UPDATE branch_budgets SET alerted_at_unix_ms = @now WHERE repository = @repository AND branch = @branch AND alerted_at_unix_ms IS NULL AND budget_usd_pico < (SELECT COALESCE(SUM(cost_usd_pico), 0) FROM spans WHERE COALESCE(repo_slug, repo_root, '(none)') = @repository AND COALESCE(branch_name, '(none)') = @branch AND accounting_state = 'effective');
             """;
         command.Parameters.AddWithValue("@repository", repository);
         command.Parameters.AddWithValue("@branch", branch);
@@ -964,7 +1005,8 @@ public sealed class SqliteLedgerStore
             SELECT b.repository, b.branch, b.budget_usd_pico, b.set_at_unix_ms, b.alerted_at_unix_ms, b.notified_at_unix_ms,
                    (SELECT COALESCE(SUM(s.cost_usd_pico), 0) FROM spans AS s
                      WHERE COALESCE(s.repo_slug, s.repo_root, '(none)') = b.repository
-                       AND COALESCE(s.branch_name, '(none)') = b.branch) AS spent_usd_pico
+                       AND COALESCE(s.branch_name, '(none)') = b.branch
+                       AND s.accounting_state = 'effective') AS spent_usd_pico
             FROM branch_budgets AS b
             WHERE b.alerted_at_unix_ms IS NOT NULL AND b.alerted_at_unix_ms >= @since AND b.notified_at_unix_ms IS NULL ORDER BY b.alerted_at_unix_ms, b.repository, b.branch;
             """;
@@ -991,7 +1033,7 @@ public sealed class SqliteLedgerStore
             ", ",
             Enumerable.Range(0, traces.Length).Select(index => $"@t{index}"));
         command.CommandText = $"""
-            SELECT trace_id, COUNT(*) FROM span_links WHERE trace_id IN ({parameters}) AND operation_name = 'execute_tool' AND ((tool_exit_code IS NOT NULL AND tool_exit_code <> 0) OR status_code = 2) GROUP BY trace_id;
+            SELECT trace_id, COUNT(*) FROM span_links WHERE trace_id IN ({parameters}) AND operation_name = 'execute_tool' AND ((tool_exit_code IS NOT NULL AND tool_exit_code <> 0) OR status_code = 2) AND {EffectiveLinkSql} GROUP BY trace_id;
             """;
         for (int index = 0; index < traces.Length; index++)
         {
@@ -1114,6 +1156,15 @@ public sealed class SqliteLedgerStore
                     command.Parameters.AddWithValue("@sha", OrDbNull(agent.GitCommitSha));
                     changed += await command.ExecuteNonQueryAsync(cancellationToken);
                 }
+            }
+
+            // A live row whose conversation was just assigned follows the authority rules as if it had arrived with it.
+            foreach (string conversation in agents
+                .Select(agent => agent.ConversationId)
+                .OfType<string>()
+                .Distinct(StringComparer.Ordinal))
+            {
+                await UsageAuthority.ReconcileConversationAsync(transaction, conversation, null, cancellationToken);
             }
         }
 
@@ -1368,6 +1419,7 @@ public sealed class SqliteLedgerStore
                 FROM spans
                 WHERE (@trace IS NULL OR trace_id = @trace)
                   AND (@conversation IS NULL OR conversation_id = @conversation)
+                  AND accounting_state = 'effective'
             )
             SELECT trace_id, span_id, parent_span_id, conversation_id, agent_span_id, start_time_unix_ms,
                    COALESCE(repo_slug, repo_root, '(none)') AS repository,
@@ -1769,14 +1821,44 @@ public sealed class SqliteLedgerStore
         }
     }
 
+    // A live row's provenance: OTLP, with the usage identity of a GitHub-billed span (UsageIdentity.CanonicalUsageId).
+    private static RowProvenance LiveProvenance(LedgerEntry entry) =>
+        new(
+            "otlp",
+            UsageIdentity.CanonicalUsageId(
+                entry.Span.ProviderName,
+                entry.Span.ServiceRequestId,
+                entry.Calculation.Channel),
+            null,
+            entry.Git?.RepositoryRoot,
+            entry.Git?.RepositorySlug,
+            entry.Git?.BranchName,
+            entry.Git?.HeadCommitSha,
+            entry.Git?.PullRequestNumber);
+
+    // Inserts a spans row and returns its id, or null when (trace_id, span_id) already has a row.
+    private static async Task<long?> InsertSpanAsync(
+        SqliteTransaction transaction,
+        NormalizedGenAiSpan span,
+        CreditCalculationResult calculation,
+        RowProvenance provenance,
+        long recordedAtUnixMs,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = transaction.Connection!.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = InsertSql;
+        AddInsertParameters(command, span, calculation, provenance, recordedAtUnixMs);
+        return await command.ExecuteScalarAsync(cancellationToken) is long id ? id : null;
+    }
+
     private static void AddInsertParameters(
         SqliteCommand command,
-        LedgerEntry entry,
+        NormalizedGenAiSpan span,
+        CreditCalculationResult calculation,
+        RowProvenance provenance,
         long recordedAtUnixMs)
     {
-        NormalizedGenAiSpan span = entry.Span;
-        CreditCalculationResult calculation = entry.Calculation;
-
         command.Parameters.AddWithValue("@trace_id", span.TraceId);
         command.Parameters.AddWithValue("@span_id", span.SpanId);
         command.Parameters.AddWithValue("@parent_span_id", OrDbNull(span.ParentSpanId));
@@ -1818,18 +1900,18 @@ public sealed class SqliteLedgerStore
         command.Parameters.AddWithValue(
             "@saved_usd_pico",
             PicoUsd.FromUsd(calculation.EstimatedCloudSavedUsd));
-        command.Parameters.AddWithValue("@repo_root", OrDbNull(entry.Git?.RepositoryRoot));
-        command.Parameters.AddWithValue("@repo_slug", OrDbNull(entry.Git?.RepositorySlug));
-        command.Parameters.AddWithValue("@branch_name", OrDbNull(entry.Git?.BranchName));
+        command.Parameters.AddWithValue("@repo_root", OrDbNull(provenance.RepositoryRoot));
+        command.Parameters.AddWithValue("@repo_slug", OrDbNull(provenance.RepositorySlug));
+        command.Parameters.AddWithValue("@branch_name", OrDbNull(provenance.BranchName));
         command.Parameters.AddWithValue(
             "@head_commit_sha",
-            OrDbNull(entry.Git?.HeadCommitSha));
+            OrDbNull(provenance.HeadCommitSha));
         command.Parameters.AddWithValue("@recorded_at_unix_ms", recordedAtUnixMs);
         command.Parameters.AddWithValue("@cache_read_state", ToDatabaseString(span.CacheReadState));
         command.Parameters.AddWithValue("@cache_write_state", ToDatabaseString(span.CacheWriteState));
         command.Parameters.AddWithValue(
             "@pull_request_number",
-            OrDbNull(entry.Git?.PullRequestNumber));
+            OrDbNull(provenance.PullRequestNumber));
         ApiEquivalentCost retail = calculation.ApiEquivalent;
         command.Parameters.AddWithValue(
             "@api_equivalent_usd_pico",
@@ -1838,6 +1920,9 @@ public sealed class SqliteLedgerStore
         command.Parameters.AddWithValue("@api_rate_card_model_id", OrDbNull(retail.RateCardModelId));
         command.Parameters.AddWithValue("@api_rates_version", retail.RatesVersion);
         command.Parameters.AddWithValue("@api_rate_card_sha256", retail.RateCardSha256);
+        command.Parameters.AddWithValue("@ingest_source", provenance.IngestSource);
+        command.Parameters.AddWithValue("@canonical_usage_id", OrDbNull(provenance.CanonicalUsageId));
+        command.Parameters.AddWithValue("@imported_tool_call_count", OrDbNull(provenance.ImportedToolCallCount));
     }
 
     // A rollup's group key: its SELECT expressions, and their aliases separated by ", ".
@@ -1994,6 +2079,7 @@ public sealed class SqliteLedgerStore
         PricingStatus.UnrecognizedEndpoint => "unrecognized_endpoint",
         PricingStatus.InvalidUsage => "invalid_usage",
         PricingStatus.NotBillableOperation => "not_billable_operation",
+        PricingStatus.OtherProvider => "other_provider",
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
     };
 
@@ -2040,6 +2126,17 @@ public sealed class SqliteLedgerStore
         string? GitRepositorySlug,
         string? GitBranch,
         string? GitCommitSha);
+
+    // Where a row came from ('otlp' or 'import:<source>'), its usage identity, and its Git attribution.
+    private sealed record RowProvenance(
+        string IngestSource,
+        string? CanonicalUsageId,
+        long? ImportedToolCallCount,
+        string? RepositoryRoot,
+        string? RepositorySlug,
+        string? BranchName,
+        string? HeadCommitSha,
+        int? PullRequestNumber);
 
     // A group's API-equivalent totals: as recorded, or summed by Add as spans are priced again.
     private sealed class RetailTotals(decimal? usd = null, long unpricedSpanCount = 0, long estimatedSpanCount = 0)

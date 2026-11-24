@@ -22,4 +22,6 @@ public sealed record NormalizedGenAiSpan
     public long CacheWriteInputTokens { get; init; }         // gen_ai.usage.cache_write.input_tokens (legacy: cache_creation)
     public CacheCounterState CacheReadState { get; init; }   // Reported when the span carried the cache-read attribute
     public CacheCounterState CacheWriteState { get; init; }  // Reported when it carried cache_write (or legacy cache_creation)
+    public string? ServiceRequestId { get; init; }           // github.copilot.service_request_id; never stored, only its UsageIdentity
+    public BillingSource BillingSource { get; init; }        // Endpoint for live spans
 }

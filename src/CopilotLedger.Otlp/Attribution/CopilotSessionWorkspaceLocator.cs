@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using CopilotLedger.Core.Import;
 
 namespace CopilotLedger.Otlp.Attribution;
 
@@ -10,9 +10,6 @@ public sealed class CopilotSessionWorkspaceLocator
     private readonly Lock _lock = new();
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _timeToLive;
-    private static readonly Regex ConversationIdRegex = new(
-        "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
-        RegexOptions.CultureInvariant);
 
     // COPILOT_HOME when it's set and not blank; otherwise Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".copilot").
     public static string DefaultCopilotHome
@@ -49,7 +46,7 @@ public sealed class CopilotSessionWorkspaceLocator
     // The session's working directory from <CopilotHome>/session-state/<conversationId>/workspace.yaml, or null.
     public string? GetWorkingDirectory(string? conversationId)
     {
-        if (conversationId is null || !ConversationIdRegex.IsMatch(conversationId))
+        if (!CopilotSessionIds.IsValid(conversationId))
         {
             return null;
         }
