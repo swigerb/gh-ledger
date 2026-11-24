@@ -11,7 +11,7 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–12 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–17 are sequential, and each builds on the ones before it.
 
 This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-8.md`, then each task as its own commit, `Sprint 9 Task N: <Title>`, on branch `swigerb-sprint-9-ledger-export-html-report`, and opens one pull request titled exactly "Sprint 9: `gh ledger export`: self-contained offline HTML report & metadata-only bundle", with `Closes #64`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
@@ -42,6 +42,11 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 10: Privacy, XSS, Paths, Determinism, and Culture (tests). Canary content through the real ingest path and the daemon's failure log, hostile branch and agent names, local paths, byte-identical repeats and replays, the `de-DE` culture, and a check that the repository gains no packages or tooling.
 - [x] Task 11: The Reference and the Allowlist (docs & tests). `docs/cli.md` documents the command, the report, the bundle, and the allowlist of every JSON object export writes, which tests compare with the files written.
 - [x] Task 12: The Walkthrough, README, and CI (docs, CI & tests). `docs/guide.md` gains "Attach a cost report to a pull request" with a checked sample, the README a feature line and a privacy sentence, and CI a smoke test of `export --bundle` with an IANA time zone on Linux and Windows.
+- [ ] Task 13: A Repository Path Shows Only Its Folder Name (CopilotLedger.Cli, docs & tests). Review findings R1 and R6: a local path shows as its last folder's name once trailing separators are removed, and a drive, share, or file-system root as `(root folder)`, so no part of a `--repo` path reaches a file or the console; `docs/cli.md` says how to reproduce an export of a repository without a remote.
+- [ ] Task 14: A Failed Write Names No Path and Leaves Both Files As They Were (CopilotLedger.Cli, docs & tests). Review findings R2 and R3: a failed write says why without the exception's message, which names an absolute path, and a ZIP that `--force` replaces waits beside it until the report is in place, so a failed export leaves both files as they were.
+- [ ] Task 15: Tool History Counts Every Missing Tool Call and Every Deleted One (CopilotLedger.Storage, CopilotLedger.Cli, docs & tests). Review findings A1 (R4) and R5: each imported request lacks the tool calls it reported beyond the links it owns, and tool history starts no earlier than the earliest tool call the ledger keeps, so an export with a past `--generated-at` doesn't count on tool calls that the daemon deleted.
+- [ ] Task 16: Pages Seek the Start-Time Indexes (CopilotLedger.Storage & tests). Review finding C2: a plain lower bound on the start time, and a first cursor at the period's start, let each page of `spans.json` and `tool-calls.json` seek its index instead of scanning and sorting the table, and tool calls find their prompt chains through `ix_spans_trace`; 200,000 requests page in 0.3 s instead of 21 s.
+- [ ] Task 17: The Timeline Draws Every Request, Labels Only Real Times, and Lets the Page Scroll (CopilotLedger.Cli, docs & tests). Review findings C1, R7 (C3), R8, and A2: a bar is at least 0.001 wide, a local time that a transition skips is no tick and one it repeats is two, `ledger-data`'s `minWidth` stops zooming where the axis still has two labels, and only Ctrl or Command with the wheel, or a pinch, zooms, so a plain scroll or a swipe scrolls the page.
 
 ## Starting point
 
@@ -205,21 +210,50 @@ Export reads only the ledger. By default no absolute path appears anywhere: repo
 | Privacy canaries absent from `report.html`, every ZIP entry, standard output, and standard error | 10 | EP1 |
 | Allowlist tests for `ExportSpanRecord` JSON and `manifest.json` | 11 | EL1, EL2, EL3 |
 | XSS: branch and agent strings only HTML-encoded; no literal `</script>` in the embedded JSON | 10 | EP2, TL5 |
-| `repo_root` and other absolute paths only with `--include-local-paths` | 4, 5, 10 | EC10, EH7, EP3; D10 |
+| `repo_root` and other absolute paths only with `--include-local-paths` | 4, 5, 10, 13, 14 | EC10, EH7, EP3, EP7, EC3; D10 |
 | Byte-identical HTML and ZIP for the same database, arguments, and time | 9, 10 | EP4; D14 |
-| Replay inputs and rate provenance in the manifest; `--generated-at` replays; a cap below the dataset still exports every request, whose exact sums reproduce the summary from the same snapshot | 2, 9, 10 | XS2, EB3, EB5, EP4; D2, D14 |
+| Replay inputs and rate provenance in the manifest; `--generated-at` replays; a cap below the dataset still exports every request, whose exact sums reproduce the summary from the same snapshot | 2, 9, 10, 16 | XS2, EB3, EB5, EP4, XR13; D2, D14 |
 | Bundle integrity: exactly the allowlisted entries; `sha256` and `bytes` match; money equals `WriteMoney` output | 9 | EB1, EB2, EB3; D4 |
 | `Unpriced` and `n/a`, never `$0.00` or `0%` | 4, 7 | EC7, CH3, CH4 |
 | API-equivalent and local savings never added to billed spend; tool ticks at known starts without invented durations | 6, 7, 9 | CH1, CH2, TL6, EB4; D15 |
-| Timeline: daylight-saving bands for a fixed `--time-zone`; truncation noted; aggregates complete | 1, 6 | ET3–ET7, TL4, TL2, TL3 |
-| `--out` refused without `--force`; clear `--time-zone` and `--since` errors | 4, 9 | EC1, EC2, EB6 |
+| Timeline: daylight-saving bands for a fixed `--time-zone`; truncation noted; aggregates complete | 1, 6, 17 | ET3–ET7, TL4, TL12, TL2, TL3, TL11 |
+| `--out` refused without `--force`; clear `--time-zone` and `--since` errors | 4, 9, 14 | EC1, EC2, EC3, EC12, EB6 |
 | Meaningful without JavaScript (structural assertions, no browser) | 4–8 | CH6, EA3, EC9 |
 | Invariant formatting under `de-DE` | 10 | EP5 |
 | No new NuGet packages, no browser, Node, or Python tooling, no CDN | 8, 10 | EP6, EA1 |
 | `docs/cli.md` and `docs/guide.md` updated; `GuideSamplesTests` passes | 11, 12 | EL1–EL3, GS1, GS2 |
 | Build and tests green with warnings as errors; hermetic | all | Every task |
 | #63: every export query leaves out superseded rows | 2, 3 | XR1, XR3, XR4 |
-| #63: export reports coverage limitations, with retained tool coverage marked separately and a truncated timeline never called complete | 3, 4, 6, 9 | XR4, XR10, EC8, EC11, TL2, TL10, EB5; D9 |
+| #63: export reports coverage limitations, with retained tool coverage marked separately and a truncated timeline never called complete | 3, 4, 6, 9, 15 | XR4, XR10, XR11, EC8, EC11, EC13, TL2, TL10, EB5; D9 |
+
+### Review fixes (Tasks 13–17)
+
+Three reviews of Tasks 1–12, as committed on `swigerb-sprint-9-ledger-export-html-report` at `ae05799`, found the problems below: the architect's (A1, A2), an independent reviewer's (R1–R8), and the coordinator's (C1–C3, where C3 is R7). Tasks 13–17 fix them on top of Task 12. Each fix has tests that fail without it, except Task 16's, which changes only how fast pages are read (XR13 guards its results). Where these tasks and the design above differ, the tasks win. They were built like Tasks 1–12: in the scratch repository, whose Task 12 tree is the same as `ae05799`'s apart from the plans, with each task's blocks generated from its commit there, then applied by script, in order, to `git archive ae05799` with Windows line endings, with a build and the whole suite after each task: 1388, 1389, 1392, 1393, and 1398 tests, and, line endings aside, the same files.
+
+| Finding | Problem | Fix | Task |
+|---|---|---|---|
+| R1 | `FolderName` returned a path whole when it ended with `/` or `\`, so `--repo C:/Users/alice/project/` (as shells complete folder names) put an absolute path in standard output, the page, and `manifest.filter.repo`, even when it selected nothing; so did a root such as `C:\` or `/` | A local path shows as its last segment once trailing separators are removed, a drive, share, or file-system root as `(root folder)`, and never as text with a separator; `file:` URIs count as local paths | 13 |
+| R6 | A repository without a remote is recorded by its folder name, which `--repo` can't select in a replay; two folders with the same name look the same | Documented in `docs/cli.md`; telling same-named folders apart is deferred | 13 |
+| R2 | A failed write printed the exception's message, which names the temporary file's absolute path: `--out missing/report.html` showed the working directory and the process ID | The reason, without a path: `its folder doesn't exist.`, `access is denied.`, or `the file system reported error 0x<HRESULT>.` | 14 |
+| R3 | The ZIP was moved into place before the report and never put back, so a report that couldn't be replaced left the new ZIP beside the old report, and the old ZIP was lost | A ZIP that `--force` replaces waits beside it until the report is in place, and is put back if the report can't be; with no old ZIP, a new one is deleted | 14 |
+| A1, R4 | `importedToolCallsWithoutDetail` counted an imported request's tool calls only when it owned no link, but import links only the tool calls that started within the 7 days and completed, so a request with some links counted as complete | Each imported request lacks its `imported_tool_call_count` less the `execute_tool` links it owns, at least 0 | 15 |
+| R5 | Tool history was the 7 days before `generatedAt`, but the daemon deletes tool calls by its own clock, so an export with a past `--generated-at` counted on tool calls that were already deleted | Tool history starts no earlier than the earliest tool call the ledger keeps, read from the snapshot, so an unchanged ledger still replays byte for byte | 15 |
+| C2 | `(@after_start IS NULL OR …)` kept SQLite from using `ix_spans_start_time`, so each 1,000-row page scanned and sorted the table, and each tool-call page built an `IN` list of every selected trace again: one pass over 200,000 requests took 21 s, and over their tool calls 56 s; a bundle makes two of each | A plain lower bound on the start time and a first cursor at the period's start; a correlated `EXISTS` through `ix_spans_trace`: 0.3 s and 0.4 s | 16 |
+| C1 | A request without a duration (every Codex import, and Copilot imports without one) or shorter than about 1.2 s on a 30-day axis was a bar `width="0"`, which SVG never draws | Bars are at least 0.001 wide, and their 1-pixel stroke shows them | 17 |
+| R7, C3 | A local time that spring-forward skips mapped to the gap's end and kept its label, and the real tick there was dropped: `02:00` where it was 03:00 | A skipped time is no tick, except midnight, whose tick is the day's first instant; a repeated time is a tick each time it occurs | 17 |
+| R8 | Ticks were as fine as the whole range needed (6 hours over 30 days), but the script zoomed down to 0.5 units (22 minutes there), where a view can hold no tick and no label | Ticks one step finer than the axis's lines, and `ledger-data`'s `timeline.minWidth`, twice the widest gap between ticks, below which the script doesn't zoom | 17 |
+| A2 | The wheel always zoomed and `#timeline-plot` had `touch-action: none`, so a timeline of many rows, up to 3,200 units tall, trapped the page's scrolling under the pointer and under a finger | Only Ctrl or Command with the wheel, or a pinch, zooms; a plain scroll and a vertical swipe scroll the page | 17 |
+
+Measured on 2026-11-23 for Task 16, on SQLite 3.53.3 (Microsoft.Data.Sqlite 10.0.15), in a ledger of 200,000 requests and 200,000 tool calls, with and without `ANALYZE`:
+
+| Page query | `EXPLAIN QUERY PLAN` | One pass, 1,000 rows a page |
+|---|---|---|
+| Requests, before | `SCAN spans`; `USE TEMP B-TREE FOR ORDER BY` | 21.2 s |
+| Requests, after | `SEARCH spans USING INDEX ix_spans_start_time (start_time_unix_ms>?)`; `USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY` | 0.3 s |
+| Tool calls, before | `SEARCH span_links USING PRIMARY KEY (trace_id=?)`; `LIST SUBQUERY` with `SCAN spans`; `USE TEMP B-TREE FOR ORDER BY` | 55.8 s |
+| Tool calls, after | `SEARCH span_links USING INDEX ix_span_links_start (start_time_unix_ms>?)`; `SEARCH chain EXISTS USING INDEX ix_spans_trace (trace_id=?)` | 0.4 s |
+
+Through the public snapshot after Task 17, the same ledger's requests page in 0.97 s and its tool calls in 0.45 s, and `export --all-repos --since all --bundle --max-timeline-spans 0` takes 9.2 s. Assumption A5, measured after Task 17: 25,000 requests and 25,000 tool calls over 25 days make a 6,067,672-byte report and a 1,716,559-byte ZIP at the default cap.
 
 ## Task 1 specification: Time Zones and the Export's Time Rules
 
@@ -10576,6 +10610,1847 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 13 specification: A Repository Path Shows Only Its Folder Name
+
+Review findings R1 and R6. `ExportRecords.FolderName` returned its whole input when the input ended with `/` or `\`, and when it was a root such as `C:\`, `C:`, or `/`. So a `--repo` given as a path with a trailing separator, as shells complete folder names, put the absolute path in standard output, the page's header, and `manifest.filter.repo`, even when it selected nothing. The same function names the folders of the ledger's local roots.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Cli/Export/ExportRecords.cs` | `FolderName` removes trailing separators and names a root `(root folder)`; `LooksLikeLocalPath` also takes `file:` URIs |
+| `docs/cli.md` | `--include-local-paths` names `(root folder)`; the replay paragraph says how to reproduce an export of a repository without a remote (R6) |
+| `tests/CopilotLedger.Tests/Cli/ExportPrivacyTests.cs` | New: EP7 |
+
+### Rules
+
+1. `FolderName(path)` removes every trailing `/` and `\`, then takes what follows the last `/` or `\` left. When that's empty (`/`), ends with `:` (`C:\`, `C:`, `file:///`), or the trimmed path is a share's root (two separators, a server, a separator, and a share, as in `\\server\share` and `//server/share`), the result is `(root folder)`. The result never holds a separator.
+2. `LooksLikeLocalPath(key)` is true when the key starts with `/` or `\` (a Unix path or a share, with either slash), with a letter and `:` (a drive, with or without a separator after it), or with `file:` in any case. A repository slug never does: it's `owner/repo` of `[A-Za-z0-9._-]`.
+3. Nothing else changes: a slug or `(none)` is shown as it is, `--include-local-paths` still shows roots in the files, and standard output still shows a local root by its folder name.
+
+### Code (copy exactly)
+
+Edit 1 of 2 in `docs/cli.md`, replace:
+
+```markdown
+| `--since` | `30d` | `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date, counted at the generation time in the export's time zone. |
+| `--time-zone` | This computer's | An IANA time zone ID, such as `America/New_York`, for dates, times, and night shading. On Windows, IANA IDs need Windows 10 version 1903 or later, and Windows IDs such as `Eastern Standard Time` also work. |
+| `--include-local-paths` | | Show the local roots of repositories without a GitHub remote. Without it, such a repository shows as its folder name. |
+| `--max-timeline-spans` | `20000` | The most requests, and the most tool calls, that the timeline draws: the latest ones. 0 to 100,000. |
+| `--generated-at` | Now | The generation time to record, in UTC, such as `2026-11-21T21:30:00Z`, to reproduce an earlier export. |
+```
+
+with:
+
+```markdown
+| `--since` | `30d` | `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date, counted at the generation time in the export's time zone. |
+| `--time-zone` | This computer's | An IANA time zone ID, such as `America/New_York`, for dates, times, and night shading. On Windows, IANA IDs need Windows 10 version 1903 or later, and Windows IDs such as `Eastern Standard Time` also work. |
+| `--include-local-paths` | | Show the local roots of repositories without a GitHub remote. Without it, such a repository shows as its folder name, or as `(root folder)` when its root is a drive or a share, so two folders with the same name look the same. |
+| `--max-timeline-spans` | `20000` | The most requests, and the most tool calls, that the timeline draws: the latest ones. 0 to 100,000. |
+| `--generated-at` | Now | The generation time to record, in UTC, such as `2026-11-21T21:30:00Z`, to reproduce an earlier export. |
+```
+
+Edit 2 of 2 in `docs/cli.md`, replace:
+
+````markdown
+```
+
+`files` lists the other five files with their exact sizes and SHA-256 hashes; the manifest doesn't list itself. The hashes show that the files weren't changed after they were written, not who wrote them. The same gh-ledger build on the same operating system writes the same bytes again from an unchanged ledger: repeat the export's filters with `--generated-at` set to `generatedAtUtc` and `--time-zone` set to `timeZone.requested`, or to `timeZone.id`. A Windows ID works only on Windows, so pass an IANA `--time-zone` when a report may be reproduced elsewhere. A request recorded after the export but started before it changes the result.
+
+### What export includes
+````
+
+with:
+
+````markdown
+```
+
+`files` lists the other five files with their exact sizes and SHA-256 hashes; the manifest doesn't list itself. The hashes show that the files weren't changed after they were written, not who wrote them. The same gh-ledger build on the same operating system writes the same bytes again from an unchanged ledger: repeat the export's filters with `--generated-at` set to `generatedAtUtc` and `--time-zone` set to `timeZone.requested`, or to `timeZone.id`. A Windows ID works only on Windows, so pass an IANA `--time-zone` when a report may be reproduced elsewhere. A request recorded after the export but started before it changes the result. `filter.repo` of a repository without a GitHub remote is its folder name, which `--repo` doesn't select (a slug has a `/`, and a folder name never does): to reproduce such an export, pass the repository's full root to `--repo`, or export with `--include-local-paths`, which records the root.
+
+### What export includes
+````
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/ExportRecords.cs`, replace:
+
+```csharp
+        !includeLocalPaths && (roots.Contains(key) || LooksLikeLocalPath(key)) ? FolderName(key) : key;
+
+    // The last segment after / or \; the path itself when it has none.
+    public static string FolderName(string path)
+    {
+        int separator = path.LastIndexOfAny(['/', '\\']);
+        return separator < 0 || separator == path.Length - 1 ? path : path[(separator + 1)..];
+    }
+
+    // Starts with / or \, or with a drive letter and a colon.
+    public static bool LooksLikeLocalPath(string key) =>
+        key.StartsWith('/') || key.StartsWith('\\') || (key.Length >= 2 && char.IsAsciiLetter(key[0]) && key[1] == ':');
+
+    // "<repository, or all repositories>[, branch <b>][, pull request #<n>][, conversation <id>]". A local root shows as
+```
+
+with:
+
+```csharp
+        !includeLocalPaths && (roots.Contains(key) || LooksLikeLocalPath(key)) ? FolderName(key) : key;
+
+    // A local path's last segment, once trailing / and \ are removed, so it's never a path; (root folder) for a root, such as
+    // C:\, /, or \\server\share.
+    public static string FolderName(string path)
+    {
+        string trimmed = path.TrimEnd('/', '\\');
+        string name = trimmed[(trimmed.LastIndexOfAny(['/', '\\']) + 1)..];
+        return name.Length == 0 || name.EndsWith(':') || IsShareRoot(trimmed) ? "(root folder)" : name;
+    }
+
+    // Starts with / or \, with a drive letter and a colon, or with file:.
+    public static bool LooksLikeLocalPath(string key) =>
+        key.StartsWith('/') || key.StartsWith('\\') || (key.Length >= 2 && char.IsAsciiLetter(key[0]) && key[1] == ':')
+        || key.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
+
+    // \\server\share or //server/share, without trailing separators.
+    private static bool IsShareRoot(string trimmed) =>
+        trimmed.Length > 2 && trimmed[0] is '/' or '\\' && trimmed[1] is '/' or '\\' && trimmed[2..].Split(['/', '\\']).Length == 2;
+
+    // "<repository, or all repositories>[, branch <b>][, pull request #<n>][, conversation <id>]". A local root shows as
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ExportPrivacyTests.cs`, replace:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task EP4_TheSameInputsWriteTheSameBytesAndAReplayReproducesThem()
+```
+
+with:
+
+```csharp
+    }
+
+    // A --repo that's a path shows as its last folder's name, however it ends, or as (root folder); nothing else of it
+    // reaches a file or the console.
+    [Theory]
+    [InlineData("C:/Users/Alice/private-9f3e/project/", "project")]
+    [InlineData(@"C:\Users\Alice\private-9f3e\project\\", "project")]
+    [InlineData("/home/alice/private-9f3e/project/", "project")]
+    [InlineData(@"\\fileserver-9f3e\share\project\", "project")]
+    [InlineData("//fileserver-9f3e/share/project/", "project")]
+    [InlineData("file:///C:/Users/Alice/private-9f3e/project/", "project")]
+    [InlineData(@"\\fileserver-9f3e\private-9f3e\", "(root folder)")]
+    [InlineData(@"C:\", "(root folder)")]
+    [InlineData("C:", "(root folder)")]
+    [InlineData("/", "(root folder)")]
+    public async Task EP7_ARepositoryGivenAsAPathShowsOnlyItsFolderName(string repository, string shown)
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+
+        CliRun run = await Harness(temp.Path).RunAsync("export", "--repo", repository, "--bundle");
+
+        using JsonDocument manifest = JsonDocument.Parse(Entry(temp.Path, "manifest.json"));
+        Assert.Equal(
+            (0, $"Wrote copilot-ledger-report.html: 0 requests in {shown} (last 30 days).\nWrote copilot-ledger-report.zip: report.html, manifest.json, and 4 telemetry files.\n", string.Empty),
+            (run.ExitCode, run.Out, run.Error));
+        Assert.Equal(shown, manifest.RootElement.GetProperty("filter").GetProperty("repo").GetString());
+        Assert.All(Texts(temp.Path), text => Assert.DoesNotContain("9f3e", text, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task EP4_TheSameInputsWriteTheSameBytesAndAReplayReproducesThem()
+```
+
+### Tests
+
+- **EP7** (10 cases) `export --repo <path> --bundle` shows `project` for `C:/Users/Alice/private-9f3e/project/`, `C:\Users\Alice\private-9f3e\project\\`, `/home/alice/private-9f3e/project/`, `\\fileserver-9f3e\share\project\`, `//fileserver-9f3e/share/project/`, and `file:///C:/Users/Alice/private-9f3e/project/`, and `(root folder)` for `\\fileserver-9f3e\private-9f3e\`, `C:\`, `C:`, and `/`. Standard output is exactly `Wrote copilot-ledger-report.html: 0 requests in <shown> (last 30 days).` and the bundle's line, standard error is empty, `manifest.filter.repo` is the shown name, and `9f3e` is in neither the report nor any entry of the ZIP.
+
+### Acceptance criteria
+
+- No part of a path given to `--repo`, or of a local root, reaches a file or the console without `--include-local-paths`, however the path ends.
+- `dotnet test CopilotLedger.slnx` passes **1388** tests (1378 + 10).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 14 specification: A Failed Write Names No Path and Leaves Both Files As They Were
+
+Review findings R2 and R3. A write that failed printed the exception's message, which names the temporary file's absolute path: `--out missing/report.html` printed the working directory and the process ID. And with `--bundle --force`, the ZIP was moved into place before the report and never put back, so a report that couldn't be replaced (on Windows, a read-only one) left the new ZIP beside the old report, and the old ZIP was lost.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Cli/Export/ExportCommands.cs` | `WriteFailure`; a replaced ZIP waits at `BackupPath` until the report is in place, and `RestoreZip` puts it back |
+| `docs/cli.md` | `--force` says that a report that can't be replaced leaves the ZIP as it was |
+| `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs` | EC3 compares the whole message; new: EC12 |
+
+### Rules
+
+1. A failed write prints `Could not write <shown>: <reason>`, where `<shown>` is `--out` as given, or its `.zip`. `<reason>` is `its folder doesn't exist.` for a `DirectoryNotFoundException`, `access is denied.` for an `UnauthorizedAccessException`, and otherwise `the file system reported error 0x<HRESULT>.`, the exception's `HResult` as 8 uppercase hexadecimal digits. No exception message is printed.
+2. Both files are written to temporary files first, as before. Then, with `--bundle`, an existing ZIP (there's one only with `--force`) is moved to `<zip>.<process ID>.bak`, the new ZIP is moved into place, and the report is moved into place, replacing an existing one with `--force`.
+3. If a step fails, the export exits with 1 after putting the ZIP back as it was: the `.bak` file is moved back over the ZIP, or, when there's none, a ZIP that the export moved into place is deleted. If the `.bak` file can't be moved back, it's kept, and a second line says `The replaced <zip shown> is kept as <its file name>.`
+4. The temporary files are always deleted, and so is the `.bak` file once the report is in place.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+```markdown
+| `--max-timeline-spans` | `20000` | The most requests, and the most tool calls, that the timeline draws: the latest ones. 0 to 100,000. |
+| `--generated-at` | Now | The generation time to record, in UTC, such as `2026-11-21T21:30:00Z`, to reproduce an earlier export. |
+| `--force` | | Replace existing files. |
+
+The export reads the ledger once, so the report and the bundle agree. It covers the requests that start from the first day of `--since` up to the generation time, and the tool calls of their prompt chains in the same window; breaker trips are those of the same prompt chains, and budgets those of the requests' branches, with their all-time spend as `budget list` shows it. Standard output names the files, the number of requests, the scope, and the period, and never a folder:
+```
+
+with:
+
+```markdown
+| `--max-timeline-spans` | `20000` | The most requests, and the most tool calls, that the timeline draws: the latest ones. 0 to 100,000. |
+| `--generated-at` | Now | The generation time to record, in UTC, such as `2026-11-21T21:30:00Z`, to reproduce an earlier export. |
+| `--force` | | Replace existing files. If the report can't be replaced, the ZIP is put back as it was. |
+
+The export reads the ledger once, so the report and the bundle agree. It covers the requests that start from the first day of `--since` up to the generation time, and the tool calls of their prompt chains in the same window; breaker trips are those of the same prompt chains, and budgets those of the requests' branches, with their all-time spend as `budget list` shows it. Standard output names the files, the number of requests, the scope, and the period, and never a folder:
+```
+
+Edit 1 of 5 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+        string htmlTemp = TemporaryPath(htmlPath);
+        string? zipTemp = zipPath is null ? null : TemporaryPath(zipPath);
+        string writing = output;
+        ExportReportModel model;
+        try
+        {
+            // Both files are written from one snapshot, then moved into place: the ZIP first, then the report.
+            await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
+            {
+```
+
+with:
+
+```csharp
+        string htmlTemp = TemporaryPath(htmlPath);
+        string? zipTemp = zipPath is null ? null : TemporaryPath(zipPath);
+        string? zipBackup = null;
+        bool zipMoved = false;
+        string writing = output;
+        ExportReportModel model;
+        try
+        {
+            // Both files are written from one snapshot, then moved into place: the ZIP first, then the report. A ZIP that
+            // --force replaces waits beside it until the report is in place, so a failed export leaves both as they were.
+            await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
+            {
+```
+
+Edit 2 of 5 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+            {
+                writing = zipShown;
+                File.Move(zipTemp, zipPath!, overwrite: force);
+            }
+
+            writing = output;
+```
+
+with:
+
+```csharp
+            {
+                writing = zipShown;
+                if (File.Exists(zipPath))
+                {
+                    string backup = BackupPath(zipPath!);
+                    File.Move(zipPath!, backup);
+                    zipBackup = backup;
+                }
+
+                File.Move(zipTemp, zipPath!);
+                zipMoved = true;
+            }
+
+            writing = output;
+```
+
+Edit 3 of 5 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            context.Error.WriteLine($"Could not write {writing}: {ex.Message}");
+            return 1;
+        }
+```
+
+with:
+
+```csharp
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            context.Error.WriteLine($"Could not write {writing}: {WriteFailure(ex)}");
+            if (zipPath is not null && !RestoreZip(zipPath, zipBackup, zipMoved))
+            {
+                context.Error.WriteLine($"The replaced {zipShown} is kept as {Path.GetFileName(zipBackup)}.");
+                zipBackup = null;
+            }
+
+            return 1;
+        }
+```
+
+Edit 4 of 5 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+            {
+                DeleteIfPresent(zipTemp);
+            }
+        }
+```
+
+with:
+
+```csharp
+            {
+                DeleteIfPresent(zipTemp);
+            }
+
+            if (zipBackup is not null)
+            {
+                DeleteIfPresent(zipBackup);
+            }
+        }
+```
+
+Edit 5 of 5 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+        $"{target}.{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}.tmp";
+
+    private static void DeleteIfPresent(string path)
+    {
+```
+
+with:
+
+```csharp
+        $"{target}.{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}.tmp";
+
+    // Where a ZIP that --force replaces waits until the report is in place.
+    private static string BackupPath(string target) =>
+        $"{target}.{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}.bak";
+
+    // Why a file couldn't be written, without the path that the exception's message names.
+    private static string WriteFailure(Exception ex) => ex switch
+    {
+        DirectoryNotFoundException => "its folder doesn't exist.",
+        UnauthorizedAccessException => "access is denied.",
+        _ => $"the file system reported error 0x{ex.HResult.ToString("X8", CultureInfo.InvariantCulture)}.",
+    };
+
+    // Puts back the ZIP that --force replaced, or deletes the new one when there was none, so a failed export leaves no ZIP
+    // that doesn't match the report beside it. False when the replaced ZIP couldn't be put back.
+    private static bool RestoreZip(string zipPath, string? backup, bool moved)
+    {
+        if (backup is null)
+        {
+            if (moved)
+            {
+                DeleteIfPresent(zipPath);
+            }
+
+            return true;
+        }
+
+        try
+        {
+            File.Move(backup, zipPath, overwrite: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static void DeleteIfPresent(string path)
+    {
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+        CliRun missing = await cli.RunAsync("export", "--all-repos", "--out", "missing/report.html");
+
+        Assert.Equal((1, "out.html is a directory.\n"), (directory.ExitCode, directory.Error));
+        Assert.Equal(1, missing.ExitCode);
+        Assert.StartsWith("Could not write missing/report.html: ", missing.Error);
+        Assert.Empty(Directory.GetFiles(temp.Path, "*.tmp", SearchOption.AllDirectories));
+    }
+```
+
+with:
+
+```csharp
+        CliRun missing = await cli.RunAsync("export", "--all-repos", "--out", "missing/report.html");
+
+        Assert.Equal((1, "out.html is a directory.\n"), (directory.ExitCode, directory.Error));
+        Assert.Equal((1, "Could not write missing/report.html: its folder doesn't exist.\n"), (missing.ExitCode, missing.Error));
+        Assert.Empty(Directory.GetFiles(temp.Path, "*.tmp", SearchOption.AllDirectories));
+    }
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+with:
+
+```csharp
+    }
+
+    // Only Windows refuses to replace a read-only file or to move one that's open; on Linux, the folder's permissions decide.
+    [Fact]
+    public async Task EC12_AFailedReplaceLeavesBothFilesAsTheyWere()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        CliHarness cli = Harness(temp.Path);
+        string report = Path.Combine(temp.Path, Report);
+        string bundle = Path.ChangeExtension(report, ".zip");
+        File.WriteAllText(report, "old report");
+        File.WriteAllText(bundle, "old bundle");
+
+        File.SetAttributes(report, FileAttributes.ReadOnly);
+        CliRun readOnly = await cli.RunAsync("export", "--all-repos", "--bundle", "--force");
+        File.SetAttributes(report, FileAttributes.Normal);
+        CliRun open;
+        using (new FileStream(bundle, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            open = await cli.RunAsync("export", "--all-repos", "--bundle", "--force");
+        }
+
+        Assert.Equal((1, "Could not write copilot-ledger-report.html: access is denied.\n"), (readOnly.ExitCode, readOnly.Error));
+        Assert.Equal(
+            (1, "Could not write copilot-ledger-report.zip: the file system reported error 0x80070020.\n"),
+            (open.ExitCode, open.Error));
+        Assert.Equal(("old report", "old bundle"), (File.ReadAllText(report), File.ReadAllText(bundle)));
+        Assert.Equal([report, bundle], Directory.GetFiles(temp.Path).Order(StringComparer.Ordinal));
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+### Tests
+
+- **EC3** (changed) `--out missing/report.html` prints exactly `Could not write missing/report.html: its folder doesn't exist.`
+- **EC12** On Windows (elsewhere it returns at once: whether a file can be replaced there depends on its folder, not on the file): with a read-only `copilot-ledger-report.html` and an old ZIP, `export --all-repos --bundle --force` exits with 1 and prints `Could not write copilot-ledger-report.html: access is denied.`; with the ZIP open without sharing, it exits with 1 and prints `Could not write copilot-ledger-report.zip: the file system reported error 0x80070020.` Both times the report and the ZIP keep their old contents, and the folder holds only those two files.
+
+### Acceptance criteria
+
+- No path reaches standard error when a write fails, and a failed export leaves the report and the ZIP as they were.
+- `dotnet test CopilotLedger.slnx` passes **1389** tests (1388 + 1).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 15 specification: Tool History Counts Every Missing Tool Call and Every Deleted One
+
+Review findings A1 (R4) and R5. `importedToolCallsWithoutDetail` counted an imported request's `imported_tool_call_count` only when the request owned no link. But import links only the tool calls that started within the 7 days before the import and that completed (`LedgerImporter` and `CopilotSessionLogSource.ToolComplete`), so a request with 3 tool calls and 1 link counted as complete, and `toolHistory.complete` could be true. And tool history was the 7 days before `generatedAt`, while the daemon deletes `span_links` rows older than 7 days by its own clock, when it starts and every 6 hours. So an export with a past `--generated-at`, made after the daemon had deleted tool calls of that week, called requests complete that had lost theirs.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs` | Each imported request's missing tool calls; `ReadEarliestToolCallStartAsync` |
+| `src/CopilotLedger.Storage/ExportCoverageRow.cs` | `ImportedToolCallsWithoutDetail`'s comment |
+| `src/CopilotLedger.Storage/LedgerExportSnapshot.cs` | `GetEarliestToolCallStartAsync` |
+| `src/CopilotLedger.Cli/Export/ExportModelBuilder.cs` | Tool history starts no earlier than the earliest tool call kept |
+| `src/CopilotLedger.Cli/Export/ExportReportModel.cs` | `ExportCoverage.ToolHistoryFromEarliestToolCall` |
+| `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs` | The note's second wording |
+| `docs/cli.md` | The coverage bullet says where tool history starts |
+| `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs` | New: XR11, XR12 |
+| `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs` | EC8 gives its old request a tool call; new: EC13 |
+
+### Rules
+
+1. An imported request lacks the detail of `MAX(imported_tool_call_count - <its execute_tool links>, 0)` tool calls, where its links are the `span_links` rows whose `owner_span_row_id` is its row. `importedToolCallsWithoutDetail` sums that over the selected requests whose `imported_tool_call_count` is above 0.
+2. `GetEarliestToolCallStartAsync` returns the smallest `start_time_unix_ms` of the ledger's `execute_tool` links, of any filter or owner, or null when there's none. The daemon deletes every link that starts before its cutoff, so no tool call before this one is left, and a request that started before it may have lost its tool calls.
+3. Tool history starts at `generatedAt` less 7 days, or at the earliest tool call kept when that's later (it can be after `generatedAt`). `coverage.toolHistory.retainedFromUtc` is that start, and `spansBeforeRetention` counts the selected requests that started before it. When the ledger keeps no tool call, it's `generatedAt` less 7 days, because the ledger can't tell deleted tool calls from none.
+4. The note is `Tool calls are kept for 7 days, so the <n requests> before <local time> may be missing their tool calls.` when tool history starts 7 days before `generatedAt`, and `The earliest tool call the ledger keeps started at <local time>, so the <n requests> before it may be missing their tool calls.` when it starts at the earliest tool call kept (`its` for 1 request).
+5. Both rules read only the snapshot, so an unchanged ledger still writes the same bytes. A replay after the daemon has deleted tool calls reports more requests that may be missing theirs, which is true.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+```markdown
+### What the report shows
+
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the 7 days of tool history, unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Scroll or pinch to zoom, drag to pan, or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+```
+
+with:
+
+```markdown
+### What the report shows
+
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call the ledger keeps, because the daemon deletes older tool calls by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Scroll or pinch to zoom, drag to pan, or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Cli/Export/ExportModelBuilder.cs`, replace:
+
+```csharp
+            await snapshot.GetRollupAsync(LedgerGrouping.ChannelModel, filter, cancellationToken);
+        LedgerRollupRow totals = ReportCommands.Sum(byChannelModel);
+        DateTimeOffset toolHistoryFrom = inputs.GeneratedAt - LedgerImporter.ToolLinkRetention;
+        ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
+        IReadOnlyList<LedgerRollupRow> byModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken);
+```
+
+with:
+
+```csharp
+            await snapshot.GetRollupAsync(LedgerGrouping.ChannelModel, filter, cancellationToken);
+        LedgerRollupRow totals = ReportCommands.Sum(byChannelModel);
+
+        // Tool history is the retention before generatedAt, but starts no earlier than the earliest tool call the ledger
+        // keeps: the daemon deletes tool calls by its own clock, so a past --generated-at can't count on the retention.
+        DateTimeOffset retained = inputs.GeneratedAt - LedgerImporter.ToolLinkRetention;
+        DateTimeOffset? earliestToolCall = await snapshot.GetEarliestToolCallStartAsync(cancellationToken);
+        DateTimeOffset toolHistoryFrom = earliestToolCall is DateTimeOffset earliest && earliest > retained ? earliest : retained;
+        ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
+        IReadOnlyList<LedgerRollupRow> byModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken);
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Cli/Export/ExportModelBuilder.cs`, replace:
+
+```csharp
+                ToolHistoryRetentionDays = LedgerImporter.ToolLinkRetention.Days,
+                ToolHistoryFromUtc = toolHistoryFrom,
+                SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
+                ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
+```
+
+with:
+
+```csharp
+                ToolHistoryRetentionDays = LedgerImporter.ToolLinkRetention.Days,
+                ToolHistoryFromUtc = toolHistoryFrom,
+                ToolHistoryFromEarliestToolCall = toolHistoryFrom > retained,
+                SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
+                ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/ExportReportModel.cs`, replace:
+
+```csharp
+    public required long CacheLegacyUnknownSpans { get; init; }
+    public required int ToolHistoryRetentionDays { get; init; }        // LedgerImporter.ToolLinkRetention.Days (7)
+    public required DateTimeOffset ToolHistoryFromUtc { get; init; }    // GeneratedAt less the retention
+    public required long SpansBeforeToolHistory { get; init; }
+    public required long ImportedToolCallsWithoutDetail { get; init; }
+```
+
+with:
+
+```csharp
+    public required long CacheLegacyUnknownSpans { get; init; }
+    public required int ToolHistoryRetentionDays { get; init; }        // LedgerImporter.ToolLinkRetention.Days (7)
+    public required DateTimeOffset ToolHistoryFromUtc { get; init; }    // GeneratedAt less the retention, or the earliest tool call kept
+    public required bool ToolHistoryFromEarliestToolCall { get; init; } // ToolHistoryFromUtc is the earliest tool call kept, which is later
+    public required long SpansBeforeToolHistory { get; init; }
+    public required long ImportedToolCallsWithoutDetail { get; init; }
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs`, replace:
+
+```csharp
+        if (before > 0)
+        {
+            yield return $"Tool calls are kept for {coverage.ToolHistoryRetentionDays.ToString(CultureInfo.InvariantCulture)} days, so the {ExportRecords.Plural(before, "request", "requests")} before {LedgerFormat.LocalTime(coverage.ToolHistoryFromUtc, zone)} may be missing {(before == 1 ? "its" : "their")} tool calls.";
+        }
+
+        long withoutDetail = coverage.ImportedToolCallsWithoutDetail;
+```
+
+with:
+
+```csharp
+        if (before > 0)
+        {
+            string requests = ExportRecords.Plural(before, "request", "requests");
+            string their = before == 1 ? "its" : "their";
+            string from = LedgerFormat.LocalTime(coverage.ToolHistoryFromUtc, zone);
+            yield return coverage.ToolHistoryFromEarliestToolCall
+                ? $"The earliest tool call the ledger keeps started at {from}, so the {requests} before it may be missing {their} tool calls."
+                : $"Tool calls are kept for {coverage.ToolHistoryRetentionDays.ToString(CultureInfo.InvariantCulture)} days, so the {requests} before {from} may be missing {their} tool calls.";
+        }
+
+        long withoutDetail = coverage.ImportedToolCallsWithoutDetail;
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/ExportCoverageRow.cs`, replace:
+
+```csharp
+    public required long LedgerIncompleteImportLogs { get; init; }   // import_sessions with complete = 0, the whole ledger
+    public required long SpansBeforeToolHistory { get; init; }       // selected spans that start before toolHistoryFrom
+    public required long ImportedToolCallsWithoutDetail { get; init; }
+    public required long CacheReportedSpans { get; init; }
+    public required long CacheAbsentSpans { get; init; }
+```
+
+with:
+
+```csharp
+    public required long LedgerIncompleteImportLogs { get; init; }   // import_sessions with complete = 0, the whole ledger
+    public required long SpansBeforeToolHistory { get; init; }       // selected spans that start before toolHistoryFrom
+    public required long ImportedToolCallsWithoutDetail { get; init; } // tool calls of imported requests beyond the links they own
+    public required long CacheReportedSpans { get; init; }
+    public required long CacheAbsentSpans { get; init; }
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/LedgerExportSnapshot.cs`, replace:
+
+```csharp
+        SqliteLedgerStore.CountExportToolCallsAsync(_transaction, filter, cancellationToken);
+
+    // What the filter's spans cover. Spans that start before toolHistoryFrom may have lost their tool calls to retention.
+    public Task<ExportCoverageRow> GetCoverageAsync(
+```
+
+with:
+
+```csharp
+        SqliteLedgerStore.CountExportToolCallsAsync(_transaction, filter, cancellationToken);
+
+    // The start of the earliest tool call the ledger keeps, of any filter, or null when it keeps none. The daemon deletes
+    // older ones, so no tool call before it is left.
+    public Task<DateTimeOffset?> GetEarliestToolCallStartAsync(CancellationToken cancellationToken = default) =>
+        SqliteLedgerStore.ReadEarliestToolCallStartAsync(_transaction, cancellationToken);
+
+    // What the filter's spans cover. Spans that start before toolHistoryFrom may have lost their tool calls to retention.
+    public Task<ExportCoverageRow> GetCoverageAsync(
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+    }
+
+    // A superseded row that a live span of the same call replaced (the same canonical usage ID) counts when that live row is
+    // selected: it's the same request, counted once. One that live spans of its session replaced without matching it may be a
+    // call that no live span covers, so it counts when the filter selects it by its own columns, as gh ledger import reports
+    // it. import_sessions has no repository, so its two counts are the whole ledger's.
+    internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
+        SqliteTransaction snapshot,
+```
+
+with:
+
+```csharp
+    }
+
+    // The start of the earliest execute_tool link in the whole ledger, whatever its owner, or null when there's none.
+    internal static async Task<DateTimeOffset?> ReadEarliestToolCallStartAsync(
+        SqliteTransaction snapshot,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = snapshot.Connection!.CreateCommand();
+        command.Transaction = snapshot;
+        command.CommandText = "SELECT MIN(start_time_unix_ms) FROM span_links WHERE operation_name = 'execute_tool';";
+        return await command.ExecuteScalarAsync(cancellationToken) is long start
+            ? DateTimeOffset.FromUnixTimeMilliseconds(start)
+            : null;
+    }
+
+    // A superseded row that a live span of the same call replaced (the same canonical usage ID) counts when that live row is
+    // selected: it's the same request, counted once. One that live spans of its session replaced without matching it may be a
+    // call that no live span covers, so it counts when the filter selects it by its own columns, as gh ledger import reports
+    // it. An imported request lacks the detail of each tool call it made beyond the execute_tool links it owns: import keeps
+    // the links of only the tool calls that started within the retention, and that completed. import_sessions has no
+    // repository, so its two counts are the whole ledger's.
+    internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
+        SqliteTransaction snapshot,
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+            SELECT COALESCE(SUM(CASE WHEN start_time_unix_ms < @tool_history_from THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN imported_tool_call_count > 0
+                                      AND NOT EXISTS (SELECT 1 FROM span_links WHERE span_links.owner_span_row_id = spans.id)
+                                     THEN imported_tool_call_count ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN NOT {ReportedSql}
+```
+
+with:
+
+```csharp
+            SELECT COALESCE(SUM(CASE WHEN start_time_unix_ms < @tool_history_from THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN imported_tool_call_count > 0
+                                     THEN MAX(imported_tool_call_count
+                                              - (SELECT COUNT(*) FROM span_links
+                                                  WHERE span_links.owner_span_row_id = spans.id
+                                                    AND span_links.operation_name = 'execute_tool'), 0)
+                                     ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN NOT {ReportedSql}
+```
+
+Edit 1 of 4 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+using System.Xml.Linq;
+using CopilotLedger.Core.Import;
+```
+
+with:
+
+```csharp
+using System.Text.Json;
+using System.Xml.Linq;
+using CopilotLedger.Core.Import;
+```
+
+Edit 2 of 4 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+        XDocument fixture = await ExportAsync(cli, temp.Path, "--all-repos");
+        await store.RecordAsync([Entry(new DateTimeOffset(2026, 11, 10, 12, 0, 0, TimeSpan.Zero))]);
+        XDocument older = await ExportAsync(cli, temp.Path, "--all-repos", "--force");
+        await store.RecordImportedAsync([], Checkpoint(ambiguous: 2));
+```
+
+with:
+
+```csharp
+        XDocument fixture = await ExportAsync(cli, temp.Path, "--all-repos");
+        await store.RecordAsync([Entry(new DateTimeOffset(2026, 11, 10, 12, 0, 0, TimeSpan.Zero))]);
+        await store.RecordSpanLinksAsync([ToolCall("9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a", new DateTimeOffset(2026, 11, 10, 12, 0, 30, TimeSpan.Zero))]);
+        XDocument older = await ExportAsync(cli, temp.Path, "--all-repos", "--force");
+        await store.RecordImportedAsync([], Checkpoint(ambiguous: 2));
+```
+
+Edit 3 of 4 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+with:
+
+```csharp
+    }
+
+    // The daemon deleted the tool calls before 11-21, so the two requests of 11-20 may have lost theirs, though they're
+    // within 7 days of the generation time.
+    [Fact]
+    public async Task EC13_ToolHistoryStartsNoEarlierThanTheEarliestToolCallKept()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        await store.RecordSpanLinksAsync([ToolCall(ExportSeeds.E, new DateTimeOffset(2026, 11, 21, 13, 0, 0, TimeSpan.Zero))]);
+        await store.PruneSpanLinksAsync(new DateTimeOffset(2026, 11, 21, 0, 0, 0, TimeSpan.Zero));
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos", "--generated-at", "2026-11-21T21:30:00Z");
+
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement history = data.RootElement.GetProperty("coverage").GetProperty("toolHistory");
+        Assert.Equal(
+            ("2026-11-21T13:00:00.0000000+00:00", 2, false),
+            (history.GetProperty("retainedFromUtc").GetString(), history.GetProperty("spansBeforeRetention").GetInt32(), history.GetProperty("complete").GetBoolean()));
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains(
+            "The earliest tool call the ledger keeps started at 2026-11-21 08:00, so the 2 requests before it may be missing their tool calls.",
+            Notes(page));
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+Edit 4 of 4 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    private static ImportSessionCheckpoint Checkpoint(long ambiguous) => new()
+    {
+```
+
+with:
+
+```csharp
+    }
+
+    // A bash call in trace at start.
+    private static GenAiSpanLink ToolCall(string trace, DateTimeOffset start) => new()
+    {
+        TraceId = trace,
+        SpanId = trace[..2] + "00000000000099",
+        OperationName = "execute_tool",
+        ConversationId = "conv-x",
+        StartTime = start,
+        ToolName = "bash",
+        ToolExitCode = 0,
+    };
+
+    private static ImportSessionCheckpoint Checkpoint(long ambiguous) => new()
+    {
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs`, replace:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task XR5_ProvenanceListsTheRateCardsThatPricedTheSelection()
+    {
+```
+
+with:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task XR11_ImportedToolCallsWithoutDetailAreWhatEachRequestLacks()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        DateTimeOffset toolHistoryFrom = new(2026, 11, 14, 0, 0, 0, TimeSpan.Zero);
+        string i1 = ImportEntries.Copilot("k1", "conv-i", null).Span.TraceId;
+        List<long> withoutDetail = [];
+
+        // I1 owns the link of one tool call: it lacks none of 1, and 2 of 3.
+        foreach (int count in new[] { 1, 3 })
+        {
+            await LedgerSql.ExecuteAsync(
+                store.DatabasePath,
+                "UPDATE spans SET imported_tool_call_count = @p0 WHERE trace_id = @p1;",
+                count,
+                i1);
+            await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();
+            withoutDetail.Add((await snapshot.GetCoverageAsync(LedgerFilter.All, toolHistoryFrom)).ImportedToolCallsWithoutDetail);
+        }
+
+        Assert.Equal([0L, 2L], withoutDetail);
+    }
+
+    [Fact]
+    public async Task XR12_TheEarliestToolCallIsTheWholeLedgers()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore empty = new(Path.Combine(temp.Path, "empty.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await empty.InitializeAsync();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        List<DateTimeOffset?> earliest = [];
+
+        foreach (SqliteLedgerStore ledger in new[] { empty, store })
+        {
+            await using LedgerExportSnapshot snapshot = await ledger.OpenExportSnapshotAsync();
+            earliest.Add(await snapshot.GetEarliestToolCallStartAsync());
+        }
+
+        // Once I1's, I2's, T1, and T2 are deleted, T5 (A's invoke_agent link, at 14:00:50) is the earliest link, but T3 the
+        // earliest tool call.
+        await store.PruneSpanLinksAsync(new DateTimeOffset(2026, 11, 21, 14, 0, 45, TimeSpan.Zero));
+        await using (LedgerExportSnapshot pruned = await store.OpenExportSnapshotAsync())
+        {
+            earliest.Add(await pruned.GetEarliestToolCallStartAsync());
+        }
+
+        Assert.Equal([null, ImportEntries.Start, new DateTimeOffset(2026, 11, 21, 15, 0, 10, TimeSpan.Zero)], earliest);
+    }
+
+    [Fact]
+    public async Task XR5_ProvenanceListsTheRateCardsThatPricedTheSelection()
+    {
+```
+
+### Tests
+
+- **XR11** I1 owns the link of one tool call: with `imported_tool_call_count` 1 it lacks no detail, and with 3 it lacks 2.
+- **XR12** The earliest tool call is null in an empty ledger and `2026-11-20T12:00:00Z` (I1's and I2's) in `ExportSeeds`; once the links before 14:00:45 on 11-21 are deleted, it's T3's, at 15:00:10, though T5, an invoke_agent link at 14:00:50, is earlier.
+- **EC8** (changed) The request of 11-10 has a tool call at 12:00:30, so tool history still starts 7 days before `generatedAt`, and the note is unchanged.
+- **EC13** With a tool call at 13:00 on 11-21 and every link before 11-21 deleted, an export at `2026-11-21T21:30:00Z` has `retainedFromUtc` `2026-11-21T13:00:00.0000000+00:00`, 2 requests before it (I1 and J1), `complete` false, `Tool calls: partial; see the notes.`, and the note `The earliest tool call the ledger keeps started at 2026-11-21 08:00, so the 2 requests before it may be missing their tool calls.`
+
+### Acceptance criteria
+
+- Tool history is complete only when no selected request may have lost a tool call to retention, to the daemon's deletions, or to an import that kept no detail; an unchanged ledger still replays byte for byte.
+- `dotnet test CopilotLedger.slnx` passes **1392** tests (1389 + 3).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 16 specification: Pages Seek the Start-Time Indexes
+
+Review finding C2, from the coordinator's review. `AfterCursorSql`, `(@after_start IS NULL OR (start_time_unix_ms, trace_id, span_id) > (…))`, together with `FilterSql`'s `@from IS NULL OR …`, left SQLite no index to seek. So every 1,000-row page of `spans.json` scanned and sorted the whole table, and every page of `tool-calls.json` built the list of every selected trace again (the plans and times are under "Review fixes"). The bundle reads each file twice, once to hash it and once to write it. The rows don't change, only how fast they come.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs` | `AfterCursorSql` with a plain lower bound, and a first cursor at the period's start; `ExportToolCallWhereSql` with a correlated `EXISTS` |
+| `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs` | New: XR13 |
+
+### Rules
+
+1. A page reads the rows with `start_time_unix_ms >= @after_start AND (start_time_unix_ms, trace_id, span_id) > (@after_start, @after_trace, @after_span)`, in that order, up to its limit. The plain bound lets SQLite seek `ix_spans_start_time`, or `ix_span_links_start` for tool calls, and stop after the limit.
+2. Without a cursor, `@after_start` is the filter's `From` in Unix milliseconds, or `long.MinValue`, and `@after_trace` and `@after_span` are empty, which sorts before every ID, so the first page starts at the period's first row.
+3. A tool call belongs to the selection when `EXISTS (SELECT 1 FROM spans AS chain WHERE chain.trace_id = span_links.trace_id AND <FilterSql>)`: a lookup in `ix_spans_trace` for each link, instead of an `IN` list that every page built again. The tool-call count uses the same condition.
+4. The snapshot stays read-only, with no temporary table.
+
+### Code (copy exactly)
+
+Edit 1 of 3 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+        """;
+
+    // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span.
+    // Unqualified columns are span_links' outside the subquery and spans' inside it.
+    private const string ExportToolCallWhereSql = $"""
+        operation_name = 'execute_tool'
+```
+
+with:
+
+```csharp
+        """;
+
+    // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span: a
+    // correlated EXISTS, which finds each link's trace through ix_spans_trace, rather than an IN list of every selected trace
+    // that each page would build again. Unqualified columns are span_links' outside the subquery and spans' inside it.
+    private const string ExportToolCallWhereSql = $"""
+        operation_name = 'execute_tool'
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+          AND (@from IS NULL OR start_time_unix_ms >= @from)
+          AND (@to IS NULL OR start_time_unix_ms < @to)
+          AND trace_id IN (SELECT trace_id FROM spans WHERE {FilterSql})
+        """;
+
+    // Rows after the cursor in (start time, trace ID, span ID) order, or every row when there's no cursor.
+    private const string AfterCursorSql =
+        "(@after_start IS NULL OR (start_time_unix_ms, trace_id, span_id) > (@after_start, @after_trace, @after_span))";
+
+    internal static Task<IReadOnlyList<ExportSpanRow>> ReadExportSpansAsync(
+```
+
+with:
+
+```csharp
+          AND (@from IS NULL OR start_time_unix_ms >= @from)
+          AND (@to IS NULL OR start_time_unix_ms < @to)
+          AND EXISTS (SELECT 1 FROM spans AS chain WHERE chain.trace_id = span_links.trace_id AND {FilterSql})
+        """;
+
+    // Rows after the cursor in (start time, trace ID, span ID) order. The plain lower bound on start_time_unix_ms lets every
+    // page seek ix_spans_start_time or ix_span_links_start instead of scanning and sorting the whole table; the first page's
+    // cursor is the period's start, or the earliest time, with empty IDs, which sorts before every row (ReadExportRowsAsync).
+    private const string AfterCursorSql = """
+        start_time_unix_ms >= @after_start
+          AND (start_time_unix_ms, trace_id, span_id) > (@after_start, @after_trace, @after_span)
+        """;
+
+    internal static Task<IReadOnlyList<ExportSpanRow>> ReadExportSpansAsync(
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+        command.CommandText = sql;
+        AddFilterParameters(command, filter);
+        command.Parameters.AddWithValue("@after_start", OrDbNull(after?.StartTimeUnixMs));
+        command.Parameters.AddWithValue("@after_trace", OrDbNull(after?.TraceId));
+        command.Parameters.AddWithValue("@after_span", OrDbNull(after?.SpanId));
+        command.Parameters.AddWithValue("@limit", limit);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+```
+
+with:
+
+```csharp
+        command.CommandText = sql;
+        AddFilterParameters(command, filter);
+        command.Parameters.AddWithValue("@after_start", after?.StartTimeUnixMs ?? filter.From?.ToUnixTimeMilliseconds() ?? long.MinValue);
+        command.Parameters.AddWithValue("@after_trace", after?.TraceId ?? string.Empty);
+        command.Parameters.AddWithValue("@after_span", after?.SpanId ?? string.Empty);
+        command.Parameters.AddWithValue("@limit", limit);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+```
+
+Edit 1 of 3 in `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs`, replace:
+
+```csharp
+using CopilotLedger.Core.Breaker;
+using CopilotLedger.Core.Import;
+```
+
+with:
+
+```csharp
+using System.Globalization;
+using CopilotLedger.Core.Breaker;
+using CopilotLedger.Core.Import;
+```
+
+Edit 2 of 3 in `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs`, replace:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task XR5_ProvenanceListsTheRateCardsThatPricedTheSelection()
+```
+
+with:
+
+```csharp
+    }
+
+    // Pages seek past rows that start in the same millisecond, from the period's first, and skip or repeat none.
+    [Fact]
+    public async Task XR13_PagesSplitRowsThatStartTogether()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        DateTimeOffset start = new(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
+        string[] traces = [.. "12345".Select(digit => new string(digit, 32))];
+        await store.RecordAsync(
+        [
+            .. traces.SelectMany(trace => new[] { Request(trace, 2, start), Request(trace, 1, start) }),
+            Request(traces[0], 3, start.AddMilliseconds(-1)),
+            Request(traces[4], 3, start.AddSeconds(1)),
+        ]);
+        await store.RecordSpanLinksAsync(
+        [
+            .. traces.Take(3).SelectMany(trace => new[] { ToolCall(trace, 2, start.AddSeconds(30)), ToolCall(trace, 1, start.AddSeconds(30)) }),
+            ToolCall(new string('9', 32), 1, start.AddSeconds(30)),
+        ]);
+        LedgerFilter filter = LedgerFilter.All with { From = start, To = start.AddHours(1) };
+        await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();
+
+        List<string> spans = [];
+        ExportCursor? after = null;
+        IReadOnlyList<ExportSpanRow> page;
+        while ((page = await snapshot.GetSpansAsync(filter, after, 3)).Count > 0)
+        {
+            spans.AddRange(page.Select(row => $"{row.TraceId[0]}{row.SpanId[^1]}"));
+            after = new ExportCursor(page[^1].StartTime.ToUnixTimeMilliseconds(), page[^1].TraceId, page[^1].SpanId);
+        }
+
+        List<string> toolCalls = [];
+        after = null;
+        IReadOnlyList<ExportToolCallRow> calls;
+        while ((calls = await snapshot.GetToolCallsAsync(filter, after, 4)).Count > 0)
+        {
+            toolCalls.AddRange(calls.Select(row => $"{row.TraceId[0]}{row.SpanId[^1]}"));
+            after = new ExportCursor(calls[^1].StartTime.ToUnixTimeMilliseconds(), calls[^1].TraceId, calls[^1].SpanId);
+        }
+
+        Assert.Equal(["11", "12", "21", "22", "31", "32", "41", "42", "51", "52", "53"], spans);
+        Assert.Equal(["11", "12", "21", "22", "31", "32"], toolCalls);
+    }
+
+    [Fact]
+    public async Task XR5_ProvenanceListsTheRateCardsThatPricedTheSelection()
+```
+
+Edit 3 of 3 in `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs`, replace:
+
+```csharp
+        Assert.Equal(trips, (await snapshot.GetBreakerTripsAsync(filter)).Count);
+    }
+}
+```
+
+with:
+
+```csharp
+        Assert.Equal(trips, (await snapshot.GetBreakerTripsAsync(filter)).Count);
+    }
+
+    // A claude-haiku-4.5 request, the index-th of trace, at start.
+    private static LedgerEntry Request(string trace, int index, DateTimeOffset start)
+    {
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            startTime: start,
+            requestModel: "claude-haiku-4.5",
+            conversationId: "conv-" + trace[0],
+            inputTokens: 1_000,
+            outputTokens: 100) with
+        {
+            TraceId = trace,
+            SpanId = ExportSeeds.SpanId(trace, index),
+        };
+        return new LedgerEntry(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), null);
+    }
+
+    // A bash call, the index-th of trace, at start.
+    private static GenAiSpanLink ToolCall(string trace, int index, DateTimeOffset start) => new()
+    {
+        TraceId = trace,
+        SpanId = "7" + trace[0] + "0000000000000" + index.ToString(CultureInfo.InvariantCulture),
+        OperationName = "execute_tool",
+        ConversationId = "conv-" + trace[0],
+        StartTime = start,
+        ToolName = "bash",
+        ToolExitCode = 0,
+    };
+}
+```
+
+### Tests
+
+- **XR13** Ten requests that start in the same millisecond, one a millisecond before the period (left out), and one a second after the ten, read 3 at a time, come back once each, in (start, trace, span) order; so do six tool calls that start together in three of the traces, read 4 at a time, without the tool call of a trace that has no request. XR13 passes before this task too, because the old queries were slow, not wrong. A test can't check a query plan without the store's SQL, which is private, so the plans were checked by the probe under "Review fixes".
+
+### Acceptance criteria
+
+- Pages seek the start-time indexes and return the same rows as before.
+- `dotnet test CopilotLedger.slnx` passes **1393** tests (1392 + 1).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 17 specification: The Timeline Draws Every Request, Labels Only Real Times, and Lets the Page Scroll
+
+Review findings C1, R7 (C3), R8, and A2:
+
+- **C1.** A bar was `Math.Max(X(end) - X(start), 0)` wide, to three decimals, so a request without a duration (every Codex import, and Copilot imports without one) or shorter than about 1.2 s on a 30-day axis was `width="0"`, which SVG never draws, though the note says every request is drawn.
+- **R7 (C3).** `ExportTime.ToUtc` moves a skipped local time to the gap's end, so local 02:00 on 2026-03-08 in New York became the instant of 03:00 with the label `02:00`, and the real 03:00 was dropped as its duplicate. The comment said the opposite.
+- **R8.** Ticks were as fine as the whole range needed (6 hours over 30 days), but the script zoomed down to 0.5 units (about 22 minutes there), where a view can hold no tick and so no label.
+- **A2.** The wheel always zoomed, and `#timeline-plot` had `touch-action: none`, so a timeline of many rows, up to 200 of 16 units each, trapped the page's scrolling under the pointer and under a finger.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Cli/Export/TimelineLayout.cs` | `MinimumBarWidth`; `Ticks` rewritten; `Step`, `AxisLevel`, and `MinWidth` |
+| `src/CopilotLedger.Cli/Export/ExportReportModel.cs` | `ExportTimeline.MinWidth` and `AxisLevel` |
+| `src/CopilotLedger.Cli/Export/ExportSvg.cs` | The axis draws lines down to `AxisLevel` |
+| `src/CopilotLedger.Cli/Export/ExportJson.cs` | `timeline.minWidth` in `ledger-data` |
+| `src/CopilotLedger.Cli/Export/Assets/report.js` | Every zoom stops at `minWidth`; the wheel zooms only with Ctrl or Command |
+| `src/CopilotLedger.Cli/Export/Assets/report.css` | `#timeline-plot` has `touch-action: pan-y` |
+| `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs` | The help text |
+| `docs/cli.md` | The Timeline bullet; `minWidth` in the allowlist |
+| `tests/CopilotLedger.Tests/Cli/ExportTimelineTests.cs` | TL7's ticks; new: TL11, TL12, TL13 |
+| `tests/CopilotLedger.Tests/Cli/ExportAssetTests.cs` | New: EA4 |
+
+### Rules
+
+1. A bar is at least 0.001 units wide (`MinimumBarWidth`), and its non-scaling 1-pixel stroke shows it at any zoom.
+2. Ticks are local boundaries from t0 to t1, in time order, as fine as `Step`: 10 minutes within 7 days, an hour within 62, 6 hours within 366, and else a day, thinned as before beyond 2,000 days. A boundary that a transition skips is no tick, except midnight, whose tick is then the day's first instant, and wins over an hour's tick at that instant. A boundary that a transition repeats is a tick at each of its instants, with the same label.
+3. The axis draws a line only for ticks down to `AxisLevel`, the levels it drew before: 10-minute marks within a day, hours within 7 days, 6-hour marks within 62, and else days. The finer ticks are in `ledger-data`, for the script's labels.
+4. `ledger-data`'s `timeline.minWidth`, after `width`, is twice the widest gap between neighboring ticks, or between an end of the axis and its nearest tick, and at least 0.5. The script's every zoom (wheel, pinch, keys, and the overview) stops at it, so every view holds at least two ticks to label.
+5. The wheel zooms only with Ctrl or Command held, or in a trackpad pinch, which browsers send as a wheel with `ctrlKey`; otherwise the page scrolls. `#timeline-plot` has `touch-action: pan-y`, so a vertical swipe scrolls the page and a sideways drag or a pinch still reaches the script. The help text and `docs/cli.md` say so.
+
+### Code (copy exactly)
+
+Edit 1 of 2 in `docs/cli.md`, replace:
+
+```markdown
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call the ledger keeps, because the daemon deletes older tool calls by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Scroll or pinch to zoom, drag to pan, or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+- **Cache efficiency, prompt chains, spend tables, and the circuit breaker:** the reports' numbers, with sortable columns.
+```
+
+with:
+
+```markdown
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call the ledger keeps, because the daemon deletes older tool calls by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Hold Ctrl or Command and scroll, or pinch, to zoom, as far as the axis can still label two times; drag sideways to pan; or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+- **Cache efficiency, prompt chains, spend tables, and the circuit breaker:** the reports' numbers, with sortable columns.
+```
+
+Edit 2 of 2 in `docs/cli.md`, replace:
+
+```markdown
+| `manifest.json` | `files[]` | `path`, `bytes`, `sha256` |
+| `report.html` | `.` | `schemaVersion`, `generatedAtUtc`, `toolVersion`, `filter`, `timeZone`, `timeline`, `coverage` |
+| `report.html` | `timeline` | `fromUtc`, `toUtc`, `width`, `ticks` |
+| `report.html` | `timeline.ticks[]` | `x`, `level`, `label` |
+| `manifest.json`, `report.html` | `filter` | `repo`, `allRepositories`, `branch`, `pr`, `conversation`, `since`, `period`, `fromUtc`, `toUtc` |
+```
+
+with:
+
+```markdown
+| `manifest.json` | `files[]` | `path`, `bytes`, `sha256` |
+| `report.html` | `.` | `schemaVersion`, `generatedAtUtc`, `toolVersion`, `filter`, `timeZone`, `timeline`, `coverage` |
+| `report.html` | `timeline` | `fromUtc`, `toUtc`, `width`, `minWidth`, `ticks` |
+| `report.html` | `timeline.ticks[]` | `x`, `level`, `label` |
+| `manifest.json`, `report.html` | `filter` | `repo`, `allRepositories`, `branch`, `pr`, `conversation`, `since`, `period`, `fromUtc`, `toUtc` |
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/Assets/report.css`, replace:
+
+```
+.timeline-viewport { min-width: 0; }
+.timeline-viewport > svg { display: block; width: 100%; }
+#timeline-plot { touch-action: none; cursor: grab; }
+#timeline-overview { touch-action: none; cursor: crosshair; margin-top: 4px; }
+.axis-labels { position: relative; height: 18px; font-size: 11px; color: var(--muted); }
+```
+
+with:
+
+```
+.timeline-viewport { min-width: 0; }
+.timeline-viewport > svg { display: block; width: 100%; }
+#timeline-plot { touch-action: pan-y; cursor: grab; }
+#timeline-overview { touch-action: none; cursor: crosshair; margin-top: 4px; }
+.axis-labels { position: relative; height: 18px; font-size: 11px; color: var(--muted); }
+```
+
+Edit 1 of 5 in `src/CopilotLedger.Cli/Export/Assets/report.js`, replace:
+
+```
+    }
+
+    var width = timeline.width;
+    var height = Number(plot.getAttribute('height'));
+    var ticks = Array.isArray(timeline.ticks) ? timeline.ticks : [];
+```
+
+with:
+
+```
+    }
+
+    var width = timeline.width;
+    var minWidth = timeline.minWidth;
+    var height = Number(plot.getAttribute('height'));
+    var ticks = Array.isArray(timeline.ticks) ? timeline.ticks : [];
+```
+
+Edit 2 of 5 in `src/CopilotLedger.Cli/Export/Assets/report.js`, replace:
+
+```
+    }
+
+    function apply() {
+      view.w = clamp(view.w, 0.5, width);
+      view.x = clamp(view.x, 0, width - view.w);
+      plot.setAttribute('viewBox', view.x + ' 0 ' + view.w + ' ' + height);
+```
+
+with:
+
+```
+    }
+
+    function apply() {
+      view.w = clamp(view.w, minWidth, width);
+      view.x = clamp(view.x, 0, width - view.w);
+      plot.setAttribute('viewBox', view.x + ' 0 ' + view.w + ' ' + height);
+```
+
+Edit 3 of 5 in `src/CopilotLedger.Cli/Export/Assets/report.js`, replace:
+
+```
+    function zoom(factor, unit) {
+      var ratio = (unit - view.x) / view.w;
+      view.w = clamp(view.w * factor, 0.5, width);
+      view.x = unit - ratio * view.w;
+      apply();
+```
+
+with:
+
+```
+    function zoom(factor, unit) {
+      var ratio = (unit - view.x) / view.w;
+      view.w = clamp(view.w * factor, minWidth, width);
+      view.x = unit - ratio * view.w;
+      apply();
+```
+
+Edit 4 of 5 in `src/CopilotLedger.Cli/Export/Assets/report.js`, replace:
+
+```
+    }
+
+    viewport.addEventListener('wheel', function (event) {
+      event.preventDefault();
+      zoom(event.deltaY < 0 ? 1 / 1.25 : 1.25, unitAt(event.clientX));
+```
+
+with:
+
+```
+    }
+
+    // Ctrl or Command with the wheel zooms, as does a trackpad pinch, which browsers send as a wheel with ctrlKey set. A plain
+    // scroll is left to the page: a timeline of many rows is taller than the window, and would otherwise trap it.
+    viewport.addEventListener('wheel', function (event) {
+      if (!(event.ctrlKey || event.metaKey) || event.deltaY === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      zoom(event.deltaY < 0 ? 1 / 1.25 : 1.25, unitAt(event.clientX));
+```
+
+Edit 5 of 5 in `src/CopilotLedger.Cli/Export/Assets/report.js`, replace:
+
+```
+        var box = plot.getBoundingClientRect();
+        var middle = (positions[0] + positions[1]) / 2;
+        view.w = clamp(pinch.w * pinch.distance / distance, 0.5, width);
+        view.x = pinch.unit - (middle - box.left) / Math.max(box.width, 1) * view.w;
+        apply();
+```
+
+with:
+
+```
+        var box = plot.getBoundingClientRect();
+        var middle = (positions[0] + positions[1]) / 2;
+        view.w = clamp(pinch.w * pinch.distance / distance, minWidth, width);
+        view.x = pinch.unit - (middle - box.left) / Math.max(box.width, 1) * view.w;
+        apply();
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/ExportJson.cs`, replace:
+
+```csharp
+                LedgerFormat.WriteTime(writer, "toUtc", DateTimeOffset.FromUnixTimeMilliseconds(timeline.ToUnixMs));
+                writer.WriteNumber("width", TimelineLayout.Width);
+                writer.WriteStartArray("ticks");
+                foreach (ExportAxisTick tick in timeline.Ticks)
+```
+
+with:
+
+```csharp
+                LedgerFormat.WriteTime(writer, "toUtc", DateTimeOffset.FromUnixTimeMilliseconds(timeline.ToUnixMs));
+                writer.WriteNumber("width", TimelineLayout.Width);
+                writer.WritePropertyName("minWidth");
+                writer.WriteRawValue(Number(timeline.MinWidth));
+                writer.WriteStartArray("ticks");
+                foreach (ExportAxisTick tick in timeline.Ticks)
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/ExportReportModel.cs`, replace:
+
+```csharp
+    public required IReadOnlyList<UtcBand> NightBands { get; init; }
+    public required IReadOnlyList<ExportAxisTick> Ticks { get; init; }
+    public required IReadOnlyList<string> Models { get; init; }                   // the models of colors m0-m6: the model rollup's first 7
+    public required bool OtherModels { get; init; }                               // some drawn request has color m7
+```
+
+with:
+
+```csharp
+    public required IReadOnlyList<UtcBand> NightBands { get; init; }
+    public required IReadOnlyList<ExportAxisTick> Ticks { get; init; }
+    public required decimal MinWidth { get; init; }                               // the narrowest view the script zooms to
+    public required int AxisLevel { get; init; }                                  // the finest tick level the axis draws a line for
+    public required IReadOnlyList<string> Models { get; init; }                   // the models of colors m0-m6: the model rollup's first 7
+    public required bool OtherModels { get; init; }                               // some drawn request has color m7
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/ExportSvg.cs`, replace:
+
+```csharp
+        Line(html, "</svg>");
+        Line(html, "<svg id=\"timeline-axis\" class=\"timeline-axis\" aria-hidden=\"true\" viewBox=\"0 0 1000 6\" preserveAspectRatio=\"none\" height=\"6\">");
+        foreach (ExportAxisTick tick in timeline.Ticks)
+        {
+            Line(html, $"<line class=\"tick\" x1=\"{ExportJson.Number(tick.X)}\" y1=\"0\" x2=\"{ExportJson.Number(tick.X)}\" y2=\"6\" />");
+```
+
+with:
+
+```csharp
+        Line(html, "</svg>");
+        Line(html, "<svg id=\"timeline-axis\" class=\"timeline-axis\" aria-hidden=\"true\" viewBox=\"0 0 1000 6\" preserveAspectRatio=\"none\" height=\"6\">");
+        foreach (ExportAxisTick tick in timeline.Ticks.Where(tick => tick.Level <= timeline.AxisLevel))
+        {
+            Line(html, $"<line class=\"tick\" x1=\"{ExportJson.Number(tick.X)}\" y1=\"0\" x2=\"{ExportJson.Number(tick.X)}\" y2=\"6\" />");
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs`, replace:
+
+```csharp
+            Line(
+                html,
+                "<p id=\"timeline-help\">Scroll or pinch to zoom and drag to pan, or focus the timeline and use the arrow keys, + and -, and 0. Drag across the overview to choose a range.</p></div>");
+            Line(html, "<figure class=\"chart\" id=\"timeline-figure\">");
+            ExportSvg.Timeline(html, timeline, zone);
+```
+
+with:
+
+```csharp
+            Line(
+                html,
+                "<p id=\"timeline-help\">Hold Ctrl or Command and scroll, or pinch, to zoom; drag sideways to pan; or focus the timeline and use the arrow keys, + and -, and 0. Drag across the overview to choose a range.</p></div>");
+            Line(html, "<figure class=\"chart\" id=\"timeline-figure\">");
+            ExportSvg.Timeline(html, timeline, zone);
+```
+
+Edit 1 of 7 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+    private const long DayMs = 86_400_000;
+
+    public static readonly ExportTimeline Empty = new()
+    {
+```
+
+with:
+
+```csharp
+    private const long DayMs = 86_400_000;
+
+    // The narrowest bar: SVG draws no rectangle 0 wide, and a request without a duration still shows as its 1-pixel stroke.
+    private const decimal MinimumBarWidth = 0.001m;
+
+    public static readonly ExportTimeline Empty = new()
+    {
+```
+
+Edit 2 of 7 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+        NightBands = [],
+        Ticks = [],
+        Models = [],
+        OtherModels = false,
+```
+
+with:
+
+```csharp
+        NightBands = [],
+        Ticks = [],
+        MinWidth = Width,
+        AxisLevel = 0,
+        Models = [],
+        OtherModels = false,
+```
+
+Edit 3 of 7 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+                decimal end = X(span.EndTime.ToUnixTimeMilliseconds());
+                int color = span.Model is null ? -1 : colors.IndexOf(span.Model);
+                return new ExportTimelineSpan(span, GroupOf(span.ConversationId).Row, start, Math.Max(end - start, 0m), color < 0 ? 7 : color);
+            }),
+        ];
+```
+
+with:
+
+```csharp
+                decimal end = X(span.EndTime.ToUnixTimeMilliseconds());
+                int color = span.Model is null ? -1 : colors.IndexOf(span.Model);
+                return new ExportTimelineSpan(span, GroupOf(span.ConversationId).Row, start, Math.Max(end - start, MinimumBarWidth), color < 0 ? 7 : color);
+            }),
+        ];
+```
+
+Edit 4 of 7 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+        }
+
+        return new ExportTimeline
+        {
+```
+
+with:
+
+```csharp
+        }
+
+        IReadOnlyList<ExportAxisTick> axis = Ticks(t0, t1, zone, X);
+        return new ExportTimeline
+        {
+```
+
+Edit 5 of 7 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+                DateTimeOffset.FromUnixTimeMilliseconds(t0),
+                DateTimeOffset.FromUnixTimeMilliseconds(t1)),
+            Ticks = Ticks(t0, t1, zone, X),
+            Models = colors,
+            OtherModels = bars.Any(bar => bar.Color == 7),
+```
+
+with:
+
+```csharp
+                DateTimeOffset.FromUnixTimeMilliseconds(t0),
+                DateTimeOffset.FromUnixTimeMilliseconds(t1)),
+            Ticks = axis,
+            MinWidth = MinWidth(axis),
+            AxisLevel = AxisLevel(t1 - t0),
+            Models = colors,
+            OtherModels = bars.Any(bar => bar.Color == 7),
+```
+
+Edit 6 of 7 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+    }
+
+    // Local boundaries from t0 to t1 as ticks: level 0 at midnight, 1 at 06:00, 12:00, and 18:00 within 62 days, 2 at other
+    // whole hours within 7 days, and 3 at other 10-minute marks within a day. A boundary that a transition skips maps to the
+    // instant of the previous one and is dropped.
+    private static IReadOnlyList<ExportAxisTick> Ticks(long t0, long t1, TimeZoneInfo zone, Func<long, decimal> x)
+    {
+        long range = t1 - t0;
+        TimeSpan step = range <= DayMs
+            ? TimeSpan.FromMinutes(10)
+            : range <= 7 * DayMs
+                ? TimeSpan.FromHours(1)
+                : range <= 62 * DayMs ? TimeSpan.FromHours(6) : TimeSpan.FromDays(1);
+        DateTime end = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t1), zone).DateTime;
+        List<ExportAxisTick> ticks = [];
+        long previous = long.MinValue;
+        for (DateTime local = ExportTime.LocalDate(DateTimeOffset.FromUnixTimeMilliseconds(t0), zone).ToDateTime(TimeOnly.MinValue);
+             local <= end;
+             local += step)
+        {
+            long instant = ExportTime.ToUtc(local, zone).ToUnixTimeMilliseconds();
+            if (instant < t0 || instant > t1 || instant == previous)
+            {
+                continue;
+            }
+
+            previous = instant;
+            int level = local.TimeOfDay == TimeSpan.Zero ? 0 : local.Minute != 0 ? 3 : local.Hour % 6 == 0 ? 1 : 2;
+            ticks.Add(new ExportAxisTick(
+                x(instant),
+                level,
+                local.ToString(level == 0 ? "yyyy-MM-dd" : "HH:mm", CultureInfo.InvariantCulture)));
+        }
+
+        int days = ticks.Count(tick => tick.Level == 0);
+```
+
+with:
+
+```csharp
+    }
+
+    // Local boundaries from t0 to t1 as ticks, in time order: level 0 at midnight, 1 at 06:00, 12:00, and 18:00, 2 at other
+    // whole hours, and 3 at other 10-minute marks, down to Step's. A boundary that a transition skips isn't a tick, except
+    // midnight, whose tick is then the day's first instant; one that a transition repeats is a tick each time it occurs.
+    private static IReadOnlyList<ExportAxisTick> Ticks(long t0, long t1, TimeZoneInfo zone, Func<long, decimal> x)
+    {
+        TimeSpan step = Step(t1 - t0);
+        DateTime end = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t1), zone).DateTime;
+        List<(long Instant, int Level, string Label)> boundaries = [];
+        for (DateTime local = ExportTime.LocalDate(DateTimeOffset.FromUnixTimeMilliseconds(t0), zone).ToDateTime(TimeOnly.MinValue);
+             local <= end;
+             local += step)
+        {
+            if (zone.IsInvalidTime(local) && local.TimeOfDay != TimeSpan.Zero)
+            {
+                continue;
+            }
+
+            int level = local.TimeOfDay == TimeSpan.Zero ? 0 : local.Minute != 0 ? 3 : local.Hour % 6 == 0 ? 1 : 2;
+            string label = local.ToString(level == 0 ? "yyyy-MM-dd" : "HH:mm", CultureInfo.InvariantCulture);
+            long[] instants = zone.IsAmbiguousTime(local)
+                ? [.. zone.GetAmbiguousTimeOffsets(local).Select(offset => new DateTimeOffset(local, offset).ToUnixTimeMilliseconds())]
+                : [ExportTime.ToUtc(local, zone).ToUnixTimeMilliseconds()];
+            boundaries.AddRange(instants.Where(instant => instant >= t0 && instant <= t1).Select(instant => (instant, level, label)));
+        }
+
+        List<ExportAxisTick> ticks =
+        [
+            .. boundaries
+                .OrderBy(boundary => boundary.Instant)
+                .ThenBy(boundary => boundary.Level)
+                .DistinctBy(boundary => boundary.Instant)
+                .Select(boundary => new ExportAxisTick(x(boundary.Instant), boundary.Level, boundary.Label)),
+        ];
+
+        int days = ticks.Count(tick => tick.Level == 0);
+```
+
+Edit 7 of 7 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+        }
+
+        return ticks;
+    }
+
+    private static ExportTimelineRow Row(
+```
+
+with:
+
+```csharp
+        }
+
+        return ticks;
+    }
+
+    // The spacing of a range's finest ticks: 10 minutes within 7 days, an hour within 62, 6 hours within 366, else a day. They
+    // are finer than the axis's lines (AxisLevel), so the script has times to label wherever it zooms.
+    private static TimeSpan Step(long range) =>
+        range <= 7 * DayMs ? TimeSpan.FromMinutes(10)
+        : range <= 62 * DayMs ? TimeSpan.FromHours(1)
+        : range <= 366 * DayMs ? TimeSpan.FromHours(6)
+        : TimeSpan.FromDays(1);
+
+    // The finest level the axis draws a line for: 10-minute marks within a day, hours within 7 days, 6-hour marks within 62,
+    // else days.
+    private static int AxisLevel(long range) =>
+        range <= DayMs ? 3 : range <= 7 * DayMs ? 2 : range <= 62 * DayMs ? 1 : 0;
+
+    // The narrowest view the script zooms to: twice the widest gap between two neighboring ticks, or between an end of the
+    // axis and its nearest tick, so every view holds at least two ticks to label; at least half a unit.
+    private static decimal MinWidth(IReadOnlyList<ExportAxisTick> ticks)
+    {
+        decimal widest = ticks.Count == 0 ? Width : Math.Max(ticks[0].X, Width - ticks[^1].X);
+        for (int index = 1; index < ticks.Count; index++)
+        {
+            widest = Math.Max(widest, ticks[index].X - ticks[index - 1].X);
+        }
+
+        return Math.Max(2 * widest, 0.5m);
+    }
+
+    private static ExportTimelineRow Row(
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ExportAssetTests.cs`, replace:
+
+```csharp
+    }
+
+    private static async Task<string> ExportAsync(string root)
+    {
+```
+
+with:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task EA4_APlainScrollOverTheTimelineScrollsThePage()
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+
+        string html = await ExportAsync(temp.Path);
+
+        XDocument page = ExportFiles.Parse(html);
+        string wheel = html[html.IndexOf("addEventListener('wheel'", StringComparison.Ordinal)..];
+        wheel = wheel[..wheel.IndexOf("}, { passive: false });", StringComparison.Ordinal)];
+        int guard = wheel.IndexOf("if (!(event.ctrlKey || event.metaKey) || event.deltaY === 0) {", StringComparison.Ordinal);
+        Assert.InRange(guard, 0, wheel.IndexOf("return;", StringComparison.Ordinal));
+        Assert.True(wheel.IndexOf("return;", StringComparison.Ordinal) < wheel.IndexOf("event.preventDefault();", StringComparison.Ordinal));
+        Assert.Contains("#timeline-plot { touch-action: pan-y; cursor: grab; }", html, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(html, "touch-action: none"));
+        Assert.StartsWith("Hold Ctrl or Command and scroll, or pinch, to zoom; drag sideways to pan;", ExportFiles.ById(page, "timeline-help").Value);
+    }
+
+    private static async Task<string> ExportAsync(string root)
+    {
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Cli/ExportTimelineTests.cs`, replace:
+
+```csharp
+        using JsonDocument data = ExportFiles.LedgerData(html);
+
+        JsonElement[] ticks = [.. data.RootElement.GetProperty("timeline").GetProperty("ticks").EnumerateArray()];
+        Assert.Equal(30, ticks.Length);
+        Assert.Equal([0, 1, 2], ticks.Select(tick => tick.GetProperty("level").GetInt32()).Distinct().Order());
+        Assert.Equal(("0", 2, "07:00"), (ticks[0].GetProperty("x").GetRawText(), ticks[0].GetProperty("level").GetInt32(), ticks[0].GetProperty("label").GetString()));
+        Assert.Equal(
+```
+
+with:
+
+```csharp
+        using JsonDocument data = ExportFiles.LedgerData(html);
+
+        JsonElement[] ticks = [.. data.RootElement.GetProperty("timeline").GetProperty("ticks").EnumerateArray()];
+        Assert.Equal(175, ticks.Length);
+        Assert.Equal([0, 1, 2, 3], ticks.Select(tick => tick.GetProperty("level").GetInt32()).Distinct().Order());
+        Assert.Equal(("0", 2, "07:00"), (ticks[0].GetProperty("x").GetRawText(), ticks[0].GetProperty("level").GetInt32(), ticks[0].GetProperty("label").GetString()));
+        Assert.Equal(
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Cli/ExportTimelineTests.cs`, replace:
+
+```csharp
+    }
+
+    private static CliHarness Harness(string root)
+    {
+```
+
+with:
+
+```csharp
+    }
+
+    // SVG draws no rectangle 0 wide, so a request without a duration, such as a Codex import, or one too short for a
+    // thousandth of a 4-week axis, is a bar 0.001 wide, which its 1-pixel stroke shows.
+    [Fact]
+    public async Task TL11_RequestsWithoutADurationAreStillDrawn()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        ImportedLedgerEntry imported = ImportEntries.Copilot("k1", "conv-i", null);
+        DateTimeOffset start = new(2026, 10, 25, 12, 0, 0, TimeSpan.Zero);
+        await store.RecordImportedAsync([imported with { Span = imported.Span with { StartTime = start, EndTime = start } }], null);
+        LedgerEntry live = Entry("conv-live", 1, new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero));
+        await store.RecordAsync([live with { Span = live.Span with { EndTime = live.Span.StartTime.AddSeconds(1) } }]);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        Assert.Equal(
+            ["0|0.001", "1000|0.001"],
+            Elements(ExportFiles.ById(page, "timeline-plot"), "rect", "span").Select(rect =>
+                $"{(string)rect.Attribute("x")!}|{(string)rect.Attribute("width")!}"));
+    }
+
+    // A time that a transition skips is no tick, so 03:00 isn't shown as 02:00; a time that it repeats is a tick each time.
+    [Theory]
+    [InlineData("2026-03-08T05:00:00Z", "2026-03-08T10:00:00Z", "2026-03-08|01:00|03:00|04:00|05:00|06:00")]
+    [InlineData("2026-11-01T04:00:00Z", "2026-11-01T08:00:00Z", "2026-11-01|01:00|01:00|02:00|03:00")]
+    public async Task TL12_AxisLabelsAreLocalTimesThatExist(string first, string last, string labels)
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        await store.RecordAsync(
+        [
+            Entry("conv-dst", 1, DateTimeOffset.Parse(first, CultureInfo.InvariantCulture)),
+            Entry("conv-dst", 2, DateTimeOffset.Parse(last, CultureInfo.InvariantCulture)),
+        ]);
+
+        XDocument page = await ExportAsync(
+            Harness(temp.Path),
+            temp.Path,
+            "--all-repos", "--since", "all", "--time-zone", "Test/New_York", "--generated-at", "2026-12-01T00:00:00Z");
+
+        Assert.Equal(labels.Split('|'), ExportFiles.ById(page, "timeline-axis-labels").Elements("span").Select(span => span.Value));
+    }
+
+    // Over 4 weeks the ticks go down to hours, though the axis draws lines only every 6 hours, and zooming stops at twice the
+    // widest gap between ticks, so every view has two times to label.
+    [Fact]
+    public async Task TL13_ZoomingStopsWhereTheAxisStillHasTwoLabels()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        await store.RecordAsync(
+        [
+            Entry("conv-month", 1, new DateTimeOffset(2026, 10, 23, 5, 0, 0, TimeSpan.Zero)),
+            Entry("conv-month", 2, new DateTimeOffset(2026, 11, 21, 17, 0, 0, TimeSpan.Zero)),
+        ]);
+
+        await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        string html = ExportFiles.ReadReport(Path.Combine(temp.Path, Report));
+        using JsonDocument data = ExportFiles.LedgerData(html);
+        JsonElement timeline = data.RootElement.GetProperty("timeline");
+        JsonElement[] ticks = [.. timeline.GetProperty("ticks").EnumerateArray()];
+        decimal[] xs = [.. ticks.Select(tick => tick.GetProperty("x").GetDecimal())];
+        decimal widest = new[] { xs[0], 1000m - xs[^1] }.Concat(xs.Zip(xs.Skip(1), (left, right) => right - left)).Max();
+        Assert.Equal(709, ticks.Length);
+        Assert.Equal([0, 1, 2], ticks.Select(tick => tick.GetProperty("level").GetInt32()).Distinct().Order());
+        Assert.Equal(2.826m, timeline.GetProperty("minWidth").GetDecimal());
+        Assert.Equal(2 * widest, timeline.GetProperty("minWidth").GetDecimal());
+        Assert.Equal(
+            ticks.Count(tick => tick.GetProperty("level").GetInt32() <= 1),
+            ExportFiles.ById(ExportFiles.Parse(html), "timeline-axis").Elements("line").Count());
+        Assert.Equal(3, Regex.Matches(html, ", minWidth, width\\);").Count);
+        Assert.DoesNotContain("0.5, width)", html, StringComparison.Ordinal);
+    }
+
+    private static CliHarness Harness(string root)
+    {
+```
+
+### Tests
+
+- **TL7** (changed) The fixture's 29 hours have 175 ticks, at levels 0–3; the labels don't change.
+- **TL11** A zero-duration imported request on 10-25 and a 1-second request on 11-21 are bars `x="0" width="0.001"` and `x="1000" width="0.001"`.
+- **TL12** (2 cases) In `Test/New_York`, the axis labels for 2026-03-08 05:00–10:00 UTC are `2026-03-08`, `01:00`, `03:00`, `04:00`, `05:00`, and `06:00`, and those for 2026-11-01 04:00–08:00 UTC are `2026-11-01`, `01:00`, `01:00`, `02:00`, and `03:00`.
+- **TL13** Over 29.5 days, `ledger-data` has 709 ticks at levels 0–2 and `minWidth` 2.826, twice the widest gap; the axis draws a line for each tick at levels 0 and 1; and the script clamps to `minWidth` three times and never to 0.5.
+- **EA4** The wheel listener returns before `preventDefault` unless Ctrl or Command is held; `#timeline-plot` has `touch-action: pan-y`, and only the overview keeps `none`; and the help text starts `Hold Ctrl or Command and scroll, or pinch, to zoom; drag sideways to pan;`.
+
+### Acceptance criteria
+
+- Every drawn request is a visible bar, no axis label is a local time that doesn't exist, every zoom has labels, and a plain scroll over the timeline scrolls the page.
+- `dotnet test CopilotLedger.slnx` passes **1398** tests (1393 + 5).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
 Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` with fixed times, `FakeCliPlatform` with the custom zones of `TestZones`, and `CliHarness` for the CLI. Ledgers are synthetic, written by `ExportSeeds` or the test itself. No test starts a process, runs `git` or a browser, uses the network, Node, Python, or Docker, or reads `~/.copilot`, `~/.codex`, `~/.claude`, or `~/.copilot-ledger`; ET1 and ET2 read only the operating system's time zone data. Money is `decimal` or integer pico-USD, never `double`, and expected text is compared exactly.
@@ -10595,6 +12470,11 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 10 | EP1–EP6 | — | 1,374 |
 | 11 | EL1–EL3 | — | 1,377 |
 | 12 | GS2 (1 more case) | GS1 (the new sample ID) | 1,378 |
+| 13 | EP7 (10) | — | 1,388 |
+| 14 | EC12 | EC3 (the whole message) | 1,389 |
+| 15 | XR11, XR12, EC13 | EC8 (a tool call for the old request) | 1,392 |
+| 16 | XR13 | — | 1,393 |
+| 17 | TL11, TL12 (2), TL13, EA4 | TL7 (175 ticks, at levels 0–3) | 1,398 |
 
 Exact values used across tasks:
 
@@ -10608,14 +12488,17 @@ Exact values used across tasks:
 | `91.3` | The `feature/ledger` budget's all-time spend: A1, A2, and B1 | XR7, EH4 |
 | `896.535` | A1's bar on the 1000-unit timeline | TL1 |
 | `2026-11-21T21:30:00.0000000+00:00` | `generatedAtUtc` as the manifest and `ledger-data` write it | TL5, EB5, EP4 |
+| `(root folder)` | How a drive, share, or file-system root shows without `--include-local-paths` | EP7 |
+| `2026-11-21T13:00:00.0000000+00:00` | EC13's tool call, the earliest one kept once the links before 11-21 are deleted | EC13 |
+| `2.826` | `minWidth` over 29.5 days: twice the widest gap between hourly ticks | TL13 |
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 12, the orchestrator:
+After Task 17, the orchestrator:
 
-1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1378 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-8.md`, and the files the tasks list.
-2. Exports a report from a temporary `COPILOT_LEDGER_HOME` with a few recorded spans and opens it in a browser with and without JavaScript: zoom, pan, the overview's range selection, reset, the lens switch, sorting, keyboard focus, the dark scheme, and reduced motion. The browser's console shows no Content Security Policy violation. Never point it at a real home directory.
-3. Pushes `swigerb-sprint-9-ledger-export-html-report` and opens one pull request titled exactly "Sprint 9: `gh ledger export`: self-contained offline HTML report & metadata-only bundle", whose body says `Closes #64`, lists the twelve task commits, and has `## Changes`, `## Deviations` (D1–D19 and P1–P15 from "Design decisions", each with a one-line rationale), and `## Verification`.
+1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1398 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-8.md`, and the files the tasks list.
+2. Exports a report from a temporary `COPILOT_LEDGER_HOME` with a few recorded spans and opens it in a browser with and without JavaScript: zoom (Ctrl or Command with the wheel, and a pinch), pan, a plain scroll over the timeline, the overview's range selection, reset, the lens switch, sorting, keyboard focus, the dark scheme, and reduced motion. The browser's console shows no Content Security Policy violation. Never point it at a real home directory.
+3. Pushes `swigerb-sprint-9-ledger-export-html-report` and opens one pull request titled exactly "Sprint 9: `gh ledger export`: self-contained offline HTML report & metadata-only bundle", whose body says `Closes #64`, lists the seventeen task commits, and has `## Changes`, `## Deviations` (D1–D19 and P1–P15 from "Design decisions", each with a one-line rationale), `## Review fixes` (the findings of "Review fixes (Tasks 13–17)", each with its task), and `## Verification`.
 4. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary's export.
 5. Asks `ledger-architect` to review the branch.
 
@@ -10624,10 +12507,13 @@ This sprint doesn't bump the version, tag, or release. When the sprint closes, `
 ## Deferred to later sprints
 
 - **A hash-based Content Security Policy** (D19): `script-src 'sha256-…'` and `style-src 'sha256-…'` instead of `'unsafe-inline'`.
-- **An index for the export's paging key**, (`start_time_unix_ms`, `trace_id`, `span_id`), which needs a migration. Without it, each page sorts the rows after its cursor: about 5 million row visits for 100,000 requests.
 - **The audit findings section** (#65): its content, a bundle entry, and a manifest field; the model and the page already have the place.
 - **Coverage notes in reports, receipts, and MCP**: Sprint 8's D26 still holds for them; only export and import report coverage.
 - **IANA IDs on Windows 10 1703–1809**, through `icuin.dll`, which has the same function under a versioned name.
 - **Every prompt chain in `prompt-chains.json`**, configurable night hours, and PDF or PNG output (out of scope in #64).
 - **Byte identity of the ZIP container across operating systems** (A3); the entries' bytes are already identical.
 - **Failed tool calls and the sixth model color share #d55e00.** Ticks and bars differ in shape and the timeline's table lists failures, but a distinct color would read faster.
+- **Telling same-named local repositories apart** (R6): two roots with the same folder name show the same name; a short, stable suffix after the name could tell them apart without showing either path.
+- **A record of the daemon's deletions** (R5): with the cutoff of its last deletion of tool calls in the ledger, tool history wouldn't start at the earliest tool call kept, which a quiet spell without tool calls moves later. It needs a schema change.
+- **Repository slugs recorded before Sprint 8's strict `owner/repo` rule** are shown as stored, by reports and by export; one from a remote URL with a query or fragment may hold it. A migration could clear the slugs that aren't strict.
+- **Axis lines at every zoom**: the axis draws lines only down to the level it labels unzoomed, so the finer labels the script shows when zoomed in have no line under them.
