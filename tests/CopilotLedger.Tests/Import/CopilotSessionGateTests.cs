@@ -40,7 +40,8 @@ public sealed class CopilotSessionGateTests
         Directory.CreateDirectory(Path.Combine(root, "c-without-events"));
         await File.WriteAllTextAsync(Path.Combine(root, "stray.jsonl"), "{}\n");
 
-        IReadOnlyList<SessionLogLocation> logs = Source.Discover(temp.Path);
+        SessionLogDiscovery discovery = Source.Discover(temp.Path);
+        IReadOnlyList<SessionLogLocation> logs = discovery.Logs;
 
         Assert.Equal(["a-session", "b-session"], logs.Select(log => log.LogId));
         Assert.Equal([true, false], logs.Select(log => log.IsActive));
@@ -48,7 +49,10 @@ public sealed class CopilotSessionGateTests
         Assert.Equal(new FileInfo(first).Length, logs[0].SizeBytes);
         Assert.Equal(new DateTimeOffset(File.GetLastWriteTimeUtc(first), TimeSpan.Zero), logs[0].LastWriteTime);
         Assert.All(logs, log => Assert.Equal(ImportSourceKind.Copilot, log.Source));
-        Assert.Empty(Source.Discover(Path.Combine(temp.Path, "missing")));
+        Assert.Equal(0, discovery.UnreadableEntries);
+        SessionLogDiscovery missing = Source.Discover(Path.Combine(temp.Path, "missing"));
+        Assert.Empty(missing.Logs);
+        Assert.Equal(0, missing.UnreadableEntries);
     }
 
     [Theory]
@@ -256,7 +260,7 @@ public sealed class CopilotSessionGateTests
     {
         using TempDirectory temp = new();
         string path = new CopilotSessionLogs(SessionId).Write(temp.Path);
-        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path));
+        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path).Logs);
         await File.AppendAllTextAsync(path, "{not json\n");
 
         SessionLogReadResult result = await Source.ReadAsync(location, CancellationToken.None);
@@ -288,8 +292,20 @@ public sealed class CopilotSessionGateTests
         Assert.Null(version);
     }
 
+    [Fact]
+    public async Task CS15_ASessionStoreThatCantBeListedIsCounted()
+    {
+        using TempDirectory temp = new();
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "session-state"), "not a folder");
+
+        SessionLogDiscovery discovery = Source.Discover(temp.Path);
+
+        Assert.Empty(discovery.Logs);
+        Assert.Equal(1, discovery.UnreadableEntries);
+    }
+
     private static async Task<SessionLogReadResult> ReadAsync(string home) =>
-        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
 
     private static async Task WriteAsync(string home, string text)
     {

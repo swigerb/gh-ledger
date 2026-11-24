@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using CopilotLedger.Core.Telemetry;
 
 namespace CopilotLedger.Core.Import;
@@ -53,14 +54,19 @@ public sealed class CodexSessionLogSource : ISessionLogSource
         string.IsNullOrEmpty(codexHome) ? Path.Combine(userProfile, ".codex") : codexHome;
 
     // Rollouts under <home>/sessions, and under <home>/archived_sessions with LogIds that start with "archived/". A
-    // .jsonl.zst rollout is listed as compressed and never opened.
-    public IReadOnlyList<SessionLogLocation> Discover(string home)
+    // .jsonl.zst rollout is listed as compressed and never opened. A folder or rollout that exists but can't be listed or
+    // examined is an unreadable entry; listing stops at the first folder that can't be listed.
+    public SessionLogDiscovery Discover(string home)
     {
         ArgumentNullException.ThrowIfNull(home);
         List<SessionLogLocation> logs = [];
-        AddRollouts(logs, Path.Combine(home, "sessions"), "");
-        AddRollouts(logs, Path.Combine(home, "archived_sessions"), "archived/");
-        return [.. logs.OrderBy(log => log.LogId, StringComparer.Ordinal)];
+        long unreadable = AddRollouts(logs, Path.Combine(home, "sessions"), "") +
+                          AddRollouts(logs, Path.Combine(home, "archived_sessions"), "archived/");
+        return new SessionLogDiscovery
+        {
+            Logs = [.. logs.OrderBy(log => log.LogId, StringComparer.Ordinal)],
+            UnreadableEntries = unreadable,
+        };
     }
 
     public Task<SessionLogReadResult> ReadAsync(SessionLogLocation location, CancellationToken cancellationToken)
@@ -74,8 +80,10 @@ public sealed class CodexSessionLogSource : ISessionLogSource
         return Task.Run(() => Read(location, cancellationToken), cancellationToken);
     }
 
-    private static void AddRollouts(List<SessionLogLocation> logs, string root, string prefix)
+    // Adds root's rollouts to logs and returns how many entries couldn't be listed or examined.
+    private static long AddRollouts(List<SessionLogLocation> logs, string root, string prefix)
     {
+        long unreadable = 0;
         try
         {
             foreach (string path in Directory.EnumerateFiles(root, "rollout-*", SearchOption.AllDirectories))
@@ -101,12 +109,19 @@ public sealed class CodexSessionLogSource : ISessionLogSource
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
+                    unreadable++;
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (DirectoryNotFoundException) when (!File.Exists(root))
         {
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            unreadable++;
+        }
+
+        return unreadable;
     }
 
     // rollout-YYYY-MM-DDTHH-MM-SS-<thread ID>[_<rollout ID>].jsonl, or .jsonl.zst: the IDs in lowercase, joined by "_".
@@ -146,6 +161,7 @@ public sealed class CodexSessionLogSource : ISessionLogSource
         }
 
         Rollout rollout = new(location);
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         try
         {
             using FileStream stream = new(
@@ -162,6 +178,7 @@ public sealed class CodexSessionLogSource : ISessionLogSource
                 rollout.OnLine,
                 rollout.OnOversized,
                 rollout.OnUnterminated,
+                hash,
                 cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -169,7 +186,7 @@ public sealed class CodexSessionLogSource : ISessionLogSource
             return SessionLogs.NotRead(location, SessionLogStatus.Unreadable, ImportEventKind.Unknown, null, 0, 0);
         }
 
-        return rollout.Finish();
+        return rollout.Finish(Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
     // One rollout's reading state.
@@ -231,7 +248,8 @@ public sealed class CodexSessionLogSource : ISessionLogSource
         internal void OnUnterminated(long number, long offset) =>
             Malformed(ImportDiagnosticCode.UnterminatedLine, ImportEventKind.Unknown, null, number, offset);
 
-        internal SessionLogReadResult Finish()
+        // contentSha256: the SHA-256 of the bytes that were read, which a Read result keeps.
+        internal SessionLogReadResult Finish(string contentSha256)
         {
             if (_stop is { } stop)
             {
@@ -260,6 +278,7 @@ public sealed class CodexSessionLogSource : ISessionLogSource
                 UnsupportedUsageShapes = _unsupported,
                 MalformedLines = _malformed,
                 SkippedEvents = _skipped,
+                ContentSha256 = contentSha256,
             };
         }
 

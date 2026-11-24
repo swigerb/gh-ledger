@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CopilotLedger.Core.Import;
@@ -36,14 +37,18 @@ public sealed class CodexRolloutTests
         File.WriteAllText(Path.Combine(day, "rollout-2026-11-20T12-00-00-not-a-thread.jsonl"), "x");
         File.WriteAllText(Path.Combine(day, $"rollout-2026-13-20T12-00-00-{Thread}.jsonl"), "x");
 
-        IReadOnlyList<SessionLogLocation> logs = Source.Discover(temp.Path);
+        SessionLogDiscovery discovery = Source.Discover(temp.Path);
+        IReadOnlyList<SessionLogLocation> logs = discovery.Logs;
 
         Assert.Equal(
             [Thread, $"{Thread}_{Fork}", Fork, $"archived/{Fork}"],
             logs.Select(log => log.LogId));
         Assert.Equal([false, false, true, false], logs.Select(log => log.IsCompressed));
         Assert.All(logs, log => Assert.False(log.IsActive));
-        Assert.Empty(Source.Discover(Path.Combine(temp.Path, "missing")));
+        Assert.Equal(0, discovery.UnreadableEntries);
+        SessionLogDiscovery missing = Source.Discover(Path.Combine(temp.Path, "missing"));
+        Assert.Empty(missing.Logs);
+        Assert.Equal(0, missing.UnreadableEntries);
     }
 
     [Theory]
@@ -282,7 +287,7 @@ public sealed class CodexRolloutTests
     {
         using TempDirectory temp = new();
         string path = new CodexRollouts(Thread).Write(temp.Path, compressed: true);
-        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path));
+        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path).Logs);
         File.Delete(path);
 
         SessionLogReadResult result = await Source.ReadAsync(location, CancellationToken.None);
@@ -371,8 +376,38 @@ public sealed class CodexRolloutTests
             (diagnostic.Code, diagnostic.Field, diagnostic.FirstLine));
     }
 
+    // A rollout folder that can't be listed is counted, and the other folder's rollouts are still found.
+    [Fact]
+    public async Task CX15_ARolloutFolderThatCantBeListedIsCounted()
+    {
+        using TempDirectory temp = new();
+        new CodexRollouts(Thread).Write(temp.Path, archived: true);
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "sessions"), "not a folder");
+
+        SessionLogDiscovery discovery = Source.Discover(temp.Path);
+
+        Assert.Equal([$"archived/{Thread}"], discovery.Logs.Select(log => log.LogId));
+        Assert.Equal(1, discovery.UnreadableEntries);
+    }
+
+    // A rollout's SHA-256 covers the bytes it was read up to.
+    [Fact]
+    public async Task CX16_AReadRolloutHasTheHashOfItsBytes()
+    {
+        using TempDirectory temp = new();
+        string path = new CodexRollouts(Thread).TurnContext("turn-1", "gpt-6.1-sol").Usage("resp_1", "turn-1").Write(temp.Path);
+        SessionLogLocation location = Assert.Single(Source.Discover(temp.Path).Logs);
+        byte[] bytes = await File.ReadAllBytesAsync(path);
+        await File.AppendAllTextAsync(path, "{\"type\":\"event_msg\"}\n");
+
+        SessionLogReadResult result = await Source.ReadAsync(location, CancellationToken.None);
+
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), result.ContentSha256);
+        Assert.Equal(result.ContentSha256, await SessionLogHash.ComputeAsync(location, CancellationToken.None));
+    }
+
     private static async Task<SessionLogReadResult> ReadAsync(string home) =>
-        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
 
     private static void AssertNoCanary(SessionLogReadResult result) =>
         Assert.DoesNotContain(CopilotSessionLogs.Canary, JsonSerializer.Serialize(result), StringComparison.Ordinal);

@@ -271,6 +271,7 @@ public sealed class UsageAuthorityTests
             LogId = "session-a",
             LogSizeBytes = 4_096,
             LogLastWriteTime = new DateTimeOffset(2026, 11, 20, 12, 34, 56, 789, TimeSpan.Zero),
+            LogSha256 = new string('a', 64),
             Complete = true,
             Recorded = 1,
             Duplicates = 2,
@@ -281,7 +282,9 @@ public sealed class UsageAuthorityTests
         await store.RecordImportedAsync([ImportEntries.Copilot("usage-1", "session-a", S1)], checkpoint);
         ImportSessionCheckpoint? written = await store.GetImportSessionAsync(ImportSourceKind.Copilot, "session-a");
         time.Advance(TimeSpan.FromHours(1));
-        await store.RecordImportedAsync([], checkpoint with { Complete = false, LogSizeBytes = 8_192 });
+        await store.RecordImportedAsync(
+            [],
+            checkpoint with { Complete = false, LogSizeBytes = 8_192, LogSha256 = new string('b', 64) });
 
         Assert.Equal(checkpoint with { ImportedAt = new DateTimeOffset(2026, 11, 23, 10, 0, 0, TimeSpan.Zero) }, written);
         Assert.Equal(
@@ -289,6 +292,7 @@ public sealed class UsageAuthorityTests
             {
                 Complete = false,
                 LogSizeBytes = 8_192,
+                LogSha256 = new string('b', 64),
                 ImportedAt = new DateTimeOffset(2026, 11, 23, 11, 0, 0, TimeSpan.Zero),
             },
             await store.GetImportSessionAsync(ImportSourceKind.Copilot, "session-a"));
@@ -311,6 +315,7 @@ public sealed class UsageAuthorityTests
                 LogId = "session-a",
                 LogSizeBytes = 1,
                 LogLastWriteTime = ImportEntries.Start,
+                LogSha256 = new string('a', 64),
                 Complete = true,
                 Recorded = 1,
                 Duplicates = 0,

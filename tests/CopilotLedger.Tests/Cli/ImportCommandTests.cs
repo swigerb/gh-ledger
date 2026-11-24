@@ -166,6 +166,7 @@ public sealed class ImportCommandTests
                   "source": "copilot",
                   "coverage": "complete",
                   "sessionsScanned": 1,
+                  "unreadableStoreEntries": 0,
                   "sessionsSkippedUnchanged": 0,
                   "sessionsSkippedActive": 0,
                   "sessionsSkippedOutOfScope": 0,
@@ -196,6 +197,7 @@ public sealed class ImportCommandTests
                   "source": "codex",
                   "coverage": "complete",
                   "sessionsScanned": 1,
+                  "unreadableStoreEntries": 0,
                   "sessionsSkippedUnchanged": 0,
                   "sessionsSkippedActive": 0,
                   "sessionsSkippedOutOfScope": 0,
@@ -490,6 +492,53 @@ public sealed class ImportCommandTests
         Assert.Contains("Skipped, out of scope            1\n", since.Out);
         Assert.EndsWith("\nNothing new to record.\n", since.Out);
         Assert.Equal("", since.Error);
+    }
+
+    [Fact]
+    public async Task IC12_ADryRunRefusesALedgerWithOneCompanionFile()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        await new SqliteLedgerStore(harness.Context.DatabasePath, harness.TimeProvider).InitializeAsync();
+        SqliteConnection.ClearAllPools();
+        await File.WriteAllBytesAsync(harness.Context.DatabasePath + "-wal", []);
+        new CopilotSessionLogs("s-a").Usage("u1", S1).Write(harness.Context.CopilotHome);
+
+        CliRun run = await harness.RunAsync("import", "--all", "--dry-run");
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal("", run.Out);
+        Assert.Equal(
+            "Dry run stopped: the ledger has a -wal or -shm file without the other, and reading it could create the missing one. Open the ledger once with another gh-ledger command, such as status, and try again.\n",
+            run.Error);
+        Assert.False(File.Exists(harness.Context.DatabasePath + "-shm"));
+        Assert.Equal(0, new FileInfo(harness.Context.DatabasePath + "-wal").Length);
+    }
+
+    [Fact]
+    public async Task IC13_AStoreThatCantBeListedIsAWarning()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        Directory.CreateDirectory(harness.Context.CopilotHome);
+        await File.WriteAllTextAsync(Path.Combine(harness.Context.CopilotHome, "session-state"), "not a folder");
+
+        CliRun text = await harness.RunAsync("import", "--all");
+        CliRun json = await harness.RunAsync("import", "--all", "--json");
+
+        Assert.Equal(2, text.ExitCode);
+        Assert.Contains("Sessions scanned                   0\n", text.Out);
+        Assert.Contains("Coverage                  incomplete\n", text.Out);
+        Assert.EndsWith("\nNothing new to record.\nCoverage is incomplete; see the warnings.\n", text.Out);
+        Assert.Equal(
+            "Warning: Copilot session logs: 1 folder or file couldn't be listed; any logs there weren't imported\n",
+            text.Error);
+        Assert.Equal(2, json.ExitCode);
+        using JsonDocument document = JsonDocument.Parse(json.Out);
+        Assert.Equal(1, document.RootElement.GetProperty("sources")[0].GetProperty("unreadableStoreEntries").GetInt64());
+        Assert.Equal(
+            """{"source":"copilot","log":"","code":"unreadableStore","event":"unknown","field":null,"version":null,"count":1,"line":null,"byteOffset":null}""",
+            JsonSerializer.Serialize(Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray())));
     }
 
     private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));

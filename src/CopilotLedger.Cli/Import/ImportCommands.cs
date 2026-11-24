@@ -331,6 +331,7 @@ internal static class ImportCommands
 
     // Every gap in the source's coverage is a session from before Copilot 1.0.103.
     private static bool OnlyOldSessionsMissing(ImportSourceReport source) =>
+        source.UnreadableStoreEntries == 0 &&
         source.SessionsUnsupported == source.SessionsAggregateOnly &&
         source.MalformedLines == 0 &&
         source.UnsupportedUsageShapes == 0 &&
@@ -356,6 +357,7 @@ internal static class ImportCommands
             writer.WriteString("source", ImportIds.SourceName(source.Source));
             writer.WriteString("coverage", Coverage(source.Complete));
             writer.WriteNumber("sessionsScanned", source.SessionsScanned);
+            writer.WriteNumber("unreadableStoreEntries", source.UnreadableStoreEntries);
             writer.WriteNumber("sessionsSkippedUnchanged", source.SessionsSkippedUnchanged);
             writer.WriteNumber("sessionsSkippedActive", source.SessionsSkippedActive);
             writer.WriteNumber("sessionsSkippedOutOfScope", source.SessionsSkippedOutOfScope);
@@ -422,9 +424,15 @@ internal static class ImportCommands
             totals.ApiEquivalentEstimatedSpans);
     }
 
-    // "<source> <session|rollout> <log ID>[, line <n> (byte <offset>)]: <message>"
+    // "<source> <session|rollout> <log ID>[, line <n> (byte <offset>)]: <message>", or "<source> session logs: <message>"
+    // for the store itself.
     private static string Describe(ImportDiagnostic diagnostic)
     {
+        if (diagnostic.Code == ImportDiagnosticCode.UnreadableStore)
+        {
+            return $"{Name(diagnostic.Source)} session logs: {Message(diagnostic)}";
+        }
+
         string log = diagnostic.Source == ImportSourceKind.Codex ? "Codex rollout" : "Copilot session";
         string line = diagnostic.FirstLine > 0
             ? string.Create(
@@ -467,6 +475,9 @@ internal static class ImportCommands
             ImportDiagnosticCode.AmbiguousOverlap =>
                 $"{Plural(count, "request")} deferred: this conversation has live spans without a call ID",
             ImportDiagnosticCode.CostOutOfRange => $"{Plural(count, "request")} skipped: cost beyond the ledger's range",
+            ImportDiagnosticCode.UnreadableStore => count == 1
+                ? "1 folder or file couldn't be listed; any logs there weren't imported"
+                : $"{LedgerFormat.Count(count)} folders or files couldn't be listed; any logs there weren't imported",
             _ => throw new ArgumentOutOfRangeException(nameof(diagnostic), diagnostic.Code, null),
         };
     }

@@ -408,6 +408,59 @@ public sealed class LedgerImporterTests
                 """));
     }
 
+    // Size and last-write time only hint that a log is unchanged: a log rewritten with the same size and its old last-write
+    // time is read again, because its SHA-256 differs.
+    [Fact]
+    public async Task IR16_ASameSizeRewriteWithItsOldLastWriteTimeIsReadAgain()
+    {
+        using TempDirectory temp = new();
+        string path = new CopilotSessionLogs("s-a").Usage("u1", S1).Write(CopilotHome(temp));
+        byte[] bytes = await FileRetry.ReadAllBytesAsync(path);
+        ImportSourceReport first = Copilot(await RunAsync(temp));
+        DateTime written = File.GetLastWriteTimeUtc(path);
+        ImportSessionCheckpoint? checkpoint =
+            await (await StoreAsync(temp)).GetImportSessionAsync(ImportSourceKind.Copilot, "s-a");
+        new CopilotSessionLogs("s-a").Usage("u2", S2).Write(CopilotHome(temp));
+        File.SetLastWriteTimeUtc(path, written);
+
+        ImportSourceReport second = Copilot(await RunAsync(temp));
+        ImportSourceReport third = Copilot(await RunAsync(temp));
+
+        Assert.Equal(1, first.Recorded);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), checkpoint!.LogSha256);
+        Assert.Equal(bytes.Length, new FileInfo(path).Length);
+        Assert.Equal(written, File.GetLastWriteTimeUtc(path));
+        Assert.Equal((0, 1), (second.SessionsSkippedUnchanged, second.Recorded));
+        Assert.Equal((1, 0), (third.SessionsSkippedUnchanged, third.Recorded));
+        Assert.Equal(2L, await LedgerSql.ScalarAsync(Database(temp), "SELECT COUNT(*) FROM spans;"));
+    }
+
+    // A store that exists but can't be listed makes its coverage incomplete; a missing one only has no logs.
+    [Fact]
+    public async Task IR17_AStoreThatCantBeListedIsReported()
+    {
+        using TempDirectory temp = new();
+        Directory.CreateDirectory(CopilotHome(temp));
+        await File.WriteAllTextAsync(Path.Combine(CopilotHome(temp), "session-state"), "not a folder");
+
+        ImportReport report = await RunAsync(temp);
+
+        ImportSourceReport copilot = Copilot(report);
+        ImportSourceReport codex = Assert.Single(report.Sources, source => source.Source == ImportSourceKind.Codex);
+        Assert.Equal((1, 0), (copilot.UnreadableStoreEntries, copilot.SessionsScanned));
+        Assert.False(copilot.Complete);
+        Assert.Equal((0, true), (codex.UnreadableStoreEntries, codex.Complete));
+        Assert.Equal(
+            new ImportDiagnostic
+            {
+                Source = ImportSourceKind.Copilot,
+                LogId = "",
+                Code = ImportDiagnosticCode.UnreadableStore,
+                Count = 1,
+            },
+            Assert.Single(report.Diagnostics));
+    }
+
     private static string CopilotHome(TempDirectory temp) => Path.Combine(temp.Path, "copilot");
 
     private static string CodexHome(TempDirectory temp) => Path.Combine(temp.Path, "codex");

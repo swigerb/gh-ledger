@@ -7,9 +7,13 @@ namespace CopilotLedger.Storage;
 
 // The ledger as one consistent, read-only snapshot, for a dry run: it decides each imported record as RecordImportedAsync
 // would, and remembers its own decisions, without ever creating, migrating, or writing the ledger. With neither -wal nor -shm
-// beside the ledger, it opens the file as immutable, so SQLite doesn't create them either.
+// beside the ledger, it opens the file as immutable, so SQLite doesn't create them either. With only one of them, SQLite could
+// create the other, so it refuses.
 public sealed class LedgerSnapshot : IAsyncDisposable
 {
+    public const string MissingCompanionMessage =
+        "Dry run stopped: the ledger has a -wal or -shm file without the other, and reading it could create the missing one. Open the ledger once with another gh-ledger command, such as status, and try again.";
+
     private readonly SqliteConnection? _connection;
     private readonly SqliteTransaction? _transaction;
     private readonly HashSet<(string Source, string Key)> _aliases = [];
@@ -25,7 +29,8 @@ public sealed class LedgerSnapshot : IAsyncDisposable
     // 0 when there's no ledger.
     public int SchemaVersion { get; }
 
-    // Throws InvalidOperationException for a ledger newer than this gh-ledger, as InitializeAsync does.
+    // Throws InvalidOperationException for a ledger newer than this gh-ledger, as InitializeAsync does, and with
+    // MissingCompanionMessage when exactly one of -wal and -shm exists.
     public static async Task<LedgerSnapshot> OpenAsync(string databasePath, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(databasePath);
@@ -35,10 +40,15 @@ public sealed class LedgerSnapshot : IAsyncDisposable
             return new LedgerSnapshot(null, null, 0);
         }
 
-        bool companions = File.Exists(path + "-wal") || File.Exists(path + "-shm");
+        bool wal = File.Exists(path + "-wal");
+        if (wal != File.Exists(path + "-shm"))
+        {
+            throw new InvalidOperationException(MissingCompanionMessage);
+        }
+
         SqliteConnection connection = new(new SqliteConnectionStringBuilder
         {
-            DataSource = companions ? path : ImmutableUri(path),
+            DataSource = wal ? path : ImmutableUri(path),
             Mode = SqliteOpenMode.ReadOnly,
             Pooling = false,
         }.ToString());

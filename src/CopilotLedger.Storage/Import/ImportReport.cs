@@ -16,6 +16,7 @@ public sealed record ImportSourceReport
 {
     public required ImportSourceKind Source { get; init; }
     public required long SessionsScanned { get; init; }             // every log discovered
+    public required long UnreadableStoreEntries { get; init; }      // folders and files of the store that couldn't be listed
     public required long SessionsSkippedUnchanged { get; init; }    // completely imported, and unchanged since
     public required long SessionsSkippedActive { get; init; }       // still open, without IncludeActive
     public required long SessionsSkippedOutOfScope { get; init; }   // last written before Since
@@ -43,6 +44,7 @@ public sealed record ImportSourceReport
     public required long ApiEquivalentEstimatedSpans { get; init; } // priced without a reported cache counter
 
     public bool Complete =>
+        UnreadableStoreEntries == 0 &&
         SessionsUnsupported == 0 &&
         MalformedLines == 0 &&
         UnsupportedUsageShapes == 0 &&

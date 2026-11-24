@@ -1,10 +1,12 @@
 using System.Buffers;
+using System.Security.Cryptography;
 
 namespace CopilotLedger.Core.Import;
 
 // Splits the first maxBytes bytes of a JSON Lines stream into lines, reading 64 KiB at a time, and hands each complete line
 // to a callback. A line longer than maxLineBytes is skipped without being kept, and a last line without "\n" is reported but
-// never handed over. Blank lines are skipped silently. Line numbers are 1-based and count every "\n".
+// never handed over. Blank lines are skipped silently. Line numbers are 1-based and count every "\n". Every byte read is also
+// added to hash, when it isn't null.
 internal static class JsonlLineReader
 {
     private const int ChunkBytes = 64 * 1024;
@@ -19,6 +21,7 @@ internal static class JsonlLineReader
         LineHandler onLine,
         Action<long, long> onOversized,
         Action<long, long> onUnterminated,
+        IncrementalHash? hash,
         CancellationToken cancellationToken)
     {
         byte[] chunk = ArrayPool<byte>.Shared.Rent(ChunkBytes);
@@ -39,6 +42,7 @@ internal static class JsonlLineReader
                     break;
                 }
 
+                hash?.AppendData(chunk, 0, read);
                 int start = 0;
                 while (start < read)
                 {

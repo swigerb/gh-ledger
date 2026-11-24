@@ -162,6 +162,7 @@ public sealed class LedgerSnapshotTests
             LogId = "archived/019a1b2c-3d4e-7f50-8a6b-7c8d9e0f1a2b",
             LogSizeBytes = 10,
             LogLastWriteTime = new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero),
+            LogSha256 = new string('c', 64),
             Complete = true,
             Recorded = 0,
             Duplicates = 0,
@@ -175,5 +176,31 @@ public sealed class LedgerSnapshotTests
         Assert.Equal(
             checkpoint with { ImportedAt = new DateTimeOffset(2026, 11, 23, 10, 0, 0, TimeSpan.Zero) },
             await snapshot.GetImportSessionAsync(ImportSourceKind.Codex, checkpoint.LogId));
+    }
+
+    // With only one of -wal and -shm, a read-only open could create the other, so the snapshot refuses before opening.
+    [Theory]
+    [InlineData("-wal", "-shm")]
+    [InlineData("-shm", "-wal")]
+    public async Task SN7_ALedgerWithOneCompanionFileIsRefusedUnchanged(string present, string missing)
+    {
+        using TempDirectory temp = new();
+        string path = Path.Combine(temp.Path, "ledger.db");
+        SqliteLedgerStore store = new(path);
+        await store.InitializeAsync();
+        await store.RecordAsync([ImportEntries.Live("session-a", S1)]);
+        SqliteConnection.ClearAllPools();
+        await File.WriteAllBytesAsync(path + present, []);
+        DateTime written = File.GetLastWriteTimeUtc(path + present);
+        byte[] before = SHA256.HashData(await FileRetry.ReadAllBytesAsync(path));
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => LedgerSnapshot.OpenAsync(path));
+
+        Assert.Equal(LedgerSnapshot.MissingCompanionMessage, exception.Message);
+        Assert.False(File.Exists(path + missing));
+        Assert.Equal(0, new FileInfo(path + present).Length);
+        Assert.Equal(written, File.GetLastWriteTimeUtc(path + present));
+        Assert.Equal(before, SHA256.HashData(await FileRetry.ReadAllBytesAsync(path)));
     }
 }

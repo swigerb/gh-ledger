@@ -18,4 +18,5 @@ public enum ImportDiagnosticCode
     InheritedRecord,              // informational: a Codex record of another thread, skipped
     AmbiguousOverlap,             // set by the importer
     CostOutOfRange,               // set by the importer
+    UnreadableStore,              // set by the importer: entries of the store that couldn't be listed or examined
 }

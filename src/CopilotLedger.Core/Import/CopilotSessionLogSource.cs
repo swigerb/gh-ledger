@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using CopilotLedger.Core.Telemetry;
 
 namespace CopilotLedger.Core.Import;
@@ -106,14 +107,17 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
 
     public ImportSourceKind Kind => ImportSourceKind.Copilot;
 
-    // Each <home>/session-state/<session ID>/events.jsonl whose directory name is a valid session ID.
-    public IReadOnlyList<SessionLogLocation> Discover(string home)
+    // Each <home>/session-state/<session ID>/events.jsonl whose directory name is a valid session ID. A session folder, or a
+    // session-state that exists but isn't a folder that can be listed, is an unreadable entry.
+    public SessionLogDiscovery Discover(string home)
     {
         ArgumentNullException.ThrowIfNull(home);
+        string root = Path.Combine(home, "session-state");
         List<SessionLogLocation> logs = [];
+        long unreadable = 0;
         try
         {
-            foreach (string directory in Directory.EnumerateDirectories(Path.Combine(home, "session-state")))
+            foreach (string directory in Directory.EnumerateDirectories(root))
             {
                 string sessionId = Path.GetFileName(directory);
                 if (!CopilotSessionIds.IsValid(sessionId))
@@ -141,14 +145,23 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
+                    unreadable++;
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (DirectoryNotFoundException) when (!File.Exists(root))
         {
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            unreadable++;
+        }
 
-        return [.. logs.OrderBy(log => log.LogId, StringComparer.Ordinal)];
+        return new SessionLogDiscovery
+        {
+            Logs = [.. logs.OrderBy(log => log.LogId, StringComparer.Ordinal)],
+            UnreadableEntries = unreadable,
+        };
     }
 
     public Task<SessionLogReadResult> ReadAsync(SessionLogLocation location, CancellationToken cancellationToken)
@@ -165,6 +178,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
     private static SessionLogReadResult Read(SessionLogLocation location, CancellationToken cancellationToken)
     {
         Session session = new(location);
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         try
         {
             using FileStream stream = new(
@@ -181,6 +195,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 session.OnLine,
                 session.OnOversized,
                 session.OnUnterminated,
+                hash,
                 cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -188,7 +203,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             return SessionLogs.NotRead(location, SessionLogStatus.Unreadable, ImportEventKind.Unknown, null, 0, 0);
         }
 
-        return session.Finish();
+        return session.Finish(Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
     // One log's reading state.
@@ -276,7 +291,8 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         internal void OnUnterminated(long number, long offset) =>
             Malformed(ImportDiagnosticCode.UnterminatedLine, ImportEventKind.Unknown, null, number, offset);
 
-        internal SessionLogReadResult Finish()
+        // contentSha256: the SHA-256 of the bytes that were read, which a Read result keeps.
+        internal SessionLogReadResult Finish(string contentSha256)
         {
             if (_stop is { } stop)
             {
@@ -305,6 +321,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 UnsupportedUsageShapes = _unsupported,
                 MalformedLines = _malformed,
                 SkippedEvents = _skipped,
+                ContentSha256 = contentSha256,
             };
         }
 

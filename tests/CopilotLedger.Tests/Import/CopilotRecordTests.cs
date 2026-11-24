@@ -418,7 +418,7 @@ public sealed class CopilotRecordTests
     }
 
     internal static async Task<SessionLogReadResult> ReadAsync(string home) =>
-        await Source.ReadAsync(Assert.Single(Source.Discover(home)), CancellationToken.None);
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
 
     internal static void AssertNoCanary(SessionLogReadResult result) =>
         Assert.DoesNotContain(CopilotSessionLogs.Canary, JsonSerializer.Serialize(result), StringComparison.Ordinal);

@@ -210,13 +210,15 @@ public sealed partial class SqliteLedgerStore
         if (checkpoint.Source is not (ImportSourceKind.Copilot or ImportSourceKind.Codex) ||
             string.IsNullOrEmpty(checkpoint.LogId) ||
             checkpoint.LogSizeBytes < 0 ||
+            checkpoint.LogSha256 is not { Length: 64 } ||
+            !checkpoint.LogSha256.All(character => char.IsAsciiDigit(character) || character is >= 'a' and <= 'f') ||
             checkpoint.Recorded < 0 ||
             checkpoint.Duplicates < 0 ||
             checkpoint.OverlapSkipped < 0 ||
             checkpoint.AmbiguousOverlap < 0)
         {
             throw new ArgumentException(
-                "A checkpoint must name a Copilot or Codex log, and its size and counts can't be negative.",
+                "A checkpoint must name a Copilot or Codex log and its SHA-256, and its size and counts can't be negative.",
                 parameterName);
         }
     }

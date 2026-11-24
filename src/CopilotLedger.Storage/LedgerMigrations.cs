@@ -189,6 +189,7 @@ internal static class LedgerMigrations
                 log_id                 TEXT    NOT NULL,
                 log_size_bytes         INTEGER NOT NULL CHECK (log_size_bytes >= 0),
                 log_last_write_unix_ms INTEGER NOT NULL,
+                log_sha256             TEXT    NOT NULL CHECK (length(log_sha256) = 64),
                 complete               INTEGER NOT NULL CHECK (complete IN (0, 1)),
                 records_recorded       INTEGER NOT NULL CHECK (records_recorded >= 0),
                 records_duplicate      INTEGER NOT NULL CHECK (records_duplicate >= 0),

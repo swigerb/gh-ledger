@@ -176,13 +176,14 @@ internal static class UsageAuthority
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO import_sessions (
-                source, log_id, log_size_bytes, log_last_write_unix_ms, complete, records_recorded, records_duplicate,
-                records_overlap, records_ambiguous, imported_at_unix_ms
+                source, log_id, log_size_bytes, log_last_write_unix_ms, log_sha256, complete, records_recorded,
+                records_duplicate, records_overlap, records_ambiguous, imported_at_unix_ms
             ) VALUES (
-                @source, @log, @size, @time, @complete, @recorded, @duplicate, @overlap, @ambiguous, @now
+                @source, @log, @size, @time, @sha256, @complete, @recorded, @duplicate, @overlap, @ambiguous, @now
             ) ON CONFLICT (source, log_id) DO UPDATE SET
                 log_size_bytes = excluded.log_size_bytes,
                 log_last_write_unix_ms = excluded.log_last_write_unix_ms,
+                log_sha256 = excluded.log_sha256,
                 complete = excluded.complete,
                 records_recorded = excluded.records_recorded,
                 records_duplicate = excluded.records_duplicate,
@@ -194,6 +195,7 @@ internal static class UsageAuthority
         command.Parameters.AddWithValue("@log", checkpoint.LogId);
         command.Parameters.AddWithValue("@size", checkpoint.LogSizeBytes);
         command.Parameters.AddWithValue("@time", checkpoint.LogLastWriteTime.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("@sha256", checkpoint.LogSha256);
         command.Parameters.AddWithValue("@complete", checkpoint.Complete ? 1 : 0);
         command.Parameters.AddWithValue("@recorded", checkpoint.Recorded);
         command.Parameters.AddWithValue("@duplicate", checkpoint.Duplicates);
@@ -215,7 +217,7 @@ internal static class UsageAuthority
         command.Transaction = transaction;
         command.CommandText = """
             SELECT log_size_bytes, log_last_write_unix_ms, complete, records_recorded, records_duplicate, records_overlap,
-                   records_ambiguous, imported_at_unix_ms
+                   records_ambiguous, imported_at_unix_ms, log_sha256
             FROM import_sessions
             WHERE source = @source AND log_id = @log;
             """;
@@ -233,6 +235,7 @@ internal static class UsageAuthority
             LogId = logId,
             LogSizeBytes = reader.GetInt64(0),
             LogLastWriteTime = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)),
+            LogSha256 = reader.GetString(8),
             Complete = reader.GetInt64(2) == 1,
             Recorded = reader.GetInt64(3),
             Duplicates = reader.GetInt64(4),

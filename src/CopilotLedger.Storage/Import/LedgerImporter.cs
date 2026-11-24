@@ -48,7 +48,20 @@ public sealed class LedgerImporter
             foreach (ImportSourceRequest source in request.Sources.OrderBy(source => source.Source.Kind))
             {
                 Tally tally = new(source.Source.Kind);
-                foreach (SessionLogLocation log in source.Source.Discover(source.Home))
+                SessionLogDiscovery discovery = source.Source.Discover(source.Home);
+                tally.UnreadableStoreEntries = discovery.UnreadableEntries;
+                if (discovery.UnreadableEntries > 0)
+                {
+                    diagnostics.Add(new ImportDiagnostic
+                    {
+                        Source = source.Source.Kind,
+                        LogId = string.Empty,
+                        Code = ImportDiagnosticCode.UnreadableStore,
+                        Count = discovery.UnreadableEntries,
+                    });
+                }
+
+                foreach (SessionLogLocation log in discovery.Logs)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     await ImportLogAsync(request, source.Source, log, store, snapshot, linkCutoff, tally, diagnostics, cancellationToken);
@@ -92,12 +105,14 @@ public sealed class LedgerImporter
             return;
         }
 
+        // Size and last-write time only hint that a log is unchanged: it's skipped when the SHA-256 of its content matches too.
         ImportSessionCheckpoint? checkpoint = store is not null
             ? await store.GetImportSessionAsync(log.Source, log.LogId, cancellationToken)
             : await snapshot!.GetImportSessionAsync(log.Source, log.LogId, cancellationToken);
         if (checkpoint is { Complete: true } &&
             checkpoint.LogSizeBytes == log.SizeBytes &&
-            checkpoint.LogLastWriteTime.ToUnixTimeMilliseconds() == log.LastWriteTime.ToUnixTimeMilliseconds())
+            checkpoint.LogLastWriteTime.ToUnixTimeMilliseconds() == log.LastWriteTime.ToUnixTimeMilliseconds() &&
+            await SessionLogHash.ComputeAsync(log, cancellationToken) == checkpoint.LogSha256)
         {
             tally.SessionsSkippedUnchanged++;
             return;
@@ -240,6 +255,8 @@ public sealed class LedgerImporter
                     LogId = log.LogId,
                     LogSizeBytes = log.SizeBytes,
                     LogLastWriteTime = log.LastWriteTime,
+                    LogSha256 = result.ContentSha256 ??
+                                throw new InvalidOperationException("A log that was read has no content hash."),
                     Complete = result.MalformedLines == 0 &&
                                result.UnsupportedUsageShapes == 0 &&
                                journal == 0 &&
@@ -310,6 +327,7 @@ public sealed class LedgerImporter
         private bool _apiEquivalentPriced;
 
         public long SessionsScanned { get; set; }
+        public long UnreadableStoreEntries { get; set; }
         public long SessionsSkippedUnchanged { get; set; }
         public long SessionsSkippedActive { get; set; }
         public long SessionsSkippedOutOfScope { get; set; }
@@ -366,6 +384,7 @@ public sealed class LedgerImporter
         {
             Source = source,
             SessionsScanned = SessionsScanned,
+            UnreadableStoreEntries = UnreadableStoreEntries,
             SessionsSkippedUnchanged = SessionsSkippedUnchanged,
             SessionsSkippedActive = SessionsSkippedActive,
             SessionsSkippedOutOfScope = SessionsSkippedOutOfScope,
