@@ -20,6 +20,7 @@ internal sealed record ExportReportModel
     public required IReadOnlyList<BreakerTrip> BreakerTrips { get; init; }              // shown keys; RepositoryRoot only with local paths
     public required IReadOnlyList<BranchBudgetRow> Budgets { get; init; }               // shown keys
     public required ExportTimeline Timeline { get; init; }
+    public required IReadOnlyList<ExportChainTurns> ChainTurns { get; init; }           // the first GrowthChains chains with 2+ requests
 }
 
 internal sealed record ExportHeader
@@ -188,5 +189,18 @@ internal sealed record ExportTimelineSpan(ExportSpanRecord Span, int Row, decima
 internal sealed record ExportTimelineTool(ExportToolCallRecord Call, int Row, decimal X);
 
 internal sealed record ExportAxisTick(decimal X, int Level, string Label);   // Level 0 days, 1 six hours, 2 hours, 3 ten minutes
+
+// A prompt chain's requests for its context-growth chart: at most GrowthTurns of TotalTurns, in start order. StartTime is the
+// chain's first request; PeakInputTokens is the most input of any of its requests.
+internal sealed record ExportChainTurns(
+    int Rank,
+    string TraceId,
+    DateTimeOffset StartTime,
+    long TotalTurns,
+    long PeakInputTokens,
+    IReadOnlyList<ExportTurnPoint> Turns);
+
+// Sequence numbers an (agent invocation, model) pair by its first request in the chain, from 0.
+internal sealed record ExportTurnPoint(int Index, DateTimeOffset StartTime, string? Agent, string Model, int Sequence, long InputTokens);
 
 internal sealed record ExportAuditFinding(string Severity, string Title, string Detail);

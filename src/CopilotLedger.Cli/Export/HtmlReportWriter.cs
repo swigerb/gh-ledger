@@ -32,12 +32,16 @@ internal static class HtmlReportWriter
         Line(html, "</style>");
         Line(html, "</head>");
         Line(html, "<body>");
+        Line(
+            html,
+            "<svg class=\"defs\" width=\"0\" height=\"0\" aria-hidden=\"true\" focusable=\"false\"><defs><pattern id=\"hatch\" width=\"6\" height=\"6\" patternUnits=\"userSpaceOnUse\" patternTransform=\"rotate(45)\"><rect class=\"hatch-back\" width=\"6\" height=\"6\" /><line class=\"hatch-line\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"6\" /></pattern></defs></svg>");
         WriteHeader(html, model);
         Line(html, "<main>");
         WriteSummary(html, model);
         WriteCoverage(html, model.Coverage, header.TimeZone);
         WriteTimeline(html, model, header.TimeZone);
-        WriteCache(html, model);
+        WriteCostSplit(html, model);
+        WriteCache(html, model, header.TimeZone);
         WritePromptChains(html, model, header.TimeZone);
         WriteRollups(html, model);
         WriteBreaker(html, model, header.TimeZone);
@@ -190,6 +194,7 @@ internal static class HtmlReportWriter
         yield return ("summary", "Summary");
         yield return ("coverage", "Coverage");
         yield return ("timeline", "Timeline");
+        yield return ("cost-split", "Cost by model and agent");
         yield return ("cache", "Cache efficiency");
         yield return ("prompt-chains", "Prompt chains");
         yield return ("rollups", "Spend tables");
@@ -354,9 +359,129 @@ internal static class HtmlReportWriter
         Line(html, "</section>");
     }
 
-    private static void WriteCache(StringBuilder html, ExportReportModel model)
+    // The three lenses of cost. Each figure stands alone without the script; the script shows one at a time.
+    private static void WriteCostSplit(StringBuilder html, ExportReportModel model)
+    {
+        SectionStart(html, "cost-split", "Cost by model and agent");
+        Line(
+            html,
+            "<p>Billed is what GitHub (AI credits) and Microsoft Foundry (BYOK) charge. The API-equivalent and local-savings views compare the same requests with other prices; they're never added to billed spend.</p>");
+        Line(html, "<fieldset class=\"lens-toggle\" id=\"lens-toggle\" hidden=\"hidden\"><legend>Show</legend>");
+        Line(html, "<label><input type=\"radio\" name=\"lens\" value=\"billed\" checked=\"checked\" /> Billed</label>");
+        Line(html, "<label><input type=\"radio\" name=\"lens\" value=\"api\" /> API equivalent</label>");
+        Line(html, "<label><input type=\"radio\" name=\"lens\" value=\"local\" /> Local savings</label></fieldset>");
+        Lens(
+            html,
+            "billed",
+            "Billed USD: GitHub AI credits and Foundry BYOK",
+            "Billed USD",
+            model.ByModel,
+            model.ByAgent,
+            ["Requests", "Unpriced", "GitHub USD", "BYOK USD", "Billed USD"],
+            row =>
+            [
+                Count(row.SpanCount),
+                Count(row.UnpricedSpanCount),
+                Money(LedgerFormat.Usd(row.AiCreditsUsd), row.AiCreditsUsd),
+                Money(LedgerFormat.Usd(row.FoundryByokUsd), row.FoundryByokUsd),
+                Money(LedgerFormat.Usd(row.AiCreditsUsd + row.FoundryByokUsd), row.AiCreditsUsd + row.FoundryByokUsd),
+            ]);
+        Lens(
+            html,
+            "api",
+            "API-equivalent USD: the same requests at API list prices",
+            "API-equivalent USD",
+            model.ByModel,
+            model.ByAgent,
+            ["Requests", "API equiv USD", "No API price", "Estimated"],
+            row =>
+            [
+                Count(row.SpanCount),
+                Money(LedgerFormat.ApiEquivalent(row), row.ApiEquivalentUsd),
+                Count(row.ApiEquivalentUnpricedSpanCount),
+                Count(row.ApiEquivalentEstimatedSpanCount),
+            ]);
+        Lens(
+            html,
+            "local",
+            "Local savings: the cloud spend that local models avoided",
+            "Local savings",
+            [.. model.ByChannelModel.Where(row => row.Channel == BillingChannel.Local)],
+            [.. model.ByAgent.Where(row => row.LocalSavedUsd > 0m)],
+            ["Requests", "Local saved"],
+            row => [Count(row.SpanCount), Money(LedgerFormat.Usd(row.LocalSavedUsd), row.LocalSavedUsd)]);
+        Line(html, "</section>");
+    }
+
+    // One lens's figure: its key, a chart by model, a chart by agent, and their tables. Local bars never carry a hatched mark,
+    // so the local key has one entry.
+    private static void Lens(
+        StringBuilder html,
+        string lens,
+        string caption,
+        string name,
+        IReadOnlyList<LedgerRollupRow> byModel,
+        IReadOnlyList<LedgerRollupRow> byAgent,
+        IReadOnlyList<string> headers,
+        Func<LedgerRollupRow, IReadOnlyList<Cell>> cells)
+    {
+        string key = lens switch
+        {
+            "billed" => Key("seg-github", "GitHub AI credits") + Key("seg-byok", "Foundry BYOK") + HatchKey("unpriced", "Unpriced requests"),
+            "api" => Key("seg-api", "API-equivalent USD") + HatchKey("unpriced", "No API-equivalent price"),
+            _ => Key("seg-local", "Cloud spend avoided"),
+        };
+        Line(
+            html,
+            $"<figure class=\"chart lens\" id=\"lens-{lens}\" data-lens=\"{lens}\"><figcaption>{caption}<ul class=\"legend\" id=\"legend-{lens}\">{key}</ul></figcaption>");
+        Chart(byModel, "model", row => row.Model ?? "(none)");
+        Chart(byAgent, "agent", row => row.Agent ?? "(none)");
+        Line(html, "<details class=\"chart-table\"><summary>Data tables</summary>");
+        Table(
+            html,
+            $"table-cost-{lens}-model",
+            $"{name} by model",
+            ["Model", .. headers],
+            [.. byModel.Select(row => (IReadOnlyList<Cell>)[Name(row.Model), .. cells(row)])]);
+        Table(
+            html,
+            $"table-cost-{lens}-agent",
+            $"{name} by agent",
+            ["Agent", .. headers],
+            [.. byAgent.Select(row => (IReadOnlyList<Cell>)[Name(row.Agent), .. cells(row)])]);
+        Line(html, "</details>");
+        Line(html, "</figure>");
+
+        void Chart(IReadOnlyList<LedgerRollupRow> rows, string by, Func<LedgerRollupRow, string> label)
+        {
+            Line(html, $"<h3 class=\"chart-heading\">By {by}</h3>");
+            if (rows.Count == 0)
+            {
+                Line(html, $"<p class=\"empty\">{(lens == "local" ? "No local requests." : "No requests.")}</p>");
+            }
+            else
+            {
+                ExportSvg.CostSplit(html, $"cost-{lens}-{by}", $"{name} by {by}", rows, lens, label);
+            }
+        }
+    }
+
+    // A key's entry: a swatch of a CSS class, then what it means.
+    private static string Key(string swatch, string meaning) => $"<li><span class=\"swatch {swatch}\"></span>{Text(meaning)}</li>";
+
+    // A key's entry for a hatched mark of the given class.
+    private static string HatchKey(string mark, string meaning) => $"<li>{ExportSvg.HatchSwatch(mark)}{Text(meaning)}</li>";
+
+    private static void WriteCache(StringBuilder html, ExportReportModel model, TimeZoneInfo zone)
     {
         SectionStart(html, "cache", "Cache efficiency");
+        Line(
+            html,
+            $"<figure class=\"chart\" id=\"cache-figure\"><figcaption>Prompt-cache hit ratio by model and agent<ul class=\"legend\" id=\"legend-cache\">{Key("seg-cache", "Cache hit ratio")}{HatchKey("na", "No hit ratio (n/a)")}</ul></figcaption>");
+        Line(html, "<h3 class=\"chart-heading\">By model</h3>");
+        ExportSvg.CacheBars(html, "cache-model", "Cache hit ratio by model", model.CacheByModel, row => row.Model ?? "(none)");
+        Line(html, "<h3 class=\"chart-heading\">By agent</h3>");
+        ExportSvg.CacheBars(html, "cache-agent", "Cache hit ratio by agent", model.CacheByAgent, row => row.Agent ?? "(none)");
         Table(
             html,
             "table-cache-model",
@@ -369,6 +494,45 @@ internal static class HtmlReportWriter
             "Prompt cache by agent",
             ["Agent", .. CacheHeaders],
             [.. model.CacheByAgent.Select(row => (IReadOnlyList<Cell>)[Name(row.Agent), .. CacheCells(row)])]);
+        Line(html, "</figure>");
+        Line(html, "<h3 id=\"growth-heading\">Context growth</h3>");
+        if (model.ChainTurns.Count == 0)
+        {
+            Line(html, "<p class=\"empty\" id=\"growth-none\">No prompt chain has more than one request.</p>");
+        }
+        else
+        {
+            Line(
+                html,
+                "<figure class=\"chart\" id=\"growth-figure\"><figcaption>Input tokens per request in the costliest prompt chains that have more than one request</figcaption>");
+            Line(html, "<div class=\"growth-grid\">");
+            foreach (ExportChainTurns chain in model.ChainTurns)
+            {
+                ExportSvg.Growth(html, chain, zone);
+            }
+
+            Line(html, "</div>");
+            Line(html, "<details class=\"chart-table\"><summary>Data table</summary>");
+            Table(
+                html,
+                "table-growth",
+                "Context growth of the costliest prompt chains",
+                ["#", "Trace", "Requests", "First input", "Peak input", "Sequences"],
+                [
+                    .. model.ChainTurns.Select(chain => (IReadOnlyList<Cell>)
+                    [
+                        Count(chain.Rank),
+                        Code(chain.TraceId),
+                        Count(chain.TotalTurns),
+                        Count(chain.Turns.Count == 0 ? 0 : chain.Turns[0].InputTokens),
+                        Count(chain.PeakInputTokens),
+                        Count(chain.Turns.Count == 0 ? 0 : chain.Turns.Max(turn => turn.Sequence) + 1),
+                    ]),
+                ]);
+            Line(html, "</details>");
+            Line(html, "</figure>");
+        }
+
         Line(html, "</section>");
     }
 

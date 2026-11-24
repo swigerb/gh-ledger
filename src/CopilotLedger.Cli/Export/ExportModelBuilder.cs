@@ -51,6 +51,8 @@ internal static class ExportModelBuilder
                 .Reverse()
                 .Select(ExportRecords.ToolCall),
         ];
+        IReadOnlyList<PromptChainRow> promptChains =
+            await snapshot.GetTopPromptChainsAsync(filter, ExportLimits.PromptChains, cancellationToken);
         return new ExportReportModel
         {
             Header = new ExportHeader
@@ -105,11 +107,7 @@ internal static class ExportModelBuilder
             ByChannelModel = byChannelModel,
             CacheByModel = await snapshot.GetCacheEfficiencyAsync(LedgerGrouping.Model, filter, cancellationToken),
             CacheByAgent = await snapshot.GetCacheEfficiencyAsync(LedgerGrouping.Agent, filter, cancellationToken),
-            PromptChains =
-            [
-                .. (await snapshot.GetTopPromptChainsAsync(filter, ExportLimits.PromptChains, cancellationToken))
-                    .Select(row => row with { Repository = Shown(row.Repository) }),
-            ],
+            PromptChains = [.. promptChains.Select(row => row with { Repository = Shown(row.Repository) })],
             BreakerTrips =
             [
                 .. (await snapshot.GetBreakerTripsAsync(filter, cancellationToken)).Select(trip => trip with
@@ -128,8 +126,60 @@ internal static class ExportModelBuilder
                 drawnToolCalls,
                 [.. byModel.Select(row => row.Model ?? "(none)")],
                 inputs.TimeZone),
+            ChainTurns = await ChainTurnsAsync(snapshot, filter, promptChains, cancellationToken),
         };
 
         string Shown(string key) => ExportRecords.Repository(key, roots, inputs.IncludeLocalPaths);
+    }
+
+    // The requests, in the export's window, of the first GrowthChains prompt chains, in cost order, that have at least two
+    // requests: a single request shows no growth. A chain whose trace ID isn't 32 hexadecimal characters is skipped, as
+    // --turns can't select it.
+    private static async Task<IReadOnlyList<ExportChainTurns>> ChainTurnsAsync(
+        LedgerExportSnapshot snapshot,
+        LedgerFilter filter,
+        IReadOnlyList<PromptChainRow> promptChains,
+        CancellationToken cancellationToken)
+    {
+        List<ExportChainTurns> chains = [];
+        for (int index = 0; index < promptChains.Count && chains.Count < ExportLimits.GrowthChains; index++)
+        {
+            string trace = promptChains[index].TraceId;
+            if (promptChains[index].SpanCount < 2 || trace.Length != 32 || !trace.All(char.IsAsciiHexDigit))
+            {
+                continue;
+            }
+
+            IReadOnlyList<TurnTokenRow> turns =
+                await snapshot.GetTurnBreakdownAsync(TurnSelector.ForTrace(trace), filter, cancellationToken);
+            List<(string AgentSpan, string Model)> sequences = [];
+            List<ExportTurnPoint> points = [];
+            foreach (TurnTokenRow turn in turns.Take(ExportLimits.GrowthTurns))
+            {
+                (string, string) key = (turn.AgentSpanId ?? string.Empty, turn.Model);
+                if (!sequences.Contains(key))
+                {
+                    sequences.Add(key);
+                }
+
+                points.Add(new ExportTurnPoint(
+                    points.Count,
+                    turn.StartTime,
+                    turn.Agent,
+                    turn.Model,
+                    sequences.IndexOf(key),
+                    turn.InputTokens));
+            }
+
+            chains.Add(new ExportChainTurns(
+                index + 1,
+                trace,
+                promptChains[index].StartTime,
+                turns.Count,
+                turns.Count == 0 ? 0 : turns.Max(turn => turn.InputTokens),
+                points));
+        }
+
+        return chains;
     }
 }

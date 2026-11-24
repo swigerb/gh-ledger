@@ -45,6 +45,24 @@ internal static class ExportRecords
     public static string TimelineTruncation(ExportCoverage coverage) =>
         $"The timeline draws the latest {LedgerFormat.Count(coverage.TimelineSpans)} of {Plural(coverage.Spans, "request", "requests")} and {LedgerFormat.Count(coverage.TimelineToolCalls)} of {Plural(coverage.ToolCalls, "tool call", "tool calls")}; the totals and tables include them all.";
 
+    // value when it has at most length UTF-16 code units; else its first length - 1 units and "…", one fewer when the cut
+    // would split a surrogate pair (HtmlEncoder would write a lone surrogate as U+FFFD).
+    public static string Shorten(string value, int length)
+    {
+        if (value.Length <= length)
+        {
+            return value;
+        }
+
+        int keep = length - 1;
+        if (keep > 0 && char.IsHighSurrogate(value[keep - 1]))
+        {
+            keep--;
+        }
+
+        return value[..keep] + "…";
+    }
+
     // A request's shown repository: its slug, else its root's folder name (the root with includeLocalPaths), else (none).
     public static string SpanRepository(string? slug, string? root, bool includeLocalPaths) =>
         slug ?? (root is null ? "(none)" : includeLocalPaths ? root : FolderName(root));

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using CopilotLedger.Cli.Reporting;
 using CopilotLedger.Core.Pricing;
+using CopilotLedger.Storage;
 
 namespace CopilotLedger.Cli.Export;
 
@@ -111,6 +112,180 @@ internal static class ExportSvg
         Line(html, "</div></div>");
     }
 
+    // A cost chart of one lens: billed (GitHub AI credits, then Foundry BYOK), api (API-equivalent), or local (savings). Each
+    // chart scales to its own largest bar.
+    public static void CostSplit(
+        StringBuilder html,
+        string id,
+        string title,
+        IReadOnlyList<LedgerRollupRow> rows,
+        string lens,
+        Func<LedgerRollupRow, string> name) =>
+        Bars(
+            html,
+            id,
+            title,
+            lens switch
+            {
+                "billed" => "Billed USD: GitHub AI credits, then Foundry BYOK. A hatched mark means some requests have no price.",
+                "api" => "USD at API list prices. A hatched mark means some requests have no API-equivalent price.",
+                _ => "The cloud spend that local models avoided, in USD.",
+            },
+            [
+                .. rows.Select(row => lens switch
+                {
+                    "billed" => row.UnpricedSpanCount == row.SpanCount
+                        ? new Bar(name(row), [], "Unpriced", "unpriced", 12)
+                        : new Bar(
+                            name(row),
+                            [("seg-github", row.AiCreditsUsd), ("seg-byok", row.FoundryByokUsd)],
+                            LedgerFormat.Usd(row.AiCreditsUsd + row.FoundryByokUsd)
+                                + (row.UnpricedSpanCount > 0 ? $" + {LedgerFormat.Count(row.UnpricedSpanCount)} unpriced" : string.Empty),
+                            row.UnpricedSpanCount > 0 ? "unpriced" : null,
+                            12),
+                    "api" => new Bar(
+                        name(row),
+                        [("seg-api", row.ApiEquivalentUsd ?? 0m)],
+                        LedgerFormat.ApiEquivalent(row),
+                        row.ApiEquivalentUnpricedSpanCount > 0 ? "unpriced" : null,
+                        12),
+                    _ => new Bar(name(row), [("seg-local", row.LocalSavedUsd)], LedgerFormat.Usd(row.LocalSavedUsd), null, 0),
+                }),
+            ],
+            null);
+
+    // Cache hit ratios as bars of ratio × 440. A row that reported no cache counters gets a hatched mark and n/a, never 0%.
+    public static void CacheBars(
+        StringBuilder html,
+        string id,
+        string title,
+        IReadOnlyList<CacheEfficiencyRow> rows,
+        Func<CacheEfficiencyRow, string> name) =>
+        Bars(
+            html,
+            id,
+            title,
+            "The share of input tokens read from the prompt cache, over the requests that reported cache counters.",
+            [
+                .. rows.Select(row => row.CacheHitRatio is decimal ratio
+                    ? new Bar(
+                        name(row),
+                        [("seg-cache", ratio)],
+                        $"{LedgerFormat.Percent(ratio)} · {LedgerFormat.Count(row.CacheReportedSpanCount)} of {LedgerFormat.Count(row.SpanCount)} reported",
+                        null,
+                        0)
+                    : new Bar(name(row), [], row.CacheReportedSpanCount == 0 ? "n/a (no cache counters)" : "n/a", "na", 60)),
+            ],
+            1m);
+
+    // A prompt chain's context growth: a caption (rank, local start, requests, peak input; the trace ID in its title), then
+    // each request's input tokens in start order, a line per sequence (agent invocation and model), from x = 48 to 348 and
+    // y = 130 (0) to 10 (the most input), then a key of the sequences when there's more than one.
+    public static void Growth(StringBuilder html, ExportChainTurns chain, TimeZoneInfo zone)
+    {
+        string id = "growth-" + Int(chain.Rank);
+        IReadOnlyList<ExportTurnPoint> turns = chain.Turns;
+        long most = turns.Count == 0 ? 0 : turns.Max(turn => turn.InputTokens);
+        int sequences = turns.Count == 0 ? 0 : turns.Max(turn => turn.Sequence) + 1;
+        string X(int index) => ExportJson.Number(
+            decimal.Round(48m + index * 300m / Math.Max(turns.Count - 1, 1), 2, MidpointRounding.AwayFromZero));
+        string Y(long input) => ExportJson.Number(
+            most == 0 ? 130m : decimal.Round(130m - input * 120m / most, 2, MidpointRounding.AwayFromZero));
+        string description =
+            $"{ExportRecords.Plural(chain.TotalTurns, "request", "requests")} of trace {chain.TraceId} in {ExportRecords.Plural(sequences, "sequence", "sequences")}, with at most {LedgerFormat.Count(most)} input tokens."
+            + (chain.TotalTurns > turns.Count ? $" The chart draws the first {LedgerFormat.Count(turns.Count)}." : string.Empty);
+        string caption =
+            $"#{Int(chain.Rank)} · {TimeZoneInfo.ConvertTime(chain.StartTime, zone).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} · {ExportRecords.Plural(chain.TotalTurns, "request", "requests")} · peak {LedgerFormat.Count(chain.PeakInputTokens)} input tokens";
+        Line(html, "<div class=\"growth-chart\">");
+        Line(html, $"<p class=\"growth-caption\" id=\"{id}-caption\" title=\"{Text(chain.TraceId)}\">{Text(caption)}</p>");
+        Line(html, $"<svg id=\"{id}\" class=\"growth\" role=\"img\" aria-labelledby=\"{id}-title {id}-desc\" viewBox=\"0 0 360 160\">");
+        Line(
+            html,
+            $"<title id=\"{id}-title\">Prompt chain {Int(chain.Rank)}: input tokens per request</title><desc id=\"{id}-desc\">{Text(description)}</desc>");
+        Line(html, "<line class=\"axis\" x1=\"48\" y1=\"10\" x2=\"48\" y2=\"130\" /><line class=\"axis\" x1=\"48\" y1=\"130\" x2=\"348\" y2=\"130\" />");
+        Line(
+            html,
+            $"<text x=\"44\" y=\"134\" text-anchor=\"end\">0</text><text x=\"44\" y=\"14\" text-anchor=\"end\">{LedgerFormat.Count(most)}</text><text x=\"48\" y=\"146\" text-anchor=\"middle\">1</text><text x=\"348\" y=\"146\" text-anchor=\"middle\">{LedgerFormat.Count(turns.Count)}</text>");
+        List<string> names = [];
+        for (int sequence = 0; sequence < sequences; sequence++)
+        {
+            ExportTurnPoint[] points = [.. turns.Where(turn => turn.Sequence == sequence)];
+            string name = $"{points[0].Agent ?? "(none)"} · {points[0].Model}";
+            names.Add(name);
+            string label = $"{name}: {ExportRecords.Plural(points.Length, "request", "requests")}";
+            html.Append($"<g class=\"sequence s{Int(sequence % 8)}\" tabindex=\"0\" role=\"img\" aria-label=\"{Text(label)}\">");
+            html.Append($"<polyline points=\"{string.Join(' ', points.Select(point => $"{X(point.Index)},{Y(point.InputTokens)}"))}\" />");
+            foreach (ExportTurnPoint point in points)
+            {
+                html.Append(
+                    $"<circle cx=\"{X(point.Index)}\" cy=\"{Y(point.InputTokens)}\" r=\"2\"><title>{Text($"Request {Int(point.Index + 1)} · {Clock(point.StartTime, zone)} · {point.Agent ?? "(none)"} · {point.Model} · {LedgerFormat.Count(point.InputTokens)} input tokens")}</title></circle>");
+            }
+
+            Line(html, "</g>");
+        }
+
+        Line(html, "</svg>");
+        if (names.Count > 1)
+        {
+            Line(
+                html,
+                "<ul class=\"legend\">"
+                + string.Concat(names.Select((name, sequence) => $"<li><span class=\"swatch s{Int(sequence % 8)}\"></span>{Text(name)}</li>"))
+                + "</ul>");
+        }
+
+        Line(html, "</div>");
+    }
+
+    // A key's swatch of the hatch pattern, drawn with the class of the hatched mark it explains.
+    public static string HatchSwatch(string mark) =>
+        $"<svg class=\"swatch\" width=\"10\" height=\"10\" aria-hidden=\"true\" focusable=\"false\"><rect class=\"{mark}\" width=\"10\" height=\"10\" fill=\"url(#hatch)\" /></svg>";
+
+    // A horizontal bar chart of at most ExportLimits.ChartRows rows. Segments start at x = 200 and are scaled so that max
+    // (by default, the longest bar) is 440 long; then come the hatched mark and the value text.
+    private static void Bars(StringBuilder html, string id, string title, string description, IReadOnlyList<Bar> bars, decimal? max)
+    {
+        Bar[] shown = [.. bars.Take(ExportLimits.ChartRows)];
+        decimal scale = max ?? (shown.Length == 0 ? 0m : shown.Max(bar => bar.Segments.Sum(segment => segment.Value)));
+        string desc = bars.Count > shown.Length
+            ? $"{description} Showing {LedgerFormat.Count(shown.Length)} of {LedgerFormat.Count(bars.Count)}; the table lists them all."
+            : description;
+        Line(
+            html,
+            $"<svg id=\"{id}\" class=\"bars\" role=\"img\" aria-labelledby=\"{id}-title {id}-desc\" viewBox=\"0 0 860 {Int(shown.Length * 22 + 8)}\">");
+        Line(html, $"<title id=\"{id}-title\">{Text(title)}</title><desc id=\"{id}-desc\">{Text(desc)}</desc>");
+        for (int row = 0; row < shown.Length; row++)
+        {
+            Bar bar = shown[row];
+            string label = $"{bar.Name}: {bar.Value}";
+            html.Append($"<g class=\"bar\" tabindex=\"0\" role=\"img\" aria-label=\"{Text(label)}\"><title>{Text(label)}</title>");
+            html.Append(
+                $"<text class=\"label\" x=\"192\" y=\"{Int(row * 22 + 19)}\" text-anchor=\"end\">{Text(ExportRecords.Shorten(bar.Name, 28))}</text>");
+            decimal x = 200m;
+            foreach ((string segment, decimal value) in bar.Segments)
+            {
+                decimal width = scale == 0m ? 0m : decimal.Round(value * 440m / scale, 2, MidpointRounding.AwayFromZero);
+                if (width > 0m)
+                {
+                    html.Append(
+                        $"<rect class=\"{segment}\" x=\"{ExportJson.Number(x)}\" y=\"{Int(row * 22 + 6)}\" width=\"{ExportJson.Number(width)}\" height=\"14\" />");
+                    x += width;
+                }
+            }
+
+            if (bar.Mark is not null)
+            {
+                html.Append(
+                    $"<rect class=\"{bar.Mark}\" x=\"{ExportJson.Number(x)}\" y=\"{Int(row * 22 + 6)}\" width=\"{Int(bar.MarkWidth)}\" height=\"14\" fill=\"url(#hatch)\" />");
+                x += bar.MarkWidth;
+            }
+
+            Line(html, $"<text class=\"value\" x=\"{ExportJson.Number(x + 6m)}\" y=\"{Int(row * 22 + 18)}\">{Text(bar.Value)}</text></g>");
+        }
+
+        Line(html, "</svg>");
+    }
+
     // The night bands, clipped to the axis, as rects of the given height.
     private static void Nights(StringBuilder html, ExportTimeline timeline, int height)
     {
@@ -149,4 +324,7 @@ internal static class ExportSvg
     private static string Text(string value) => HtmlEncoder.Default.Encode(value);
 
     private static void Line(StringBuilder html, string line) => html.Append(line).Append('\n');
+
+    // One bar: its row's name, its segments (CSS class and value), its value text, and its hatched mark's class and width.
+    private sealed record Bar(string Name, IReadOnlyList<(string Class, decimal Value)> Segments, string Value, string? Mark, int MarkWidth);
 }
