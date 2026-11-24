@@ -6,7 +6,7 @@ public enum OtlpValueKind
     String,
     Bool,
     Int,
-    Double,         // recognized; the value isn't kept
+    Double,         // recognized; only an exact non-negative integer value is kept (DoubleAsNanoAiu)
     Bytes,          // recognized; the value isn't kept
     Array,          // recognized; the value isn't kept
     KeyValueList,   // recognized; the value isn't kept
@@ -19,6 +19,7 @@ public sealed record OtlpAnyValue
     public string? StringValue { get; init; }   // set when Kind is String
     public bool BoolValue { get; init; }        // set when Kind is Bool
     public long IntValue { get; init; }         // set when Kind is Int
+    public long? DoubleAsNanoAiu { get; init; } // set when Kind is Double and the value is an integer from 0 to 2^53 (NanoAiu)
 }
 
 public sealed record OtlpAttribute(string Key, OtlpAnyValue Value);

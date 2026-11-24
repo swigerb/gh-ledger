@@ -1,5 +1,7 @@
+using System.Text;
 using System.Globalization;
 using System.Text.Json;
+using CopilotLedger.Core.Pricing;
 
 namespace CopilotLedger.Otlp.Decoding;
 
@@ -156,6 +158,16 @@ internal static class OtlpJsonTraceReader
 
             if (NameIs(property, "doubleValue"))
             {
+                if (value.ValueKind == JsonValueKind.Number &&
+                    NanoAiu.TryFromJsonNumber(Encoding.UTF8.GetBytes(value.GetRawText()), out long nanoAiu))
+                {
+                    return new OtlpAnyValue
+                    {
+                        Kind = OtlpValueKind.Double,
+                        DoubleAsNanoAiu = nanoAiu,
+                    };
+                }
+
                 return new OtlpAnyValue { Kind = OtlpValueKind.Double };
             }
 
