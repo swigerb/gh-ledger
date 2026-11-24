@@ -107,8 +107,9 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
 
     public ImportSourceKind Kind => ImportSourceKind.Copilot;
 
-    // Each <home>/session-state/<session ID>/events.jsonl whose directory name is a valid session ID. A session folder, or a
-    // session-state that exists but isn't a folder that can be listed, is an unreadable entry.
+    // Each <home>/session-state/<session ID>/events.jsonl whose directory name is a valid session ID. A session folder that
+    // can't be entered or listed, or a session-state that exists but isn't a folder that can be listed, is an unreadable entry;
+    // a session folder without events.jsonl has no log.
     public SessionLogDiscovery Discover(string home)
     {
         ArgumentNullException.ThrowIfNull(home);
@@ -125,14 +126,11 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                     continue;
                 }
 
+                // FileInfo.Exists is false for a file that can't be examined, too, so it can't tell a folder without a log from
+                // one this user can't enter. Length throws FileNotFoundException only when there's no events.jsonl.
                 try
                 {
                     FileInfo events = new(Path.Combine(directory, "events.jsonl"));
-                    if (!events.Exists)
-                    {
-                        continue;
-                    }
-
                     logs.Add(new SessionLogLocation
                     {
                         Source = ImportSourceKind.Copilot,
@@ -142,6 +140,10 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                         LastWriteTime = new DateTimeOffset(events.LastWriteTimeUtc, TimeSpan.Zero),
                         IsActive = Directory.EnumerateFiles(directory, "inuse.*.lock").Any(),
                     });
+                }
+                catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    // No events.jsonl, or the session folder is gone: no log.
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {

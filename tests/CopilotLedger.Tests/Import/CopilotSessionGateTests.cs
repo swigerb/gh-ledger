@@ -331,6 +331,31 @@ public sealed class CopilotSessionGateTests
         AssertNoCanary(result);
     }
 
+    // A session folder that this user can't enter is an unreadable entry, never a session without a log, and the others are
+    // still found; a folder without events.jsonl still has no log. FileInfo.Exists, which is false for a file it can't
+    // examine, hid such a folder before. Root on Unix can enter it, so there it's read.
+    [Fact]
+    public void CS17_ASessionFolderThatCantBeEnteredIsCounted()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs("a-session").Write(temp.Path);
+        string folder = Path.GetDirectoryName(new CopilotSessionLogs("b-session").Write(temp.Path))!;
+        Directory.CreateDirectory(Path.Combine(temp.Path, "session-state", "c-without-events"));
+
+        SessionLogDiscovery discovery;
+        bool enforced;
+        using (DeniedDirectory denied = new(folder))
+        {
+            enforced = denied.Enforced;
+            discovery = Source.Discover(temp.Path);
+        }
+
+        Assert.True(enforced || (!OperatingSystem.IsWindows() && Environment.IsPrivilegedProcess));
+        string[] found = enforced ? ["a-session"] : ["a-session", "b-session"];
+        Assert.Equal(found, discovery.Logs.Select(log => log.LogId));
+        Assert.Equal(enforced ? 1 : 0, discovery.UnreadableEntries);
+    }
+
     private static async Task<SessionLogReadResult> ReadAsync(string home) =>
         await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
 

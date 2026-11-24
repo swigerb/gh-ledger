@@ -685,6 +685,83 @@ public sealed class ImportCommandTests
             run.Out);
     }
 
+    // A Copilot session folder that this user can't enter makes coverage incomplete, with a warning, and the other sessions are
+    // imported. Before, discovery took it for a folder without a log, and the import reported complete coverage with exit code
+    // 0. Root on Unix can enter it, so there both sessions are imported.
+    [Fact]
+    public async Task IC16_ASessionFolderThatCantBeEnteredMakesCoverageIncomplete()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        new CopilotSessionLogs("s-a").Usage("u1", S1).Write(harness.Context.CopilotHome);
+        string folder = Path.GetDirectoryName(new CopilotSessionLogs("s-b").Usage("u2", S2).Write(harness.Context.CopilotHome))!;
+
+        CliRun text;
+        CliRun json;
+        bool enforced;
+        using (DeniedDirectory denied = new(folder))
+        {
+            enforced = denied.Enforced;
+            text = await harness.RunAsync("import", "--all");
+            json = await harness.RunAsync("import", "--all", "--json");
+        }
+
+        Assert.True(enforced || (!OperatingSystem.IsWindows() && Environment.IsPrivilegedProcess));
+        Assert.Equal(
+            enforced ? 1L : 2L,
+            await LedgerSql.ScalarAsync(harness.Context.DatabasePath, "SELECT COUNT(*) FROM spans;"));
+        if (!enforced)
+        {
+            Assert.Equal((0, "", 0, ""), (text.ExitCode, text.Error, json.ExitCode, json.Error));
+            return;
+        }
+
+        Assert.Equal(2, text.ExitCode);
+        Assert.Equal(
+            Normalize("""
+            Import from local session logs (all time)
+
+                                         Copilot
+            Sessions scanned                   1
+            Skipped, unchanged                 0
+            Skipped, active                    0
+            Skipped, out of scope              0
+            Unsupported sessions               0
+            Records parsed                     1
+            Out of scope                       0
+            Recorded                           1
+            Duplicate                          0
+            Overlap-skipped                    0
+            Ambiguous-overlap                  0
+            Superseded, unmatched              0
+            Malformed lines                    0
+            Unsupported usage shapes           0
+            Cost out of range                  0
+            Unpriced                           0
+            Coverage                  incomplete
+
+            Recorded 1 request: 0.15 AI credits ($0.00), API equivalent $0.00.
+            Coverage is incomplete; see the warnings.
+
+            """),
+            text.Out);
+        Assert.Equal(
+            "Warning: Copilot session logs: 1 folder or file couldn't be listed; any logs there weren't imported\n",
+            text.Error);
+        Assert.Equal((2, ""), (json.ExitCode, json.Error));
+        using JsonDocument document = JsonDocument.Parse(json.Out);
+        JsonElement copilot = document.RootElement.GetProperty("sources")[0];
+        Assert.Equal(
+            ("incomplete", 1L, 1L, 1L),
+            (document.RootElement.GetProperty("coverage").GetString(),
+                copilot.GetProperty("sessionsScanned").GetInt64(),
+                copilot.GetProperty("sessionsSkippedUnchanged").GetInt64(),
+                copilot.GetProperty("unreadableStoreEntries").GetInt64()));
+        Assert.Equal(
+            """{"source":"copilot","log":"","code":"unreadableStore","event":"unknown","field":null,"version":null,"count":1,"line":null,"byteOffset":null}""",
+            JsonSerializer.Serialize(Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray())));
+    }
+
     private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
 
     private static string Normalize(string value) => value.Replace("\r\n", "\n");
