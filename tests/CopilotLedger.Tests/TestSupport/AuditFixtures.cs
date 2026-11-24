@@ -103,4 +103,12 @@ public static class AuditFixtures
         string.Join(", ", finding.Metrics.Select(metric => $"{metric.Name}={Number(metric.Value)} {metric.Unit}"));
 
     public static string Number(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
+
+    // "none", or each finding as "{severity} [{metrics}] {impact or null} {recommendation key}", joined by " | ".
+    public static string Describe(IReadOnlyList<AuditFinding> findings) =>
+        findings.Count == 0
+            ? "none"
+            : string.Join(" | ", findings.Select(finding =>
+                $"{AuditSeverities.ToName(finding.Severity)} [{Metrics(finding)}] " +
+                $"{(finding.EstimatedImpactUsd is decimal impact ? Number(impact) : "null")} {finding.RecommendationKey}"));
 }

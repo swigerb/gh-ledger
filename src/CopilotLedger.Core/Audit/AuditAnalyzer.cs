@@ -6,7 +6,12 @@ namespace CopilotLedger.Core.Audit;
 public static class AuditAnalyzer
 {
     // The implemented rules, in AuditRuleIds.All order.
-    public static IReadOnlyList<IAuditRule> Rules { get; } = [];
+    public static IReadOnlyList<IAuditRule> Rules { get; } =
+    [
+        new ContextBloatRule(),
+        new ContextGrowthRule(),
+        new CacheMissStreakRule(),
+    ];
 
     // Rules whose ID input.Rules names; premium_model_trivial_turn only with input.Pricing. AuditRuleIds.All order.
     public static IReadOnlyList<string> EvaluatedRules(AuditInput input)
