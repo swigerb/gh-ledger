@@ -230,11 +230,14 @@ internal static class ExportCommands
         await store.InitializeAsync(cancellationToken);
         string htmlTemp = TemporaryPath(htmlPath);
         string? zipTemp = zipPath is null ? null : TemporaryPath(zipPath);
+        string? zipBackup = null;
+        bool zipMoved = false;
         string writing = output;
         ExportReportModel model;
         try
         {
-            // Both files are written from one snapshot, then moved into place: the ZIP first, then the report.
+            // Both files are written from one snapshot, then moved into place: the ZIP first, then the report. A ZIP that
+            // --force replaces waits beside it until the report is in place, so a failed export leaves both as they were.
             await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
             {
                 model = await ExportModelBuilder.BuildAsync(snapshot, inputs, cancellationToken);
@@ -254,7 +257,15 @@ internal static class ExportCommands
             if (zipTemp is not null)
             {
                 writing = zipShown;
-                File.Move(zipTemp, zipPath!, overwrite: force);
+                if (File.Exists(zipPath))
+                {
+                    string backup = BackupPath(zipPath!);
+                    File.Move(zipPath!, backup);
+                    zipBackup = backup;
+                }
+
+                File.Move(zipTemp, zipPath!);
+                zipMoved = true;
             }
 
             writing = output;
@@ -262,7 +273,13 @@ internal static class ExportCommands
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            context.Error.WriteLine($"Could not write {writing}: {ex.Message}");
+            context.Error.WriteLine($"Could not write {writing}: {WriteFailure(ex)}");
+            if (zipPath is not null && !RestoreZip(zipPath, zipBackup, zipMoved))
+            {
+                context.Error.WriteLine($"The replaced {zipShown} is kept as {Path.GetFileName(zipBackup)}.");
+                zipBackup = null;
+            }
+
             return 1;
         }
         finally
@@ -271,6 +288,11 @@ internal static class ExportCommands
             if (zipTemp is not null)
             {
                 DeleteIfPresent(zipTemp);
+            }
+
+            if (zipBackup is not null)
+            {
+                DeleteIfPresent(zipBackup);
             }
         }
 
@@ -329,6 +351,43 @@ internal static class ExportCommands
     // The temporary file beside target that a file is written to before it's moved into place.
     private static string TemporaryPath(string target) =>
         $"{target}.{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}.tmp";
+
+    // Where a ZIP that --force replaces waits until the report is in place.
+    private static string BackupPath(string target) =>
+        $"{target}.{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}.bak";
+
+    // Why a file couldn't be written, without the path that the exception's message names.
+    private static string WriteFailure(Exception ex) => ex switch
+    {
+        DirectoryNotFoundException => "its folder doesn't exist.",
+        UnauthorizedAccessException => "access is denied.",
+        _ => $"the file system reported error 0x{ex.HResult.ToString("X8", CultureInfo.InvariantCulture)}.",
+    };
+
+    // Puts back the ZIP that --force replaced, or deletes the new one when there was none, so a failed export leaves no ZIP
+    // that doesn't match the report beside it. False when the replaced ZIP couldn't be put back.
+    private static bool RestoreZip(string zipPath, string? backup, bool moved)
+    {
+        if (backup is null)
+        {
+            if (moved)
+            {
+                DeleteIfPresent(zipPath);
+            }
+
+            return true;
+        }
+
+        try
+        {
+            File.Move(backup, zipPath, overwrite: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     private static void DeleteIfPresent(string path)
     {

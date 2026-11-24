@@ -67,8 +67,7 @@ public sealed class ExportCommandTests
         CliRun missing = await cli.RunAsync("export", "--all-repos", "--out", "missing/report.html");
 
         Assert.Equal((1, "out.html is a directory.\n"), (directory.ExitCode, directory.Error));
-        Assert.Equal(1, missing.ExitCode);
-        Assert.StartsWith("Could not write missing/report.html: ", missing.Error);
+        Assert.Equal((1, "Could not write missing/report.html: its folder doesn't exist.\n"), (missing.ExitCode, missing.Error));
         Assert.Empty(Directory.GetFiles(temp.Path, "*.tmp", SearchOption.AllDirectories));
     }
 
@@ -249,6 +248,40 @@ public sealed class ExportCommandTests
                 "8 requests reported no cache counters; cache hit ratios leave them out.",
             ],
             Notes(page));
+    }
+
+    // Only Windows refuses to replace a read-only file or to move one that's open; on Linux, the folder's permissions decide.
+    [Fact]
+    public async Task EC12_AFailedReplaceLeavesBothFilesAsTheyWere()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        CliHarness cli = Harness(temp.Path);
+        string report = Path.Combine(temp.Path, Report);
+        string bundle = Path.ChangeExtension(report, ".zip");
+        File.WriteAllText(report, "old report");
+        File.WriteAllText(bundle, "old bundle");
+
+        File.SetAttributes(report, FileAttributes.ReadOnly);
+        CliRun readOnly = await cli.RunAsync("export", "--all-repos", "--bundle", "--force");
+        File.SetAttributes(report, FileAttributes.Normal);
+        CliRun open;
+        using (new FileStream(bundle, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            open = await cli.RunAsync("export", "--all-repos", "--bundle", "--force");
+        }
+
+        Assert.Equal((1, "Could not write copilot-ledger-report.html: access is denied.\n"), (readOnly.ExitCode, readOnly.Error));
+        Assert.Equal(
+            (1, "Could not write copilot-ledger-report.zip: the file system reported error 0x80070020.\n"),
+            (open.ExitCode, open.Error));
+        Assert.Equal(("old report", "old bundle"), (File.ReadAllText(report), File.ReadAllText(bundle)));
+        Assert.Equal([report, bundle], Directory.GetFiles(temp.Path).Order(StringComparer.Ordinal));
     }
 
     // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
