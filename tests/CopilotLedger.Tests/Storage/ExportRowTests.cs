@@ -244,7 +244,7 @@ public sealed class ExportRowTests
     }
 
     [Fact]
-    public async Task XR12_TheEarliestToolCallIsTheWholeLedgers()
+    public async Task XR12_TheEarliestLinkIsTheWholeLedgers()
     {
         using TempDirectory temp = new();
         SqliteLedgerStore empty = new(Path.Combine(temp.Path, "empty.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
@@ -255,18 +255,18 @@ public sealed class ExportRowTests
         foreach (SqliteLedgerStore ledger in new[] { empty, store })
         {
             await using LedgerExportSnapshot snapshot = await ledger.OpenExportSnapshotAsync();
-            earliest.Add(await snapshot.GetEarliestToolCallStartAsync());
+            earliest.Add(await snapshot.GetEarliestLinkStartAsync());
         }
 
-        // Once I1's, I2's, T1, and T2 are deleted, T5 (A's invoke_agent link, at 14:00:50) is the earliest link, but T3 the
-        // earliest tool call.
+        // Once I1's, I2's, T1, and T2 are deleted, the earliest link is T5, A's invoke_agent link at 14:00:50, though the
+        // earliest tool call is T3's: the daemon deletes both kinds by the same rule.
         await store.PruneSpanLinksAsync(new DateTimeOffset(2026, 11, 21, 14, 0, 45, TimeSpan.Zero));
         await using (LedgerExportSnapshot pruned = await store.OpenExportSnapshotAsync())
         {
-            earliest.Add(await pruned.GetEarliestToolCallStartAsync());
+            earliest.Add(await pruned.GetEarliestLinkStartAsync());
         }
 
-        Assert.Equal([null, ImportEntries.Start, new DateTimeOffset(2026, 11, 21, 15, 0, 10, TimeSpan.Zero)], earliest);
+        Assert.Equal([null, ImportEntries.Start, new DateTimeOffset(2026, 11, 21, 14, 0, 50, TimeSpan.Zero)], earliest);
     }
 
     // Pages seek past rows that start in the same millisecond, from the period's first, and skip or repeat none.

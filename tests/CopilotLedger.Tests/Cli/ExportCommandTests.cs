@@ -290,7 +290,7 @@ public sealed class ExportCommandTests
     // The daemon deleted the tool calls before 11-21, so the two requests of 11-20 may have lost theirs, though they're
     // within 7 days of the generation time.
     [Fact]
-    public async Task EC13_ToolHistoryStartsNoEarlierThanTheEarliestToolCallKept()
+    public async Task EC13_ToolHistoryStartsNoEarlierThanTheEarliestLinkKept()
     {
         using TempDirectory temp = new();
         SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
@@ -306,7 +306,7 @@ public sealed class ExportCommandTests
             (history.GetProperty("retainedFromUtc").GetString(), history.GetProperty("spansBeforeRetention").GetInt32(), history.GetProperty("complete").GetBoolean()));
         Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
         Assert.Contains(
-            "The earliest tool call the ledger keeps started at 2026-11-21 08:00, so the 2 requests before it may be missing their tool calls.",
+            "The ledger's tool history starts at 2026-11-21 08:00, so the 2 requests before it may be missing their tool calls.",
             Notes(page));
     }
 
@@ -426,6 +426,25 @@ public sealed class ExportCommandTests
         Assert.Equal(
             [Path.Combine(temp.Path, Report), bundle, backup],
             Directory.GetFiles(temp.Path).Order(StringComparer.Ordinal));
+    }
+
+    // With every link deleted, the ledger keeps no tool history, so no request's tool calls count as kept, even at a past
+    // --generated-at.
+    [Fact]
+    public async Task EC18_ALedgerWithoutLinksKeepsNoToolHistory()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        await store.PruneSpanLinksAsync(new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero));
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos", "--generated-at", "2026-11-21T21:30:00Z");
+
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement history = data.RootElement.GetProperty("coverage").GetProperty("toolHistory");
+        Assert.Equal(
+            ("2026-11-21T21:30:00.0000000+00:00", 8, false),
+            (history.GetProperty("retainedFromUtc").GetString(), history.GetProperty("spansBeforeRetention").GetInt32(), history.GetProperty("complete").GetBoolean()));
+        Assert.Contains("The ledger keeps no tool history, so the 8 requests may be missing their tool calls.", Notes(page));
     }
 
     // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.

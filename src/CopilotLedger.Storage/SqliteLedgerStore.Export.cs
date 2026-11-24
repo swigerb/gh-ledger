@@ -137,14 +137,14 @@ public sealed partial class SqliteLedgerStore
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    // The start of the earliest execute_tool link in the whole ledger, whatever its owner, or null when there's none.
-    internal static async Task<DateTimeOffset?> ReadEarliestToolCallStartAsync(
+    // The start of the earliest span link in the whole ledger, of any operation or owner, or null when there's none.
+    internal static async Task<DateTimeOffset?> ReadEarliestLinkStartAsync(
         SqliteTransaction snapshot,
         CancellationToken cancellationToken)
     {
         await using SqliteCommand command = snapshot.Connection!.CreateCommand();
         command.Transaction = snapshot;
-        command.CommandText = "SELECT MIN(start_time_unix_ms) FROM span_links WHERE operation_name = 'execute_tool';";
+        command.CommandText = "SELECT MIN(start_time_unix_ms) FROM span_links;";
         return await command.ExecuteScalarAsync(cancellationToken) is long start
             ? DateTimeOffset.FromUnixTimeMilliseconds(start)
             : null;

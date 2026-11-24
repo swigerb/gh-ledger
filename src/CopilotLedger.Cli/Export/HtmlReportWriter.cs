@@ -105,9 +105,12 @@ internal static class HtmlReportWriter
             string requests = ExportRecords.Plural(before, "request", "requests");
             string their = before == 1 ? "its" : "their";
             string from = LedgerFormat.LocalTime(coverage.ToolHistoryFromUtc, zone);
-            yield return coverage.ToolHistoryFromEarliestToolCall
-                ? $"The earliest tool call the ledger keeps started at {from}, so the {requests} before it may be missing {their} tool calls."
-                : $"Tool calls are kept for {coverage.ToolHistoryRetentionDays.ToString(CultureInfo.InvariantCulture)} days, so the {requests} before {from} may be missing {their} tool calls.";
+            yield return coverage.ToolHistoryStart switch
+            {
+                ExportToolHistoryStart.NoLinks => $"The ledger keeps no tool history, so the {requests} may be missing {their} tool calls.",
+                ExportToolHistoryStart.EarliestLink => $"The ledger's tool history starts at {from}, so the {requests} before it may be missing {their} tool calls.",
+                _ => $"Tool calls are kept for {coverage.ToolHistoryRetentionDays.ToString(CultureInfo.InvariantCulture)} days, so the {requests} before {from} may be missing {their} tool calls.",
+            };
         }
 
         long withoutDetail = coverage.ImportedToolCallsWithoutDetail;

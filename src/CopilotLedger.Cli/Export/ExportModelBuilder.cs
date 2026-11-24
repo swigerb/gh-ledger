@@ -35,11 +35,17 @@ internal static class ExportModelBuilder
             await snapshot.GetRollupAsync(LedgerGrouping.ChannelModel, filter, cancellationToken);
         LedgerRollupRow totals = ReportCommands.Sum(byChannelModel);
 
-        // Tool history is the retention before generatedAt, but starts no earlier than the earliest tool call the ledger
-        // keeps: the daemon deletes tool calls by its own clock, so a past --generated-at can't count on the retention.
+        // Tool history is the retention before generatedAt, but starts no earlier than the earliest span link the ledger
+        // keeps: the daemon deletes links, of tool calls and agent invocations alike, by its own clock, so a past
+        // --generated-at can't count on the retention. A ledger that keeps no link keeps no tool history.
         DateTimeOffset retained = inputs.GeneratedAt - LedgerImporter.ToolLinkRetention;
-        DateTimeOffset? earliestToolCall = await snapshot.GetEarliestToolCallStartAsync(cancellationToken);
-        DateTimeOffset toolHistoryFrom = earliestToolCall is DateTimeOffset earliest && earliest > retained ? earliest : retained;
+        DateTimeOffset? earliestLink = await snapshot.GetEarliestLinkStartAsync(cancellationToken);
+        (DateTimeOffset toolHistoryFrom, ExportToolHistoryStart toolHistoryStart) = earliestLink switch
+        {
+            null => (inputs.GeneratedAt, ExportToolHistoryStart.NoLinks),
+            DateTimeOffset earliest when earliest > retained => (earliest, ExportToolHistoryStart.EarliestLink),
+            _ => (retained, ExportToolHistoryStart.Retention),
+        };
         ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
         IReadOnlyList<LedgerRollupRow> byModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken);
 
@@ -94,7 +100,7 @@ internal static class ExportModelBuilder
                 CacheLegacyUnknownSpans = coverage.CacheLegacyUnknownSpans,
                 ToolHistoryRetentionDays = LedgerImporter.ToolLinkRetention.Days,
                 ToolHistoryFromUtc = toolHistoryFrom,
-                ToolHistoryFromEarliestToolCall = toolHistoryFrom > retained,
+                ToolHistoryStart = toolHistoryStart,
                 SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
                 ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
                 ToolCalls = await snapshot.CountToolCallsAsync(filter, cancellationToken),

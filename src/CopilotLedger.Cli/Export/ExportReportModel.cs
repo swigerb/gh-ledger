@@ -56,6 +56,15 @@ internal sealed record ExportSummary
     public required long PromptChains { get; init; }          // GetPromptCountAsync
 }
 
+// Where tool history starts: at the retention before GeneratedAt, at the earliest span link the ledger keeps when that's
+// later, or at GeneratedAt when the ledger keeps no link.
+internal enum ExportToolHistoryStart
+{
+    Retention,
+    EarliestLink,
+    NoLinks,
+}
+
 internal sealed record ExportCoverage
 {
     public required long Spans { get; init; }
@@ -71,8 +80,8 @@ internal sealed record ExportCoverage
     public required long CacheAbsentSpans { get; init; }
     public required long CacheLegacyUnknownSpans { get; init; }
     public required int ToolHistoryRetentionDays { get; init; }        // LedgerImporter.ToolLinkRetention.Days (7)
-    public required DateTimeOffset ToolHistoryFromUtc { get; init; }    // GeneratedAt less the retention, or the earliest tool call kept
-    public required bool ToolHistoryFromEarliestToolCall { get; init; } // ToolHistoryFromUtc is the earliest tool call kept, which is later
+    public required DateTimeOffset ToolHistoryFromUtc { get; init; }    // where ToolHistoryStart says tool history starts
+    public required ExportToolHistoryStart ToolHistoryStart { get; init; }
     public required long SpansBeforeToolHistory { get; init; }
     public required long ImportedToolCallsWithoutDetail { get; init; }
     public required long ToolCalls { get; init; }                       // CountToolCallsAsync
