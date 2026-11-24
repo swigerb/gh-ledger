@@ -849,14 +849,6 @@ gh-ledger daemon started (pid 4242) on http://localhost:4318.
 ```
 <!-- /sample -->
 
-Repair what earlier versions imported:
-
-```shell
-gh ledger import --all
-```
-
-It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs).
-
 If it says instead that the daemon did not start, check your rates overlay:
 
 <!-- sample: rates-validate-upgrade -->
@@ -870,6 +862,14 @@ Invalid rates overlay: C:\Users\you\.copilot-ledger\rates.json: githubAiCredits.
 <!-- /sample -->
 
 A new release can build in a model name that your overlay also lists, and the daemon doesn't start until the overlay is valid. Here, the overlay prices `claude-haiku-4-5-20251001`, the name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5: gh-ledger 0.4.1 didn't know it, so you may have added it yourself, and gh-ledger 0.5.0 builds it in. Remove the entry that the message names, run `gh ledger rates validate` again, and start the daemon. See [Which model prices a request](configuration.md#which-model-prices-a-request).
+
+Once the daemon is running, repair what earlier versions imported:
+
+```shell
+gh ledger import --all
+```
+
+It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs).
 
 To remove gh-ledger, undo `install`:
 

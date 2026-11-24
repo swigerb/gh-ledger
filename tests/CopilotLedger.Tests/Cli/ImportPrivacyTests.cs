@@ -191,6 +191,31 @@ public sealed partial class ImportPrivacyTests
     }
 
     [Fact]
+    public void IP5_TheReadNeverStoredListNamesEverySprint12Path()
+    {
+        string readNeverStored = Assert.Single(
+            File.ReadAllLines(RepositoryFile("docs", "cli.md")),
+            line => line.StartsWith("- **Read, never stored:**", StringComparison.Ordinal));
+
+        foreach (string path in new[]
+                 {
+                     "`data.usage.copilotUsage.totalNanoAiu`",
+                     "`data.compactionTokensUsed.copilotUsage.totalNanoAiu`",
+                     "`data.compactionAttemptId`",
+                     "`data.usage.apiCallId`",
+                     "`data.apiCallId` of `assistant.message`",
+                     "`id` and `parentId` of `assistant.message`, `tool.execution_start`, and `tool.execution_complete`",
+                     "`data.compactionTokensUsed.provider`",
+                     "`data.compactionTokensUsed.copilotUsage` are present",
+                 })
+        {
+            Assert.Contains(path, readNeverStored, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("and `copilotUsage` are present", readNeverStored, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task IP_AM1_AssistantMessageCanariesReachNoLedgerOrOutput()
     {
         using TempDirectory temp = new();
