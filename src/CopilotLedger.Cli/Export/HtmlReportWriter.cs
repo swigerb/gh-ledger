@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
 using CopilotLedger.Cli.Reporting;
+using CopilotLedger.Core.Breaker;
+using CopilotLedger.Core.Pricing;
 using CopilotLedger.Storage;
 
 namespace CopilotLedger.Cli.Export;
@@ -26,6 +28,7 @@ internal static class HtmlReportWriter
         Line(html, $"<meta name=\"generator\" content=\"gh-ledger {Text(header.ToolVersion)}\" />");
         Line(html, $"<title>CopilotLedger report: {Text(header.Scope)} ({Text(header.Filter.Period)})</title>");
         Line(html, "<style>");
+        Line(html, ExportAssets.Css.TrimEnd('\n'));
         Line(html, "</style>");
         Line(html, "</head>");
         Line(html, "<body>");
@@ -33,6 +36,10 @@ internal static class HtmlReportWriter
         Line(html, "<main>");
         WriteSummary(html, model);
         WriteCoverage(html, model.Coverage, header.TimeZone);
+        WriteCache(html, model);
+        WritePromptChains(html, model, header.TimeZone);
+        WriteRollups(html, model);
+        WriteBreaker(html, model, header.TimeZone);
         WriteAuditFindings(html, model.AuditFindings);
         Line(html, "</main>");
         Line(
@@ -173,6 +180,10 @@ internal static class HtmlReportWriter
     {
         yield return ("summary", "Summary");
         yield return ("coverage", "Coverage");
+        yield return ("cache", "Cache efficiency");
+        yield return ("prompt-chains", "Prompt chains");
+        yield return ("rollups", "Spend tables");
+        yield return ("breaker", "Circuit breaker and budgets");
         if (model.AuditFindings.Count > 0)
         {
             yield return ("audit-findings", "Audit findings");
@@ -233,6 +244,24 @@ internal static class HtmlReportWriter
             LedgerFormat.Count(model.Summary.PromptChains),
             model.Summary.PromptChains.ToString(CultureInfo.InvariantCulture),
             "prompts sent");
+        int open = model.BreakerTrips.Count(trip => trip.ResetAt is null);
+        Card(
+            html,
+            "breaker",
+            "Circuit breaker",
+            $"{LedgerFormat.Count(open)} open",
+            open.ToString(CultureInfo.InvariantCulture),
+            ExportRecords.Plural(model.BreakerTrips.Count, "trip", "trips"));
+        int exceeded = model.Budgets.Count(budget => budget.Exceeded);
+        Card(
+            html,
+            "budgets",
+            "Budgets",
+            model.Budgets.Count == 0
+                ? "None"
+                : $"{LedgerFormat.Count(exceeded)} of {LedgerFormat.Count(model.Budgets.Count)} exceeded",
+            model.Budgets.Count == 0 ? "None" : exceeded.ToString(CultureInfo.InvariantCulture),
+            "all-time spend");
         Line(html, "</ul>");
         Line(html, "</section>");
     }
@@ -255,6 +284,254 @@ internal static class HtmlReportWriter
         Line(html, "</ul>");
         Line(html, "</section>");
     }
+
+    private static void WriteCache(StringBuilder html, ExportReportModel model)
+    {
+        SectionStart(html, "cache", "Cache efficiency");
+        Table(
+            html,
+            "table-cache-model",
+            "Prompt cache by model",
+            ["Model", .. CacheHeaders],
+            [.. model.CacheByModel.Select(row => (IReadOnlyList<Cell>)[Name(row.Model), .. CacheCells(row)])]);
+        Table(
+            html,
+            "table-cache-agent",
+            "Prompt cache by agent",
+            ["Agent", .. CacheHeaders],
+            [.. model.CacheByAgent.Select(row => (IReadOnlyList<Cell>)[Name(row.Agent), .. CacheCells(row)])]);
+        Line(html, "</section>");
+    }
+
+    private static void WritePromptChains(StringBuilder html, ExportReportModel model, TimeZoneInfo zone)
+    {
+        SectionStart(html, "prompt-chains", "Prompt chains");
+        Table(
+            html,
+            "table-prompt-chains",
+            $"Top {LedgerFormat.Count(model.PromptChains.Count)} of {LedgerFormat.Count(model.Summary.PromptChains)} prompt chains by billed cost",
+            [
+                "#", "Started", "Repository", "Branch", "Agents", "Models", "Requests", "Input", "Output", "AI credits",
+                "GitHub USD", "BYOK USD", "API equiv USD", "Local saved", "Trace",
+            ],
+            [
+                .. model.PromptChains.Select((row, index) => (IReadOnlyList<Cell>)
+                [
+                    Count(index + 1),
+                    TimeCell(row.StartTime, zone),
+                    Name(row.Repository),
+                    Name(row.Branch),
+                    Name(row.Agents.Count == 0 ? "-" : string.Join(", ", row.Agents)),
+                    Name(row.Models.Count == 0 ? "-" : string.Join(", ", row.Models)),
+                    Count(row.SpanCount),
+                    Count(row.InputTokens),
+                    Count(row.OutputTokens),
+                    Money(LedgerFormat.Credits(row.AiCredits), row.AiCredits),
+                    Money(LedgerFormat.Usd(row.AiCreditsUsd), row.AiCreditsUsd),
+                    Money(LedgerFormat.Usd(row.FoundryByokUsd), row.FoundryByokUsd),
+                    Money(LedgerFormat.ApiEquivalent(row), row.ApiEquivalentUsd),
+                    Money(LedgerFormat.Usd(row.LocalSavedUsd), row.LocalSavedUsd),
+                    Code(row.TraceId),
+                ]),
+            ]);
+        Line(html, "</section>");
+    }
+
+    private static void WriteRollups(StringBuilder html, ExportReportModel model)
+    {
+        SectionStart(html, "rollups", "Spend tables");
+        Table(
+            html,
+            "table-by-model",
+            "Spend by model",
+            ["Model", .. RollupHeaders],
+            [.. model.ByModel.Select(row => (IReadOnlyList<Cell>)[Name(row.Model), .. RollupCells(row)])]);
+        Table(
+            html,
+            "table-by-agent",
+            "Spend by agent",
+            ["Agent", .. RollupHeaders],
+            [.. model.ByAgent.Select(row => (IReadOnlyList<Cell>)[Name(row.Agent), .. RollupCells(row)])]);
+        Table(
+            html,
+            "table-by-branch",
+            "Spend by branch",
+            ["Repository", "Branch", .. RollupHeaders],
+            [.. model.ByBranch.Select(row => (IReadOnlyList<Cell>)[Name(row.Repository), Name(row.Branch), .. RollupCells(row)])]);
+        Table(
+            html,
+            "table-by-channel-model",
+            "Spend by billing channel and model",
+            ["Channel", "Model", .. RollupHeaders],
+            [.. model.ByChannelModel.Select(row => (IReadOnlyList<Cell>)[Name(ChannelName(row.Channel)), Name(row.Model), .. RollupCells(row)])]);
+        Line(html, "</section>");
+    }
+
+    private static void WriteBreaker(StringBuilder html, ExportReportModel model, TimeZoneInfo zone)
+    {
+        SectionStart(html, "breaker", "Circuit breaker and budgets");
+        Table(
+            html,
+            "table-breaker-trips",
+            "Breaker trips of these prompt chains",
+            ["Rule", "Tripped", "State", "Repository", "Branch", "Window cost", "Window", "Failures", "Trace"],
+            [
+                .. model.BreakerTrips.Select(trip => (IReadOnlyList<Cell>)
+                [
+                    Name(trip.Rule == BreakerRule.CreditVelocity ? "Credit velocity" : "Retry churn"),
+                    TimeCell(trip.TrippedAt, zone),
+                    trip.ResetAt is DateTimeOffset reset ? new Cell($"Reset {Time(reset, zone)}", reset) : new Cell("Open", null),
+                    Name(trip.Repository),
+                    Name(trip.Branch),
+                    trip.WindowCostUsd is decimal cost ? Money(LedgerFormat.Usd(cost), cost) : new Cell("-", null),
+                    trip.WindowMinutes is int minutes ? new Cell($"{LedgerFormat.Count(minutes)} min", (long)minutes) : new Cell("-", null),
+                    trip.FailureCount is int failures ? Count(failures) : new Cell("-", null),
+                    Code(trip.TraceId),
+                ]),
+            ]);
+        Table(
+            html,
+            "table-budgets",
+            "Budgets of these branches",
+            ["Repository", "Branch", "Budget (AI credits)", "Spent, all time (AI credits)", "Status"],
+            [
+                .. model.Budgets.Select(budget => (IReadOnlyList<Cell>)
+                [
+                    Name(budget.Repository),
+                    Name(budget.Branch),
+                    Money(LedgerFormat.Credits(budget.BudgetAiCredits), budget.BudgetAiCredits),
+                    Money(LedgerFormat.Credits(budget.SpentAiCredits), budget.SpentAiCredits),
+                    Name(budget.Exceeded ? "Exceeded" : "Within budget"),
+                ]),
+            ]);
+        Line(html, "</section>");
+    }
+
+    private static readonly string[] RollupHeaders =
+        ["Requests", "Unpriced", "AI credits", "GitHub USD", "BYOK USD", "API equiv USD", "Local saved", "Cache hit"];
+
+    private static readonly string[] CacheHeaders =
+        ["Requests", "Cache reported", "Input", "Cache read", "Cache write", "Uncached", "Output", "Hit %"];
+
+    private static IReadOnlyList<Cell> RollupCells(LedgerRollupRow row) =>
+    [
+        Count(row.SpanCount),
+        Count(row.UnpricedSpanCount),
+        Money(LedgerFormat.Credits(row.AiCredits), row.AiCredits),
+        Money(LedgerFormat.Usd(row.AiCreditsUsd), row.AiCreditsUsd),
+        Money(LedgerFormat.Usd(row.FoundryByokUsd), row.FoundryByokUsd),
+        Money(LedgerFormat.ApiEquivalent(row), row.ApiEquivalentUsd),
+        Money(LedgerFormat.Usd(row.LocalSavedUsd), row.LocalSavedUsd),
+        Ratio(row.CacheHitRatio),
+    ];
+
+    // status --cache's cells: totals over the requests that reported cache usage are n/a when none did, and marked * when
+    // only some did.
+    private static IReadOnlyList<Cell> CacheCells(CacheEfficiencyRow row) =>
+    [
+        Count(row.SpanCount),
+        Count(row.CacheReportedSpanCount),
+        Count(row.InputTokens),
+        Observed(row, row.ReportedCacheReadInputTokens),
+        Observed(row, row.ReportedCacheWriteInputTokens),
+        Observed(row, row.ReportedUncachedInputTokens),
+        Count(row.OutputTokens),
+        Ratio(row.CacheHitRatio),
+    ];
+
+    private static Cell Observed(CacheEfficiencyRow row, long value) =>
+        row.CacheReportedSpanCount == 0
+            ? new Cell("n/a", null)
+            : new Cell(LedgerFormat.Count(value) + (row.CacheUnreportedSpanCount > 0 ? "*" : string.Empty), value);
+
+    private static string ChannelName(BillingChannel? channel) => channel switch
+    {
+        BillingChannel.GitHubAiCredits => "GitHub AI credits",
+        BillingChannel.FoundryByok => "Foundry BYOK",
+        BillingChannel.Local => "Local",
+        _ => "Unpriced",
+    };
+
+    // A sortable table. Each cell's data-sort is its row's 0-based position when the rows are ordered by that column: values
+    // ascending with null first, strings ordinal, ties in table order. A table without rows has one "None." row instead.
+    private static void Table(
+        StringBuilder html,
+        string id,
+        string caption,
+        IReadOnlyList<string> headers,
+        IReadOnlyList<IReadOnlyList<Cell>> rows)
+    {
+        Line(html, $"<div class=\"table-wrap\"><table class=\"{(rows.Count == 0 ? "data" : "data sortable")}\" id=\"{id}\">");
+        Line(html, $"<caption>{caption}</caption>");
+        Line(html, "<thead><tr>" + string.Concat(headers.Select(header => $"<th scope=\"col\">{header}</th>")) + "</tr></thead>");
+        Line(html, "<tbody>");
+        if (rows.Count == 0)
+        {
+            Line(html, $"<tr><td colspan=\"{headers.Count.ToString(CultureInfo.InvariantCulture)}\">None.</td></tr>");
+        }
+
+        int[][] ranks = [.. Enumerable.Range(0, headers.Count).Select(column => Ranks(rows, column))];
+        for (int row = 0; row < rows.Count; row++)
+        {
+            html.Append("<tr>");
+            for (int column = 0; column < headers.Count; column++)
+            {
+                Cell cell = rows[row][column];
+                html.Append($"<td data-sort=\"{ranks[column][row].ToString(CultureInfo.InvariantCulture)}\"");
+                html.Append(cell.Title is null ? ">" : $" title=\"{Text(cell.Title)}\">");
+                html.Append(cell.Html).Append("</td>");
+            }
+
+            Line(html, "</tr>");
+        }
+
+        Line(html, "</tbody>");
+        Line(html, "</table></div>");
+    }
+
+    private static int[] Ranks(IReadOnlyList<IReadOnlyList<Cell>> rows, int column)
+    {
+        int[] order = [.. Enumerable.Range(0, rows.Count).Order(Comparer<int>.Create((left, right) =>
+        {
+            int compared = CompareKeys(rows[left][column].Key, rows[right][column].Key);
+            return compared != 0 ? compared : left.CompareTo(right);
+        }))];
+        int[] ranks = new int[rows.Count];
+        for (int position = 0; position < order.Length; position++)
+        {
+            ranks[order[position]] = position;
+        }
+
+        return ranks;
+    }
+
+    private static int CompareKeys(object? left, object? right) => (left, right) switch
+    {
+        (null, null) => 0,
+        (null, _) => -1,
+        (_, null) => 1,
+        (string text, string other) => string.CompareOrdinal(text, other),
+        (IComparable value, _) => value.CompareTo(right),
+        _ => 0,
+    };
+
+    // A cell: its HTML, which the caller encoded; the value it sorts by; and the exact value for its title, if any.
+    private sealed record Cell(string Html, object? Key, string? Title = null);
+
+    private static Cell Name(string? value) => new(Text(value ?? "(none)"), value ?? "(none)");
+
+    private static Cell Count(long value) => new(LedgerFormat.Count(value), value);
+
+    // A money amount as shown, titled with its exact value, or Unpriced when there's none.
+    private static Cell Money(string shown, decimal? exact) =>
+        new(Text(shown), exact, exact is decimal value ? LedgerFormat.Exact(value) : "Unpriced");
+
+    private static Cell Ratio(decimal? ratio) =>
+        new(Text(LedgerFormat.Percent(ratio)), ratio, ratio?.ToString(CultureInfo.InvariantCulture) ?? "n/a");
+
+    private static Cell TimeCell(DateTimeOffset value, TimeZoneInfo zone) => new(Time(value, zone), value);
+
+    private static Cell Code(string value) => new($"<code>{Text(value)}</code>", value);
 
     private static void WriteAuditFindings(StringBuilder html, IReadOnlyList<ExportAuditFinding> findings)
     {

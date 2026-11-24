@@ -29,4 +29,8 @@
     <ProjectReference Include="..\CopilotLedger.Mcp\CopilotLedger.Mcp.csproj" />
     <ProjectReference Include="..\CopilotLedger.Otlp\CopilotLedger.Otlp.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Export\Assets\report.css" LogicalName="CopilotLedger.Cli.Export.Assets.report.css" />
+  </ItemGroup>
 </Project>

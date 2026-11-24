@@ -31,8 +31,9 @@ internal static class ExportModelBuilder
             ToUtc = inputs.GeneratedAt,
         };
         ExportRatesProvenance provenance = await snapshot.GetRatesProvenanceAsync(filter, cancellationToken);
-        LedgerRollupRow totals = ReportCommands.Sum(
-            await snapshot.GetRollupAsync(LedgerGrouping.ChannelModel, filter, cancellationToken));
+        IReadOnlyList<LedgerRollupRow> byChannelModel =
+            await snapshot.GetRollupAsync(LedgerGrouping.ChannelModel, filter, cancellationToken);
+        LedgerRollupRow totals = ReportCommands.Sum(byChannelModel);
         DateTimeOffset toolHistoryFrom = inputs.GeneratedAt - LedgerImporter.ToolLinkRetention;
         ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
         return new ExportReportModel
@@ -75,6 +76,36 @@ internal static class ExportModelBuilder
                 ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
             },
             AuditFindings = [],
+            ByModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken),
+            ByAgent = await snapshot.GetRollupAsync(LedgerGrouping.Agent, filter, cancellationToken),
+            ByBranch =
+            [
+                .. (await snapshot.GetRollupAsync(LedgerGrouping.Branch, filter, cancellationToken))
+                    .Select(row => row with { Repository = row.Repository is null ? null : Shown(row.Repository) }),
+            ],
+            ByChannelModel = byChannelModel,
+            CacheByModel = await snapshot.GetCacheEfficiencyAsync(LedgerGrouping.Model, filter, cancellationToken),
+            CacheByAgent = await snapshot.GetCacheEfficiencyAsync(LedgerGrouping.Agent, filter, cancellationToken),
+            PromptChains =
+            [
+                .. (await snapshot.GetTopPromptChainsAsync(filter, ExportLimits.PromptChains, cancellationToken))
+                    .Select(row => row with { Repository = Shown(row.Repository) }),
+            ],
+            BreakerTrips =
+            [
+                .. (await snapshot.GetBreakerTripsAsync(filter, cancellationToken)).Select(trip => trip with
+                {
+                    Repository = Shown(trip.Repository),
+                    RepositoryRoot = inputs.IncludeLocalPaths ? trip.RepositoryRoot : null,
+                }),
+            ],
+            Budgets =
+            [
+                .. (await snapshot.GetBudgetsAsync(filter, cancellationToken))
+                    .Select(row => row with { Repository = Shown(row.Repository) }),
+            ],
         };
+
+        string Shown(string key) => ExportRecords.Repository(key, roots, inputs.IncludeLocalPaths);
     }
 }

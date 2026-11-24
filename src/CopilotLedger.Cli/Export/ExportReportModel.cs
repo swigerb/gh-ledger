@@ -9,6 +9,15 @@ internal sealed record ExportReportModel
     public required ExportSummary Summary { get; init; }
     public required ExportCoverage Coverage { get; init; }
     public required IReadOnlyList<ExportAuditFinding> AuditFindings { get; init; }      // always empty until gh ledger audit (#65)
+    public required IReadOnlyList<LedgerRollupRow> ByModel { get; init; }               // GetRollupAsync's order
+    public required IReadOnlyList<LedgerRollupRow> ByAgent { get; init; }
+    public required IReadOnlyList<LedgerRollupRow> ByBranch { get; init; }              // Repository is the shown key
+    public required IReadOnlyList<LedgerRollupRow> ByChannelModel { get; init; }
+    public required IReadOnlyList<CacheEfficiencyRow> CacheByModel { get; init; }
+    public required IReadOnlyList<CacheEfficiencyRow> CacheByAgent { get; init; }
+    public required IReadOnlyList<PromptChainRow> PromptChains { get; init; }           // the top ExportLimits.PromptChains; shown keys
+    public required IReadOnlyList<BreakerTrip> BreakerTrips { get; init; }              // shown keys; RepositoryRoot only with local paths
+    public required IReadOnlyList<BranchBudgetRow> Budgets { get; init; }               // shown keys
 }
 
 internal sealed record ExportHeader
