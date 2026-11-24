@@ -1,4 +1,5 @@
 using CopilotLedger.Core.Git;
+using CopilotLedger.Core.Pricing;
 using CopilotLedger.Core.Telemetry;
 using CopilotLedger.Otlp.Decoding;
 
@@ -211,6 +212,7 @@ public static class GenAiSpanNormalizer
                 CacheReadState = cacheReadState,
                 CacheWriteState = cacheWriteState,
                 ServiceRequestId = Text(attributes, GenAiAttributeNames.ServiceRequestId),
+                ReportedCharge = ReadReportedCharge(attributes),
             };
         }
 
@@ -311,6 +313,24 @@ public static class GenAiSpanNormalizer
         return attribute?.Value.Kind == OtlpValueKind.Int
             ? attribute.Value.IntValue
             : null;
+    }
+
+    private static ReportedCharge ReadReportedCharge(IReadOnlyList<OtlpAttribute> attributes)
+    {
+        OtlpAttribute? attribute = FindAttribute(attributes, GenAiAttributeNames.NanoAiu);
+        if (attribute is null)
+        {
+            return ReportedCharge.Absent;
+        }
+
+        return attribute.Value.Kind switch
+        {
+            OtlpValueKind.Int when attribute.Value.IntValue is >= 0 and <= NanoAiu.MaxExact =>
+                ReportedCharge.Valid(attribute.Value.IntValue),
+            OtlpValueKind.Double when attribute.Value.DoubleAsNanoAiu is long nanoAiu =>
+                ReportedCharge.Valid(nanoAiu),
+            _ => ReportedCharge.Malformed,
+        };
     }
 
     private static OtlpAttribute? FindAttribute(IReadOnlyList<OtlpAttribute> attributes, string key) =>

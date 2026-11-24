@@ -190,6 +190,65 @@ public sealed partial class ImportPrivacyTests
         }
     }
 
+    [Fact]
+    public void IP5_TheReadNeverStoredListNamesEverySprint12Path()
+    {
+        string readNeverStored = Assert.Single(
+            File.ReadAllLines(RepositoryFile("docs", "cli.md")),
+            line => line.StartsWith("- **Read, never stored:**", StringComparison.Ordinal));
+
+        foreach (string path in new[]
+                 {
+                     "`data.usage.copilotUsage.totalNanoAiu`",
+                     "`data.compactionTokensUsed.copilotUsage.totalNanoAiu`",
+                     "`data.compactionAttemptId`",
+                     "`data.usage.apiCallId`",
+                     "`data.apiCallId` of `assistant.message`",
+                     "`id` and `parentId` of `assistant.message`, `tool.execution_start`, and `tool.execution_complete`",
+                     "`data.compactionTokensUsed.provider`",
+                     "`data.compactionTokensUsed.copilotUsage` are present",
+                 })
+        {
+            Assert.Contains(path, readNeverStored, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("and `copilotUsage` are present", readNeverStored, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IP_AM1_AssistantMessageCanariesReachNoLedgerOrOutput()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        CopilotSessionLogs log = new CopilotSessionLogs("s-assistant").AssistantMessage("api-A");
+        string message = log.LastId;
+        log.Usage("u1", S1, numToolCalls: 1)
+            .ToolStart("t1", "bash", parentId: message)
+            .ToolComplete("t1", true, exitCode: 0)
+            .Write(harness.Context.CopilotHome);
+
+        CliRun text = await harness.RunAsync("import", "--all", "--source", "copilot");
+        CliRun json = await harness.RunAsync("import", "--all", "--source", "copilot", "--json");
+        SqliteConnection.ClearAllPools();
+        string output = text.Out + text.Error + json.Out + json.Error;
+        byte[] canary = Encoding.UTF8.GetBytes(CopilotSessionLogs.Canary);
+
+        Assert.Equal((0, 0), (text.ExitCode, json.ExitCode));
+        Assert.DoesNotContain(CopilotSessionLogs.Canary, output, StringComparison.Ordinal);
+        foreach (string suffix in new[] { "", "-wal", "-shm" })
+        {
+            string path = harness.Context.DatabasePath + suffix;
+            if (File.Exists(path))
+            {
+                byte[] ledger = await FileRetry.ReadAllBytesAsync(path);
+                Assert.True(ledger.AsSpan().IndexOf(canary) < 0);
+            }
+        }
+
+        Assert.Equal(1L, await LedgerSql.ScalarAsync(harness.Context.DatabasePath, "SELECT COUNT(*) FROM spans;"));
+        Assert.Equal(1L, await LedgerSql.ScalarAsync(harness.Context.DatabasePath, "SELECT COUNT(*) FROM span_links;"));
+    }
+
     private static string Canary(string kind) => $"CANARY-{kind}-7c1d";
 
     private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));

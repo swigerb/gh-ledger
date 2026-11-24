@@ -110,6 +110,10 @@ public sealed class ApiEquivalentStoreTests
         await using (SqliteConnection connection = await OpenAsync(temp))
         {
             await ExecuteAsync(connection, """
+                ALTER TABLE spans DROP COLUMN list_cost_usd_pico;
+                ALTER TABLE spans DROP COLUMN charge_source;
+                ALTER TABLE import_sessions DROP COLUMN import_revision;
+                DROP INDEX ix_span_links_import_span;
                 DROP TABLE import_record_aliases;
                 DROP TABLE import_sessions;
                 DROP INDEX ux_spans_effective_import_usage;
@@ -141,7 +145,7 @@ public sealed class ApiEquivalentStoreTests
         await store.InitializeAsync();
 
         await using SqliteConnection check = await OpenAsync(temp);
-        Assert.Equal(6L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(7L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(6, before.Length);
         Assert.Equal(
             before,

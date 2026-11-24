@@ -52,7 +52,7 @@ It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTele
 
 **Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server.
 
-**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 6, for `gh ledger import`, the first time its daemon or any command opens it. That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
+**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 7, for `gh ledger import`, the first time its daemon or any command opens it. Format 7 keeps each request's list price beside the amount it was charged. After upgrading, run `gh ledger import --all` once so that requests imported before, and live requests whose session logs report their charge, are repaired (see [Repairs](#repairs)). That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
 
 To upgrade, close the Copilot sessions and apps that use the MCP server, and stop the daemon:
 
@@ -116,8 +116,10 @@ gh ledger import (--repo <path> | --all) [--source copilot|codex]... [--since <p
 
 | Source | Versions read | Not imported |
 |---|---|---|
-| Copilot CLI and the GitHub Copilot app | 1.0.103 to 1.0.114, by `copilotVersion` in the session's first event | Sessions that an earlier version started, which log only session totals, even when a supported version resumed them; sessions of later versions, until gh-ledger supports them; a session's earlier journal files |
+| Copilot CLI and the GitHub Copilot app | 1.0.103 to 1.0.115, by `copilotVersion` in the session's first event | Sessions that an earlier version started, which log only session totals, even when a supported version resumed them; sessions of later versions, until gh-ledger supports them; a session's earlier journal files |
 | Codex | 0.153.0 to 0.171.0, by `cli_version` | Compressed rollouts (`.jsonl.zst`); tool calls, whose outcome Codex doesn't log; and the requests of another thread that a forked rollout copied |
+
+A new Copilot version is read only after gh-ledger has been checked against its logs; until then its sessions are reported as unsupported, and nothing is guessed.
 
 ### Overlap with live spans
 
@@ -129,6 +131,17 @@ Every call is charged once, and live spans win. Requests are never matched by ti
 - A live span that arrives after its request was imported supersedes the imported row, in the same transaction: the imported row stays in the ledger but no longer counts in any report, MCP tool, budget, or circuit-breaker rule. A live span without a service request ID supersedes every imported row of its session, and any live span supersedes the imported rows of its session that have no ID. Those live spans may not cover every request of the session, so each later import whose scope holds such rows reports them as `Superseded, unmatched`, and its coverage as incomplete. They never count again.
 
 Importing again records nothing twice. A log that was imported completely is skipped while its size, last-write time, and SHA-256 hash stay the same, so import reads such a log once to hash it: the size and last-write time alone could miss a log rewritten in place. Any other log is read again, and the requests recorded from it before count as `Duplicate`. An import stopped by Ctrl+C or an error keeps the requests it recorded, and running it again completes it.
+
+### Repairs
+
+An import after upgrading reads every session log again once, even one it imported completely before, and repairs what it recorded from it in place:
+
+- **Charges.** A request imported before is priced again with the rates in use now; when anything about its price changed, such as the charge its log reports, its row is rewritten (`Repriced`). Its list price is kept beside the charge.
+- **Live requests.** A live request that the daemon recorded at the rate card, with a service request ID, gets the charge its session log reports, when the log reports a valid one (`Live repriced`). Its list price is kept. Live requests without a service request ID, such as those an earlier gh-ledger recorded, and those whose logs are gone or unsupported, keep the rate card's price.
+- **Tool calls.** An imported tool call that an earlier import attached to the wrong request moves to the request that asked for it (`Tool links relinked`); one whose request has no imported row, such as a request that a live span recorded, is removed (`toolLinksRemoved` in `--json`). Tool calls older than 7 days aren't kept, so they aren't repaired.
+- **Compactions.** Logs whose BYOK or failed compactions earlier versions couldn't read are read completely now.
+
+A dry run reports the same counts and changes nothing. Repairs never change which request counts: the rules of [Overlap with live spans](#overlap-with-live-spans) still decide that. Budgets, the circuit breaker, receipts, reports, export, and audit use the repaired charges from then on; circuit-breaker trips recorded before aren't re-evaluated.
 
 ### The import report
 
@@ -152,15 +165,19 @@ The table has a column for each source:
 | Unsupported usage shapes | Usage records with a missing or invalid field |
 | Cost out of range | Requests whose cost is beyond the ledger's range of about $9.2 million |
 | Unpriced | Recorded requests without a price; see [Pricing statuses](configuration.md#pricing-statuses) |
+| Charges rejected | Requests charged at the rate card because the charge their log reported isn't valid or can't apply |
+| Repriced | Requests imported before whose pricing changed, which this import rewrote; see [Repairs](#repairs) |
+| Live repriced | Live requests that this import gave the charge their log reported; see [Repairs](#repairs) |
+| Tool links relinked | Imported tool calls moved to the request that asked for them; see [Repairs](#repairs) |
 | Coverage | `complete`, or `incomplete` when a log or record that may hold requests wasn't imported |
 
 The next line totals the recorded requests' AI credits, GitHub USD, and API-equivalent USD, with the marks of [API-equivalent USD](#api-equivalent-usd); a line with Foundry BYOK USD and local savings follows when either isn't zero. A dry run says what the import would record. Warnings on standard error name the source, the session or rollout, and the line and byte where each problem first occurred, and nothing else from the log; after 20, the rest are counted.
 
 `--json` writes no warnings; it lists them as `diagnostics`. Its fields are `dryRun`, `period`, `from`, `repository` (the `owner/repo` slug, or the root when the repository has none) and `repositoryRoot` (both `null` with `--all`), `coverage`, and:
 
-- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `unreadableStoreEntries` (folders and files of the source's store that couldn't be listed), `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `supersededUnmatched`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
+- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `unreadableStoreEntries` (folders and files of the source's store that couldn't be listed), `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `supersededUnmatched`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, `toolLinksRelinked`, `toolLinksRemoved`, `toolLinksFallback` (tool calls linked to the latest request of their agent because their `apiCallId` couldn't be followed), `repriced`, `liveRepriced`, `reportedChargesRejected`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
 - `totals`: `recorded` and the same amounts over every source.
-- `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`. `log` is empty for `unreadableStore`, which is about the source's store rather than one log, and is the session ID for `supersededUnmatched`.
+- `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`. `log` is empty for `unreadableStore`, which is about the source's store rather than one log, and is the session ID for `supersededUnmatched`. Codes include `reportedChargeRejected`.
 
 | Exit code | Meaning |
 |---|---|
@@ -188,7 +205,7 @@ These are the only fields import keeps, and where each comes from. Fields in no 
 |---|---|---|
 | `spans.ingest_source` | `import:copilot` | `import:codex` |
 | `spans.trace_id` | SHA-256 of the session ID and the usage ID (`data.usage.accounting.usageId`) of the prompt's first request, which `data.usage.initiator` `user` marks | SHA-256 of the session ID and `payload.root_turn_id`, or `payload.turn_id` |
-| `spans.span_id` | SHA-256 of the session ID and `data.usage.accounting.usageId`, or a compaction's `data.serviceRequestId` | SHA-256 of the session ID and `payload.response_id` |
+| `spans.span_id` | SHA-256 of the session ID and `data.usage.accounting.usageId`, or a compaction's `data.serviceRequestId`, or a BYOK compaction's `data.compactionAttemptId` | SHA-256 of the session ID and `payload.response_id` |
 | `spans.operation_name` | `chat` | `chat` |
 | `spans.conversation_id` | The session ID, `data.sessionId` of `session.start` | `payload.session_id` of `session_meta` |
 | `spans.agent_name` | `data.agentName` of the `subagent.started` event that the record's `agentId`, or its `data.usage.parentToolCallId`, names | `payload.agent_role` of `session_meta` |
@@ -203,9 +220,11 @@ These are the only fields import keeps, and where each comes from. Fields in no 
 | `spans.branch_name`, `spans.head_commit_sha` | `data.context.branch` and `data.context.headCommit` | `payload.git.branch` and `payload.git.commit_hash` |
 | `spans.canonical_usage_id` | SHA-256 of `data.usage.serviceRequestId`, or of a compaction's `data.serviceRequestId`; none for BYOK | — |
 | `spans.imported_tool_call_count` | `data.usage.numToolCalls`, or none when it's missing or invalid; 0 for a compaction, which makes no tool calls | — |
-| `spans.model_id`, `spans.rate_card_model_id`, `spans.tier_name`, `spans.billing_channel`, `spans.pricing_status`, `spans.rates_version`, `spans.cost_usd_pico`, `spans.saved_usd_pico`, `spans.api_equivalent_usd_pico`, `spans.api_equivalent_status`, `spans.api_rate_card_model_id`, `spans.api_rates_version`, `spans.api_rate_card_sha256` | Priced from the fields above, as for live spans | Priced from the fields above, as for live spans |
+| `spans.model_id`, `spans.rate_card_model_id`, `spans.tier_name`, `spans.billing_channel`, `spans.pricing_status`, `spans.rates_version`, `spans.cost_usd_pico` (the reported charge when `charge_source` is `reported`), `spans.saved_usd_pico`, `spans.api_equivalent_usd_pico`, `spans.api_equivalent_status`, `spans.api_rate_card_model_id`, `spans.api_rates_version`, `spans.api_rate_card_sha256` | Priced from the fields above, as for live spans | Priced from the fields above, as for live spans |
+| `spans.list_cost_usd_pico` | The rate card's price, from the fields above | Priced from the fields above |
+| `spans.charge_source` | `reported` when `data.usage.copilotUsage.totalNanoAiu`, or a compaction's `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, is a valid charge for a priced GitHub request; `rejected` when it's present but not; else `rate_card` | `rate_card` |
 | `spans.id`, `spans.recorded_at_unix_ms`, `spans.accounting_state`, `spans.superseded_by` | Kept by the ledger | Kept by the ledger |
-| `span_links.trace_id`, `span_links.conversation_id`, `span_links.owner_span_row_id` | The usage record whose response asked for the tool: the latest one of the tool's agent | — |
+| `span_links.trace_id`, `span_links.conversation_id`, `span_links.owner_span_row_id` | The usage record whose response asked for the tool: the one whose `data.usage.apiCallId` (or usage ID) equals `data.apiCallId` of the `assistant.message` that the tool's `parentId` chain reaches through tool events; when the chain doesn't reach one, the latest usage record of the tool's agent | — |
 | `span_links.span_id` | SHA-256 of the session ID and `data.toolCallId` | — |
 | `span_links.operation_name` | `execute_tool` | — |
 | `span_links.agent_name` | As `spans.agent_name`, from the tool's `agentId` or `data.parentToolCallId` | — |
@@ -214,15 +233,15 @@ These are the only fields import keeps, and where each comes from. Fields in no 
 | `span_links.recorded_at_unix_ms` | Kept by the ledger | — |
 | `import_sessions.source`, `import_sessions.log_id` | `copilot`, and the session folder's name | `codex`, and the IDs in the rollout's file name, after `archived/` for an archived rollout |
 | `import_sessions.log_size_bytes`, `import_sessions.log_last_write_unix_ms`, `import_sessions.log_sha256` | The log file's size and last-write time, and the SHA-256 hash of its bytes up to that size | The rollout file's size and last-write time, and the SHA-256 hash of its bytes up to that size |
-| `import_sessions.complete`, `import_sessions.records_recorded`, `import_sessions.records_duplicate`, `import_sessions.records_overlap`, `import_sessions.records_ambiguous`, `import_sessions.imported_at_unix_ms` | The import's own results | The import's own results |
-| `import_record_aliases.source`, `import_record_aliases.record_key_sha256` | `copilot`, and SHA-256 of the record's usage ID, or of a compaction's service request ID | `codex`, and SHA-256 of `payload.response_id` |
+| `import_sessions.complete`, `import_sessions.records_recorded`, `import_sessions.records_duplicate`, `import_sessions.records_overlap`, `import_sessions.records_ambiguous`, `import_sessions.imported_at_unix_ms`, `import_sessions.import_revision` | The import's own results | The import's own results |
+| `import_record_aliases.source`, `import_record_aliases.record_key_sha256` | `copilot`, and SHA-256 of the record's usage ID, or of a compaction's service request ID, or a BYOK compaction's `data.compactionAttemptId` | `codex`, and SHA-256 of `payload.response_id` |
 | `import_record_aliases.span_row_id`, `import_record_aliases.resolution`, `import_record_aliases.recorded_at_unix_ms` | Kept by the ledger | Kept by the ledger |
 <!-- /import-allowlist -->
 
 Imported rows leave `parent_span_id`, `server_address`, `server_port`, `pull_request_number`, and `agent_span_id` of `spans` empty, and imported tool calls leave `parent_span_id`, `git_repository_slug`, `git_branch`, and `git_commit_sha` of `span_links` empty.
 
-- **Read, never stored:** each line's `type`. From Copilot logs: `data.producer`, `data.version`, and `data.copilotVersion` of `session.start`; the working directory, `data.context.cwd`, which only `--repo` uses; each event's `agentId`, and `data.toolCallId` of `subagent.started`, which tie a sub-agent's events to its name; `data.usage.isByok`, `data.usage.provider.kind`, `data.usage.initiator`, and `data.usage.parentToolCallId` of usage records; and `data.success`, `data.compactionTokensUsed.requestCount`, and `data.compactionTokensUsed.provider.kind` of compactions, which decide how a record is read. Usage IDs, service request IDs, and tool call IDs are stored only as the SHA-256 hashes above. From Codex rollouts: `payload.id` (the thread ID), `payload.cli_version`, and `payload.cwd` of `session_meta`; `payload.turn_id` of `turn_context`, which ties each turn's model to its records; and `payload.thread_id`, `payload.session_id`, `payload.turn_id`, and `payload.root_turn_id` of `token_usage_record`.
-- **Never read:** every other field and event, including user and assistant messages, reasoning, tool arguments and results, error messages, compaction summaries (`summaryContent`) and checkpoint paths, instructions, and attachments. Import skips a line as soon as its `type` shows it's none of the events above, and it counts a line that isn't valid JSON without echoing it. Logs are read in place, never copied.
+- **Read, never stored:** each line's `type`. From Copilot logs: `data.producer`, `data.version`, and `data.copilotVersion` of `session.start`; the working directory, `data.context.cwd`, which only `--repo` uses; each event's `agentId`, and `data.toolCallId` of `subagent.started`, which tie a sub-agent's events to its name; `data.usage.isByok`, `data.usage.provider.kind`, `data.usage.initiator`, and `data.usage.parentToolCallId` of usage records; and `data.success`, `data.compactionTokensUsed.requestCount`, and `data.compactionTokensUsed.provider.kind` of compactions, which decide how a record is read. The envelope `id` and `parentId` of `assistant.message`, `tool.execution_start`, and `tool.execution_complete`, `data.apiCallId` of `assistant.message`, and `data.usage.apiCallId` of usage records tie a tool call to the request that asked for it. `data.usage.copilotUsage.totalNanoAiu` of usage records and `data.compactionTokensUsed.copilotUsage.totalNanoAiu` of compactions, the charge Copilot reports for the request, are kept only as that charge in `spans.cost_usd_pico` and as `spans.charge_source`. `data.compactionAttemptId` of compactions is stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `data.compactionTokensUsed.copilotUsage` are present decides how a compaction is read. Usage IDs, service request IDs, and tool call IDs are stored only as the SHA-256 hashes above. From Codex rollouts: `payload.id` (the thread ID), `payload.cli_version`, and `payload.cwd` of `session_meta`; `payload.turn_id` of `turn_context`, which ties each turn's model to its records; and `payload.thread_id`, `payload.session_id`, `payload.turn_id`, and `payload.root_turn_id` of `token_usage_record`.
+- **Never read:** every other field and event, including user and assistant message content (`content`, `transformedContent`), reasoning (`reasoningText`, `reasoningOpaque`, `reasoningBlocks`, `encryptedContent`), the tool requests a message makes (`toolRequests`), tool arguments and results, error messages, compaction summaries (`summaryContent`) and checkpoint paths, instructions, and attachments. Import skips a line as soon as its `type` shows it's none of the events above, and it counts a line that isn't valid JSON without echoing it. Logs are read in place, never copied.
 
 ## Reports
 

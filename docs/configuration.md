@@ -27,10 +27,12 @@ Each LLM request (an OpenTelemetry `chat` span) is attributed to one billing cha
 
 | Channel | How it's detected | What's recorded |
 |---|---|---|
-| GitHub AI Credits | No endpoint on the span, or an endpoint under `githubcopilot.com` | AI credits and USD from GitHub's published prices (1 AI credit = $0.01) |
+| GitHub AI Credits | No endpoint on the span, or an endpoint under `githubcopilot.com` | AI credits and USD: the charge Copilot reports for the request (github.copilot.nano_aiu, or totalNanoAiu in a session log) when it's valid, which includes discounts such as Auto's 10% and Copilot Fusion's; otherwise GitHub's published prices (1 AI credit = $0.01) |
 | Microsoft Foundry BYOK | An endpoint under `services.ai.azure.com`, `openai.azure.com`, or `cognitiveservices.azure.com`, or provider `azure.ai.inference` | USD from **your** prices in `rates.json`, and 0 AI credits. Unpriced until you add prices. |
 | Local | An endpoint of `localhost`, `127.x.x.x`, `::1`, or a host you list; a local provider name (`ollama`, `lm_studio`, `foundry_local`, or `llama_cpp`, which Copilot CLI reports for models you bring or run yourself); or a known local model, such as Qwen3.8-27B, with no endpoint | $0.00 billed, plus estimated savings: the same tokens priced at MAI Code 2's GitHub rates |
 | Unpriced | Anything else | Tokens only, with a status that explains why |
+
+**Charged amount and list price.** gh-ledger records both. The charged amount is what budgets, the circuit breaker, receipts, reports, export, and audit use. The list price is the rate card's price for the same tokens. A reported charge that isn't a whole number of nano AI units from 0 to 2^53 (negative, fractional, NaN, infinite, too large, or text), or that's reported for a request GitHub didn't bill at a known price, isn't trusted: the request is charged at the rate card and counted as a rejected charge. The daemon counts rejected charges per request and records each as charged at the rate card. Upgrading from 0.5.0 or earlier keeps the rows you have; [Repairs](cli.md#repairs) says how an import corrects them.
 
 The built-in prices are GitHub's rates for every text model on [Models and pricing for GitHub Copilot](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) as of 2026-11-20: 34 models, with their long-context tiers and promotional prices. A promotional price ends at 00:00 UTC on the date GitHub gives. Two models need your attention:
 
@@ -93,11 +95,13 @@ The built-in API list prices are each vendor's public prices on 2026-11-23 for t
 
 A session log has no endpoint, so the channel comes from who billed the request:
 
-- A Copilot request that GitHub billed, and a Copilot compaction, are priced as a live request without an endpoint is: with GitHub AI credits, or as local when the model is one of `localOffload.models`.
-- A Copilot BYOK request is local when its `providerType` is in `localOffload.providerNames`, Foundry BYOK when it's in `foundryByok.providerNames`, and `other_provider` otherwise.
-- A Codex request is classified the same way by its `model_provider`, with Codex's `lmstudio` matched as `lm_studio`. A Codex request to OpenAI is `other_provider`.
+- A Copilot request that GitHub billed, and a Copilot compaction that GitHub billed, are priced as a live request without an endpoint is: with GitHub AI credits, or as local when the model is one of `localOffload.models`.
+- A Copilot BYOK request is local when its `providerType` is in `localOffload.providerNames`, or when its model is one of `localOffload.models` and its `providerType` isn't in `foundryByok.providerNames`; Foundry BYOK when its `providerType` is in `foundryByok.providerNames`; and `other_provider` otherwise. So a BYOK request through a local server that speaks OpenAI's API, which Copilot logs with provider type `openai`, is local when its model is listed in `localOffload.models`, such as Qwen3.8-27B's `qwen3.8-27b-cuda-gpu:1`, and `other_provider` when it isn't.
+- A Codex request is classified the same way by its `model_provider`, with Codex's `lmstudio` matched as `lm_studio` and with the same model rule. A Codex request to OpenAI is `other_provider`.
 
-So a Copilot BYOK request through a local server that speaks OpenAI's API, which Copilot logs with provider type `openai`, is `other_provider` when it's imported, even though its live span counts as local when its endpoint is `localhost`. An `other_provider` request bills nothing in the ledger, and it still gets an API-equivalent cost when its model has a list price.
+A compaction that Copilot billed is recorded even when it failed; a failed compaction that nobody billed is skipped. A compaction through your own provider (BYOK) is priced as that provider's requests are, by the provider of the latest BYOK request with the same model.
+
+An `other_provider` request bills nothing in the ledger, and it still gets an API-equivalent cost when its model has a list price.
 
 ## Why Foundry BYOK is unpriced by default
 
@@ -233,6 +237,8 @@ A suffix matches that host and any subdomain of it.
 ### Local models and savings
 
 Local runtimes such as Foundry Local, Ollama, and LM Studio run models on your own GPU, so local requests cost $0.00. gh-ledger recognizes them by their `localhost` endpoint.
+
+A request that its provider billed, such as an imported BYOK request, is local too when its model is one of `localOffload.models`.
 
 **Qwen3.8-27B** is the reference local model. Its runtime names all roll up as `qwen3.8-27b`: `qwen3.8:27b`, `qwen3.8:27b-q4_K_M`, `qwen3.8-27b-cuda-gpu:1`, and `Qwen 3.8 27B`.
 

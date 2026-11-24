@@ -1,4 +1,5 @@
 using System.Text;
+using CopilotLedger.Core.Pricing;
 
 namespace CopilotLedger.Otlp.Decoding;
 
@@ -238,8 +239,14 @@ internal static class OtlpProtobufTraceReader
             }
             else if (field == 4 && wireType == 1)
             {
-                _ = reader.ReadFixed64();
-                value = new OtlpAnyValue { Kind = OtlpValueKind.Double };
+                ulong bits = reader.ReadFixed64();
+                value = NanoAiu.TryFromIeee754Bits(bits, out long nanoAiu)
+                    ? new OtlpAnyValue
+                    {
+                        Kind = OtlpValueKind.Double,
+                        DoubleAsNanoAiu = nanoAiu,
+                    }
+                    : new OtlpAnyValue { Kind = OtlpValueKind.Double };
             }
             else if (field == 5 && wireType == 2)
             {

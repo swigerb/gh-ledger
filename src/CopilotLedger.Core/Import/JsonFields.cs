@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CopilotLedger.Core.Pricing;
 
 namespace CopilotLedger.Core.Import;
 
@@ -108,6 +109,18 @@ internal sealed class JsonFields
             }
             : null;
 
+    internal ReportedCharge NanoAiu(string path)
+    {
+        if (!_values.TryGetValue(path, out Value value) || value.Token == JsonTokenType.Null)
+        {
+            return ReportedCharge.Absent;
+        }
+
+        return value.Token == JsonTokenType.Number && value.NanoAiu is long nanoAiu
+            ? ReportedCharge.Valid(nanoAiu)
+            : ReportedCharge.Malformed;
+    }
+
     private static void ReadObject(ref Utf8JsonReader reader, PathTree.Node node, JsonFields fields)
     {
         List<PathTree.Node>? seen = null;
@@ -175,7 +188,11 @@ internal sealed class JsonFields
                 }
 
             case JsonTokenType.Number:
-                return new Value(JsonTokenType.Number, null, reader.TryGetInt64(out long number) ? number : null);
+                return new Value(
+                    JsonTokenType.Number,
+                    null,
+                    reader.TryGetInt64(out long number) ? number : null,
+                    Pricing.NanoAiu.TryFromJsonNumber(reader.ValueSpan, out long nanoAiu) ? nanoAiu : null);
             case JsonTokenType.StartObject:
             case JsonTokenType.StartArray:
                 JsonTokenType token = reader.TokenType;
@@ -201,7 +218,7 @@ internal sealed class JsonFields
         }
     }
 
-    private readonly record struct Value(JsonTokenType Token, string? Text, long? Integer);
+    private readonly record struct Value(JsonTokenType Token, string? Text, long? Integer, long? NanoAiu = null);
 }
 
 // The allowlisted property paths of one event type ("data.usage.inputTokens"), each with the longest string it may hold

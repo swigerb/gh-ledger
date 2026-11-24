@@ -36,6 +36,12 @@ public sealed record ImportSourceReport
     public required long JournalPredecessors { get; init; }
     public required long Unpriced { get; init; }                    // recorded with a status other than priced or local_offload
     public required long ToolLinksRecorded { get; init; }
+    public required long ToolLinksRelinked { get; init; }
+    public required long ToolLinksRemoved { get; init; }
+    public required long ToolLinksFallback { get; init; }
+    public required long Repriced { get; init; }
+    public required long LiveRepriced { get; init; }
+    public required long ReportedChargesRejected { get; init; }
     public required decimal AiCredits { get; init; }
     public required decimal AiCreditsUsd { get; init; }
     public required decimal FoundryByokUsd { get; init; }

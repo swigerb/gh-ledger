@@ -123,6 +123,30 @@ public sealed class JsonRateCardCalculator : ICreditCalculator, IAuditPricing
     {
         ArgumentNullException.ThrowIfNull(span);
 
+        CreditCalculationResult rateCard = CalculateAtRateCard(span);
+        return span.ReportedCharge.State switch
+        {
+            ReportedChargeState.Absent => rateCard,
+            ReportedChargeState.Malformed when rateCard.Status == PricingStatus.NotBillableOperation => rateCard,
+            ReportedChargeState.Malformed => rateCard with { ChargeSource = ChargeSource.Rejected },
+            ReportedChargeState.Valid
+                when rateCard.Channel == BillingChannel.GitHubAiCredits &&
+                     rateCard.Status == PricingStatus.Priced =>
+                rateCard with
+                {
+                    UsdCost = NanoAiu.ToUsd(span.ReportedCharge.NanoAiu),
+                    AiCredits = NanoAiu.ToAiCredits(span.ReportedCharge.NanoAiu),
+                    ChargeSource = ChargeSource.Reported,
+                },
+            ReportedChargeState.Valid when span.ReportedCharge.NanoAiu == 0 => rateCard,
+            ReportedChargeState.Valid when rateCard.Status == PricingStatus.NotBillableOperation => rateCard,
+            ReportedChargeState.Valid => rateCard with { ChargeSource = ChargeSource.Rejected },
+            _ => rateCard,
+        };
+    }
+
+    private CreditCalculationResult CalculateAtRateCard(NormalizedGenAiSpan span)
+    {
         // The reported model is the response model, or the request model when there's no response model. A priced
         // channel that has no model for it tries the request model too (see FindModel).
         string? model = NormalizeModel(
@@ -149,23 +173,29 @@ public sealed class JsonRateCardCalculator : ICreditCalculator, IAuditPricing
         long uncached = span.InputTokens - span.CacheReadInputTokens - span.CacheWriteInputTokens;
         string host = NormalizeHost(span.ServerAddress);
 
-        // An imported request that its provider billed (a Copilot BYOK or Codex request) is local or Foundry BYOK only when
-        // the card lists its provider name; without an endpoint, it would otherwise be priced as GitHub's.
+        LocalModelRate? localModel = model is null ? null : _localModels.FirstOrDefault(item => item.Matches(model));
+
+        // An imported request that its provider billed (a Copilot BYOK or Codex request) is local by a known local
+        // model, local or Foundry BYOK by provider name; otherwise it would be priced as GitHub's.
         if (span.BillingSource == BillingSource.Provider &&
             !MatchesValue(span.ProviderName, _localProviders) &&
-            !MatchesValue(span.ProviderName, _foundryProviders))
+            !MatchesValue(span.ProviderName, _foundryProviders) &&
+            localModel is null)
         {
             return Result(span, BillingChannel.Unpriced, PricingStatus.OtherProvider, model, uncachedInputTokens: uncached);
         }
 
-        LocalModelRate? localModel = model is null ? null : _localModels.FirstOrDefault(item => item.Matches(model));
         bool localByKnownModel = span.BillingSource == BillingSource.Endpoint &&
                                  string.IsNullOrWhiteSpace(host) &&
                                  localModel is not null;
+        bool localProviderByKnownModel = span.BillingSource == BillingSource.Provider &&
+                                        localModel is not null &&
+                                        !MatchesValue(span.ProviderName, _foundryProviders);
         if (IsLoopback(host) ||
             MatchesValue(host, _localHosts) ||
             MatchesValue(span.ProviderName, _localProviders) ||
-            localByKnownModel)
+            localByKnownModel ||
+            localProviderByKnownModel)
         {
             string? localModelId = localModel?.ModelId ?? model;
             PricedSelection? selection = Select(_baselineCard, span.StartTime, span.InputTokens);
@@ -1176,6 +1206,8 @@ public sealed class JsonRateCardCalculator : ICreditCalculator, IAuditPricing
             UncachedInputTokens = uncachedInputTokens,
             Breakdown = breakdown,
             UsdCost = usdCost,
+            ListUsdCost = usdCost,
+            ChargeSource = ChargeSource.RateCard,
             AiCredits = aiCredits,
             EstimatedCloudSavedUsd = estimatedCloudSavedUsd,
             ApiEquivalent = CalculateApiEquivalent(new ApiEquivalentRequest

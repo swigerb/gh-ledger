@@ -19,7 +19,9 @@ public sealed record CreditCalculationResult
     public string? TierName { get; init; }                // set only when a tier was applied
     public long UncachedInputTokens { get; init; }
     public TokenCostBreakdown? Breakdown { get; init; }   // priced at RateCardModelId's rates; null if nothing was priced
-    public decimal UsdCost { get; init; }                 // billed USD (GitHub AI credits or Foundry BYOK); otherwise 0
+    public decimal UsdCost { get; init; }                 // charged USD: the reported charge when ChargeSource is Reported, else the rate card's
+    public decimal ListUsdCost { get; init; }             // the rate card's billed USD for this request, whatever was charged
+    public ChargeSource ChargeSource { get; init; }       // where UsdCost came from
     public decimal AiCredits { get; init; }               // UsdCost / 0.01m when Channel is GitHubAiCredits; otherwise 0
     public decimal EstimatedCloudSavedUsd { get; init; }  // Local only: Breakdown.TotalUsd; otherwise 0
     public required ApiEquivalentCost ApiEquivalent { get; init; }   // the same request at API list prices

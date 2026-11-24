@@ -208,5 +208,16 @@ internal static class LedgerMigrations
                 PRIMARY KEY (source, record_key_sha256)
             ) STRICT, WITHOUT ROWID;
             """),
+
+        // Charged amounts (Sprint 12). cost_usd_pico stays the charged amount that every report sums; list_cost_usd_pico is the rate card's price, and NULL means "the same as cost_usd_pico" (every row recorded before format 7, and any row a running format-6 daemon writes after the upgrade, was charged at the rate card). import_revision 0 marks logs imported before Sprint 12's import fixes, which the next import reads again.
+        (7, """
+            ALTER TABLE spans ADD COLUMN list_cost_usd_pico INTEGER
+                CHECK (list_cost_usd_pico IS NULL OR list_cost_usd_pico >= 0);
+            ALTER TABLE spans ADD COLUMN charge_source TEXT NOT NULL DEFAULT 'rate_card'
+                CHECK (charge_source IN ('rate_card', 'reported', 'rejected')
+                       AND (charge_source <> 'reported' OR (billing_channel = 'github_ai_credits' AND pricing_status = 'priced')));
+            ALTER TABLE import_sessions ADD COLUMN import_revision INTEGER NOT NULL DEFAULT 0 CHECK (import_revision >= 0);
+            CREATE INDEX ix_span_links_import_span ON span_links (span_id) WHERE owner_span_row_id IS NOT NULL;
+            """),
     ];
 }
