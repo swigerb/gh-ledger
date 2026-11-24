@@ -533,6 +533,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 CacheWriteInputTokens = cacheWrite,
                 CacheReadState = CacheCounterState.Reported,
                 CacheWriteState = CacheCounterState.Reported,
+                ToolCallCount = 0, // a compaction makes no tool calls, so a missing count always means an unknown one
                 Git = _context,
                 LineNumber = number,
             });

@@ -156,9 +156,10 @@ public sealed partial class SqliteLedgerStore
     // it. An imported request lacks the detail of each tool call it made beyond the execute_tool links it owns: import keeps
     // the links of only the tool calls that started within the retention, and that completed. Each owner's links are counted
     // once, in a grouped join, because owner_span_row_id has no index to look them up by. An imported request whose log gives
-    // no tool-call count has no tool data at all, as every Codex request (a rollout records no tool calls); a known 0 is data.
-    // Copilot rows are left out: Copilot logs count each usage record's tool calls, so a Copilot row without a count is a
-    // compaction, which makes none. import_sessions has no repository, so its two counts are the whole ledger's.
+    // no tool-call count may be missing tool calls without a trace: every Codex request (a rollout records no tool calls), and
+    // a Copilot usage record whose numToolCalls is missing or invalid. A known count, 0 included, is data; Copilot's reader
+    // records 0 for a compaction, which makes no tool calls, so a compaction that an earlier build imported without a count
+    // counts too. import_sessions has no repository, so its two counts are the whole ledger's.
     internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
         SqliteTransaction snapshot,
         LedgerFilter filter,
@@ -185,8 +186,7 @@ public sealed partial class SqliteLedgerStore
                    COALESCE(SUM(CASE WHEN imported_tool_call_count > 0
                                      THEN MAX(imported_tool_call_count - COALESCE(owned.links, 0), 0)
                                      ELSE 0 END), 0),
-                   COALESCE(SUM(CASE WHEN ingest_source NOT IN ('otlp', 'import:copilot') AND imported_tool_call_count IS NULL
-                                     THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN ingest_source <> 'otlp' AND imported_tool_call_count IS NULL THEN 1 ELSE 0 END), 0),
                    COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
                    COALESCE(SUM(CASE WHEN NOT {ReportedSql}
                                       AND cache_read_state <> 'legacy_unknown' AND cache_write_state <> 'legacy_unknown'

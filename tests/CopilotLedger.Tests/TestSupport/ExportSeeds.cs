@@ -13,8 +13,9 @@ namespace CopilotLedger.Tests.TestSupport;
 // B1      trace B, conv-b, feature/ledger: Foundry BYOK gpt-6.1-sol at 15:00, priced with RateFixtures.ByokTestRatesJson.
 // C1, C2  trace C, conv-c, main: a local qwen3.8-27b request at 16:00 and an unpriced gpt-unknown one at 16:05.
 // D1      trace D, conv-d: claude-opus-5.5 at 17:00 in LocalRoot(root), a repository without a remote, on main.
-// I1      an imported Copilot record (conv-i, 11-20 12:00) whose bash call exited 0.
-// I2, J1  an imported record (conv-j, 11-20 12:00) whose bash call exited 1, superseded by J1, its live twin (trace J).
+// I1      an imported Copilot record (conv-i, 11-20 12:00) that reported its one tool call, bash, which exited 0.
+// I2, J1  an imported record (conv-j, 11-20 12:00) that reported its one tool call, bash, which exited 1, superseded by J1, its
+//         live twin (trace J).
 // SupersedeUnmatchedAsync adds U: an imported record that a live span of its session replaces without matching it.
 // Links: execute_tool T1 and T2 (trace A, bash, exit 0 at 14:00:30, exit 1 at 14:00:40), T3 (trace B, view, status 2 at
 // 15:00:10), T4 (trace E, which has no request, at 15:30), and T5, A's invoke_agent link. Breaker trips: credit_velocity on
@@ -59,8 +60,8 @@ public static class ExportSeeds
         ImportedLedgerEntry i2 = ImportEntries.Copilot("k2", "conv-j", ServiceRequestId);
         await store.RecordImportedAsync(
         [
-            i1 with { ToolLinks = [ImportEntries.ToolLink(i1, "call-1", 0)] },
-            i2 with { ToolLinks = [ImportEntries.ToolLink(i2, "call-2", 1)] },
+            i1 with { ToolCallCount = 1, ToolLinks = [ImportEntries.ToolLink(i1, "call-1", 0)] },
+            i2 with { ToolCallCount = 1, ToolLinks = [ImportEntries.ToolLink(i2, "call-2", 1)] },
         ],
             null);
 

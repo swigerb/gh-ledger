@@ -125,8 +125,8 @@ internal static class HtmlReportWriter
         if (withoutToolData > 0)
         {
             yield return withoutToolData == 1
-                ? "1 imported request has no tool-call data in its session log, so its tool calls are unknown."
-                : $"{LedgerFormat.Count(withoutToolData)} imported requests have no tool-call data in their session logs, so their tool calls are unknown.";
+                ? "1 imported request has no tool-call count in its session log, so it may be missing its tool calls."
+                : $"{LedgerFormat.Count(withoutToolData)} imported requests have no tool-call count in their session logs, so they may be missing their tool calls.";
         }
 
         long unpriced = coverage.UnpricedSpans;

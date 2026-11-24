@@ -12,7 +12,7 @@ public sealed record ExportCoverageRow
     public required long LedgerIncompleteImportLogs { get; init; }   // import_sessions with complete = 0, the whole ledger
     public required long SpansBeforeToolHistory { get; init; }       // selected spans that start before toolHistoryFrom
     public required long ImportedToolCallsWithoutDetail { get; init; } // tool calls of imported requests beyond the links they own
-    public required long ImportedRequestsWithoutToolData { get; init; } // selected imported requests, other than Copilot's, without a tool-call count
+    public required long ImportedRequestsWithoutToolData { get; init; } // selected imported requests without a tool-call count
     public required long CacheReportedSpans { get; init; }
     public required long CacheAbsentSpans { get; init; }
     public required long CacheLegacyUnknownSpans { get; init; }

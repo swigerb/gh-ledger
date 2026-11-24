@@ -1,10 +1,12 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using CopilotLedger.Core.Import;
 using CopilotLedger.Core.Pricing;
 using CopilotLedger.Core.Telemetry;
 using CopilotLedger.Storage;
+using CopilotLedger.Storage.Import;
 using CopilotLedger.Tests.TestSupport;
 
 namespace CopilotLedger.Tests.Cli;
@@ -13,6 +15,11 @@ namespace CopilotLedger.Tests.Cli;
 public sealed class ExportCommandTests
 {
     private const string Report = "copilot-ledger-report.html";
+    private const string CountedSession = "c0c0c0c0-0000-4000-8000-000000000020";
+    private const string UncountedSession = "c0c0c0c0-0000-4000-8000-000000000021";
+
+    // A Copilot session that starts within the tool history of ExportSeeds' ledger: after its earliest link, 11-20 12:00.
+    private static readonly DateTimeOffset RecentImport = new(2026, 11, 21, 10, 0, 0, TimeSpan.Zero);
 
     [Theory]
     [InlineData("--format|pdf", "--format must be html.")]
@@ -478,35 +485,67 @@ public sealed class ExportCommandTests
         }
 
         Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
-        Assert.Contains("1 imported request has no tool-call data in its session log, so its tool calls are unknown.", Notes(page));
+        Assert.Contains("1 imported request has no tool-call count in its session log, so it may be missing its tool calls.", Notes(page));
     }
 
-    // A Copilot import that reported 0 tool calls has tool data, and a Copilot compaction, whose row has no count, makes no
-    // tool calls, so tool history stays complete.
+    // Copilot imports through the real reader keep tool history complete: a usage record that reported 0 tool calls, and a
+    // compaction, which makes none, both store a count of 0.
     [Fact]
     public async Task EC20_CopilotImportsKeepToolHistoryComplete()
     {
         using TempDirectory temp = new();
-        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
-        const string compaction = "33333333-3333-4333-8333-333333333333";
-        await store.RecordImportedAsync(
-        [
-            ImportEntries.Copilot("k8", "conv-zero", null) with { ToolCallCount = 0 },
-            ImportEntries.Copilot(compaction, "conv-zero", compaction, ImportedRecordKind.Compaction),
-        ],
-            null);
+        await ExportSeeds.CreateAsync(temp.Path);
+        await ImportCopilotAsync(
+            temp.Path,
+            new CopilotSessionLogs(CountedSession, start: RecentImport)
+                .Usage("msg_zero", "55555555-5555-4555-8555-555555555555", numToolCalls: 0)
+                .Compaction("66666666-6666-4666-8666-666666666666"),
+            recorded: 2);
 
         XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
 
+        Assert.Equal(["0", "0"], await StoredToolCallCountsAsync(temp.Path, CountedSession));
         using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
         JsonElement history = data.RootElement.GetProperty("coverage").GetProperty("toolHistory");
         Assert.Equal((true, 0), (history.GetProperty("complete").GetBoolean(), history.GetProperty("importedRequestsWithoutToolData").GetInt32()));
         Assert.Equal("Tool calls: complete for this window.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+    }
+
+    // A Copilot usage record whose numToolCalls is missing or invalid has no tool-call count, so it may be missing tool
+    // calls: the real reader imports it without one, and the export counts it.
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("negative")]
+    public async Task EC21_ACopilotRequestWithoutAToolCallCountLeavesToolHistoryIncomplete(string count)
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        Action<JsonObject> change = count == "missing"
+            ? usage => usage.Remove("numToolCalls")
+            : usage => usage["numToolCalls"] = -1;
+        await ImportCopilotAsync(
+            temp.Path,
+            new CopilotSessionLogs(UncountedSession, start: RecentImport)
+                .Usage("msg_unknown", "44444444-4444-4444-8444-444444444444", change: change),
+            recorded: 1);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        Assert.Equal(["null"], await StoredToolCallCountsAsync(temp.Path, UncountedSession));
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement coverage = data.RootElement.GetProperty("coverage");
+        JsonElement history = coverage.GetProperty("toolHistory");
         Assert.Equal(
-            2L,
-            await LedgerSql.ScalarAsync(
-                Path.Combine(temp.Path, "data", "ledger.db"),
-                "SELECT COUNT(*) FROM spans WHERE conversation_id = 'conv-zero' AND accounting_state = 'effective';"));
+            (false, 1, 0, 0),
+            (history.GetProperty("complete").GetBoolean(),
+             history.GetProperty("importedRequestsWithoutToolData").GetInt32(),
+             history.GetProperty("spansBeforeRetention").GetInt32(),
+             history.GetProperty("importedToolCallsWithoutDetail").GetInt32()));
+        Assert.Contains(
+            "imported-requests-without-tool-data",
+            coverage.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()));
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains("1 imported request has no tool-call count in its session log, so it may be missing its tool calls.", Notes(page));
     }
 
     // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
@@ -535,6 +574,30 @@ public sealed class ExportCommandTests
 
     private static IReadOnlyList<string> Notes(XDocument page) =>
         ExportFiles.ById(page, "coverage-notes").Elements("li").Select(item => item.Value).ToArray();
+
+    // Imports a Copilot session log through the real reader, as gh ledger import does at ExportSeeds.GeneratedAt, into the
+    // ledger at <root>/data/ledger.db, which must record the given number of requests.
+    private static async Task ImportCopilotAsync(string root, CopilotSessionLogs log, long recorded)
+    {
+        string home = Path.Combine(root, "copilot");
+        log.Write(home);
+        ImportReport report = await new LedgerImporter(
+            JsonRateCardCalculator.LoadEmbedded(),
+            new ManualTimeProvider(ExportSeeds.GeneratedAt)).RunAsync(new ImportRequest
+            {
+                DatabasePath = Path.Combine(root, "data", "ledger.db"),
+                Sources = [new ImportSourceRequest(new CopilotSessionLogSource(), home)],
+            });
+        ImportSourceReport copilot = Assert.Single(report.Sources);
+        Assert.Equal((true, recorded), (copilot.Complete, copilot.Recorded));
+    }
+
+    // The imported_tool_call_count of a session's requests, by start time; NULL as "null".
+    private static Task<IReadOnlyList<string>> StoredToolCallCountsAsync(string root, string session) =>
+        LedgerSql.RowsAsync(
+            Path.Combine(root, "data", "ledger.db"),
+            "SELECT imported_tool_call_count FROM spans WHERE conversation_id = @p0 ORDER BY start_time_unix_ms;",
+            session);
 
     // A mai-code-2 request without cache counters at start, which has no API-equivalent price.
     private static LedgerEntry Entry(DateTimeOffset start)

@@ -84,7 +84,7 @@ internal sealed record ExportCoverage
     public required ExportToolHistoryStart ToolHistoryStart { get; init; }
     public required long SpansBeforeToolHistory { get; init; }
     public required long ImportedToolCallsWithoutDetail { get; init; }
-    public required long ImportedRequestsWithoutToolData { get; init; } // imported requests whose logs record no tool calls, as Codex's
+    public required long ImportedRequestsWithoutToolData { get; init; } // imported requests whose logs give no tool-call count
     public required long ToolCalls { get; init; }                       // CountToolCallsAsync
     public required int MaxTimelineSpans { get; init; }
     public required long TimelineSpans { get; init; }                   // drawn requests
