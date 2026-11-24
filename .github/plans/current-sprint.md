@@ -45,7 +45,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
   - New types: `JobState`, `ICliPlatform.GetJobState()`, `DetachedLaunch`, and `DetachedLaunchPolicy`.
   - `WindowsJobObjects` uses `IsProcessInJob` and `QueryInformationJobObject` through `DllImport`.
   - `StartDetached` adds `CREATE_BREAKAWAY_FROM_JOB` when the immediate job sets `JOB_OBJECT_LIMIT_BREAKAWAY_OK`.
-- [ ] Task 4: `daemon start` and `install` Refuse Instead of Starting a Daemon That Would Die (CopilotLedger.Cli, docs & tests). #78.
+- [x] Task 4: `daemon start` and `install` Refuse Instead of Starting a Daemon That Would Die (CopilotLedger.Cli, docs & tests). #78.
   - The refusal message covers both commands.
   - The daemon logs a warning when its own job would kill it.
   - DJ7 is a Windows-only real-process test of a `KILL_ON_JOB_CLOSE` job, with and without breakaway.

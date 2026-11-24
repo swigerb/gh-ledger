@@ -34,7 +34,7 @@ Use `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, or `osx-arm64
 - It sets `COPILOT_OTEL_ENABLED=true`: as a user environment variable on Windows, or in a marked block in your shell profile elsewhere (`.zshrc` for zsh, `.bash_profile` for bash on macOS, `.bashrc` for bash on Linux, and `.profile` otherwise).
 - For a binary you built, it sets the `gh ledger` alias when `gh` is on `PATH`. The extension doesn't need one. On Windows, the alias needs `sh.exe` from Git for Windows.
 - It registers the daemon to start when you sign in: the `CopilotLedger` value under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` on Windows, `~/Library/LaunchAgents/io.github.swigerb.copilot-ledger.plist` on macOS, or `copilot-ledger.desktop` in `$XDG_CONFIG_HOME/autostart` (default `~/.config/autostart`) on Linux.
-- It starts the daemon.
+- It starts the daemon, as `gh ledger daemon start` does. On Windows, in a terminal whose job would stop the daemon, it doesn't start it; see [The daemon](#the-daemon). The other changes stay, and `install` exits with code 1.
 
 It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTelemetry variables. Use `--dry-run` to print the changes without making them. Afterward, restart the GitHub Copilot app, VS Code, and open terminals so they see `COPILOT_OTEL_ENABLED`.
 
@@ -87,6 +87,15 @@ If `gh ledger daemon start` then says that the daemon did not start, run `gh led
 - `gh ledger daemon run [--port <port>] [--log-file <path>]` runs the receiver in the foreground. It logs to standard output, or appends to `--log-file`.
 - `gh ledger daemon start [--port <port>]` starts it as a detached process that logs to `daemon.log`. The daemon gets the null device as its standard input, output, and error, so a script can capture the command's output, for example `started=$(gh ledger daemon start)`.
 - `gh ledger daemon stop` asks the daemon to stop, waits up to 15 seconds, and then ends its process if it's still running.
+
+On Windows, some programs run their terminals in a job that stops every process the terminal started when it closes; the GitHub Copilot app's agent terminals can. `daemon start` reads the job it runs in. When the job lets processes leave it, the daemon leaves it. When the job would stop the daemon and doesn't let it leave, `daemon start` starts nothing, exits with code 1, and says:
+
+```text
+gh-ledger daemon not started: this terminal runs in a Windows job that stops the processes it started when it closes, so the daemon would stop with it.
+Run gh ledger daemon start from a regular terminal, or sign out and back in to start it from the sign-in item.
+```
+
+The second line leaves out the sign-in part when there's no sign-in item, and says `gh-ledger` for a binary you built. If the job can't be read, `daemon start` refuses the same way. A job inside another job can still pass the daemon to an outer job that stops it; the daemon then writes a `Warning:` line to `daemon.log` when it starts, as `daemon run` does in such a terminal.
 
 The port defaults to 4318. Only one daemon runs at a time. Copilot's telemetry is lost while no daemon is running.
 
@@ -582,6 +591,7 @@ gh-ledger stores no prompt or response content, working directories, or remote U
 - **`gh ledger import` reports `Superseded, unmatched` requests.** Live spans that can't be matched to them arrived after they were imported and replaced them, as above. The live spans count, but they may not cover every request of the session, so import reports these on every run whose scope holds them; `--since` can leave older ones out.
 - **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
 - **`gh ledger daemon start` says that the daemon did not start.** `daemon.log` in your data directory says why. After an upgrade, `Invalid rates overlay: … duplicate model identity in the merged rates: <name> (built-in model <id>)` means that your rates overlay lists a model name that the new release has built in. Remove that entry from the overlay, check it with `gh ledger rates validate`, and start the daemon.
+- **`gh ledger daemon start` or `install` says `gh-ledger daemon not started: this terminal runs in a Windows job …`.** The terminal, such as an agent terminal of the GitHub Copilot app, would stop the daemon when it closes. Run `gh ledger daemon start` from a regular terminal, or sign out and back in.
 - **`gh extension upgrade` or `remove` fails on Windows.** A program is running the extension's binary: the daemon, or the MCP server of a Copilot session. Run `gh ledger daemon stop`, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code, then try again.
 - **Apps started from the desktop record nothing.** On macOS and Linux, apps started outside a terminal may not read your shell profile, so they don't see `COPILOT_OTEL_ENABLED`. Start them from a terminal.
 - **Move the data directory.** Set `COPILOT_LEDGER_HOME` before running gh-ledger. The daemon started at sign-in uses it only if your sign-in session sets it too, for example as a Windows user environment variable.

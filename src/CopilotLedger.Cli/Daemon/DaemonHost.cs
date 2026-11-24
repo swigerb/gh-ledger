@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 using CopilotLedger.Cli.Alerts;
+using CopilotLedger.Cli.Install;
 using CopilotLedger.Cli.Rates;
 using CopilotLedger.Core.Git;
 using CopilotLedger.Core.Pricing;
@@ -55,6 +57,18 @@ internal static class DaemonHost
         try
         {
             DaemonFiles.DeleteIfExists(DaemonFiles.StopPath(context));
+
+            try
+            {
+                if (DetachedLaunchPolicy.DiesWithJob(context.Platform.GetJobState()))
+                {
+                    WriteLog(writer, context, $"Warning: this daemon runs in a Windows job that stops its processes when the job closes, so it stops when the program that started it closes. Run {GhExtension.CommandName(context.Platform)} daemon start from a regular terminal.");
+                }
+            }
+            // The job state is advisory here, and the daemon keeps running.
+            catch (Win32Exception)
+            {
+            }
 
             RatesBase rates = RateCardFiles.LoadBase(context);
             if (rates.Warning is not null)
