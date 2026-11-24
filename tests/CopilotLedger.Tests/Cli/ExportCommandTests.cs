@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Xml.Linq;
 using CopilotLedger.Core.Import;
@@ -307,6 +308,124 @@ public sealed class ExportCommandTests
         Assert.Contains(
             "The earliest tool call the ledger keeps started at 2026-11-21 08:00, so the 2 requests before it may be missing their tool calls.",
             Notes(page));
+    }
+
+    // Even with --force, a read-only report or bundle stops the export before it writes anything, on every OS.
+    [Theory]
+    [InlineData("copilot-ledger-report.html")]
+    [InlineData("copilot-ledger-report.zip")]
+    public async Task EC14_AReadOnlyFileIsNotReplacedEvenWithForce(string readOnly)
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        string report = Path.Combine(temp.Path, Report);
+        string bundle = Path.ChangeExtension(report, ".zip");
+        File.WriteAllText(report, "old report");
+        File.WriteAllText(bundle, "old bundle");
+
+        File.SetAttributes(Path.Combine(temp.Path, readOnly), FileAttributes.ReadOnly);
+        CliRun run = await Harness(temp.Path).RunAsync("export", "--all-repos", "--bundle", "--force");
+        File.SetAttributes(Path.Combine(temp.Path, readOnly), FileAttributes.Normal);
+
+        Assert.Equal((1, $"Could not write {readOnly}: access is denied.\n"), (run.ExitCode, run.Error));
+        Assert.Equal(("old report", "old bundle"), (File.ReadAllText(report), File.ReadAllText(bundle)));
+        Assert.Equal([report, bundle], Directory.GetFiles(temp.Path).Order(StringComparer.Ordinal));
+    }
+
+    // Without --force, a report or bundle that another program writes during the export is refused and kept: the fake platform
+    // writes it after the checks, as the export writes its report's temporary file, so before the export decides whether to
+    // move a bundle aside.
+    [Theory]
+    [InlineData("copilot-ledger-report.zip")]
+    [InlineData("copilot-ledger-report.html")]
+    public async Task EC15_AFileThatAppearsDuringTheExportIsKeptWithoutForce(string name)
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        string competing = Path.Combine(temp.Path, name);
+        string reportTemp = $"{Path.Combine(temp.Path, Report)}.{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}.tmp";
+        FakeCliPlatform platform = new()
+        {
+            FileOperationHandler = (operation, path) =>
+            {
+                if (operation == "write" && path == reportTemp)
+                {
+                    File.WriteAllText(competing, "another program's file");
+                }
+            },
+        };
+        CliHarness cli = new(temp.Path, platform, new ManualTimeProvider(ExportSeeds.GeneratedAt, ManualTimeProvider.UtcMinus5));
+
+        CliRun run = await cli.RunAsync("export", "--all-repos", "--bundle");
+
+        Assert.Equal((1, $"{name} already exists. Use --force to replace it.\n"), (run.ExitCode, run.Error));
+        Assert.Equal("another program's file"u8.ToArray(), File.ReadAllBytes(competing));
+        Assert.Equal([competing], Directory.GetFiles(temp.Path));
+    }
+
+    // When the report can't be moved into place and the new bundle can't be deleted, standard error says that they don't
+    // match: the fake platform fails both.
+    [Fact]
+    public async Task EC16_ABundleThatCantBeTakenBackIsReported()
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        string bundle = Path.Combine(temp.Path, "copilot-ledger-report.zip");
+        FakeCliPlatform platform = new()
+        {
+            FileOperationHandler = (operation, path) =>
+            {
+                if (operation == "move" && path == Path.Combine(temp.Path, Report))
+                {
+                    throw new UnauthorizedAccessException();
+                }
+
+                if (operation == "delete" && path == bundle)
+                {
+                    throw new IOException();
+                }
+            },
+        };
+        CliHarness cli = new(temp.Path, platform, new ManualTimeProvider(ExportSeeds.GeneratedAt, ManualTimeProvider.UtcMinus5));
+
+        CliRun run = await cli.RunAsync("export", "--all-repos", "--bundle");
+
+        Assert.Equal(
+            (1, "Could not write copilot-ledger-report.html: access is denied.\ncopilot-ledger-report.zip was written, but copilot-ledger-report.html wasn't, so they don't match.\n"),
+            (run.ExitCode, run.Error));
+        Assert.Equal([bundle], Directory.GetFiles(temp.Path));
+    }
+
+    // An export that can't delete the bundle it replaced doesn't succeed: the fake platform fails the deletion.
+    [Fact]
+    public async Task EC17_AReplacedBundleThatCantBeDeletedIsReported()
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        string bundle = Path.Combine(temp.Path, "copilot-ledger-report.zip");
+        string backup = $"{bundle}.{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}.bak";
+        File.WriteAllText(bundle, "old bundle");
+        FakeCliPlatform platform = new()
+        {
+            FileOperationHandler = (operation, path) =>
+            {
+                if (operation == "delete" && path == backup)
+                {
+                    throw new IOException();
+                }
+            },
+        };
+        CliHarness cli = new(temp.Path, platform, new ManualTimeProvider(ExportSeeds.GeneratedAt, ManualTimeProvider.UtcMinus5));
+
+        CliRun run = await cli.RunAsync("export", "--all-repos", "--bundle", "--force");
+
+        Assert.Equal(
+            (1, string.Empty, $"copilot-ledger-report.html and copilot-ledger-report.zip were written, but the replaced copilot-ledger-report.zip is kept as {Path.GetFileName(backup)}: it couldn't be deleted.\n"),
+            (run.ExitCode, run.Out, run.Error));
+        Assert.Equal("old bundle", File.ReadAllText(backup));
+        Assert.Equal(
+            [Path.Combine(temp.Path, Report), bundle, backup],
+            Directory.GetFiles(temp.Path).Order(StringComparer.Ordinal));
     }
 
     // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.

@@ -236,13 +236,14 @@ internal static class ExportCommands
         ExportReportModel model;
         try
         {
-            // Both files are written from one snapshot, then moved into place: the ZIP first, then the report. A ZIP that
-            // --force replaces waits beside it until the report is in place, so a failed export leaves both as they were.
+            // Both files are written from one snapshot, then moved into place: the ZIP first, then the report. Without --force,
+            // no move replaces a file, so one that appeared since CanWrite is refused. With it, an existing ZIP waits beside the
+            // new one until the report is in place, so a failed export leaves both as they were.
             await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
             {
                 model = await ExportModelBuilder.BuildAsync(snapshot, inputs, cancellationToken);
                 byte[] html = HtmlReportWriter.Write(model);
-                await File.WriteAllBytesAsync(htmlTemp, html, cancellationToken);
+                await context.Platform.WriteFileAsync(htmlTemp, html, cancellationToken);
                 if (zipTemp is not null)
                 {
                     writing = zipShown;
@@ -257,27 +258,28 @@ internal static class ExportCommands
             if (zipTemp is not null)
             {
                 writing = zipShown;
-                if (File.Exists(zipPath))
+                if (force && File.Exists(zipPath))
                 {
                     string backup = BackupPath(zipPath!);
-                    File.Move(zipPath!, backup);
+                    context.Platform.MoveFile(zipPath!, backup, overwrite: false);
                     zipBackup = backup;
                 }
 
-                File.Move(zipTemp, zipPath!);
+                context.Platform.MoveFile(zipTemp, zipPath!, overwrite: false);
                 zipMoved = true;
             }
 
             writing = output;
-            File.Move(htmlTemp, htmlPath, overwrite: force);
+            context.Platform.MoveFile(htmlTemp, htmlPath, overwrite: force);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            context.Error.WriteLine($"Could not write {writing}: {WriteFailure(ex)}");
-            if (zipPath is not null && !RestoreZip(zipPath, zipBackup, zipMoved))
+            context.Error.WriteLine(!force && ex is IOException && File.Exists(writing == output ? htmlPath : zipPath)
+                ? $"{writing} already exists. Use --force to replace it."
+                : $"Could not write {writing}: {WriteFailure(ex)}");
+            if (zipPath is not null && RestoreZip(context.Platform, zipPath, zipShown, output, zipBackup, zipMoved) is string left)
             {
-                context.Error.WriteLine($"The replaced {zipShown} is kept as {Path.GetFileName(zipBackup)}.");
-                zipBackup = null;
+                context.Error.WriteLine(left);
             }
 
             return 1;
@@ -289,10 +291,20 @@ internal static class ExportCommands
             {
                 DeleteIfPresent(zipTemp);
             }
+        }
 
-            if (zipBackup is not null)
+        // The report is in place, so the replaced ZIP goes; an export that has to leave it behind doesn't succeed.
+        if (zipBackup is not null)
+        {
+            try
             {
-                DeleteIfPresent(zipBackup);
+                context.Platform.DeleteFile(zipBackup);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                context.Error.WriteLine(
+                    $"{output} and {zipShown} were written, but the replaced {zipShown} is kept as {Path.GetFileName(zipBackup)}: it couldn't be deleted.");
+                return 1;
             }
         }
 
@@ -330,7 +342,8 @@ internal static class ExportCommands
         ];
     }
 
-    // False, after writing why, when path is a directory, or a file that --force doesn't allow replacing.
+    // False, after writing why, when path is a directory, a file that --force doesn't allow replacing, or a read-only file,
+    // which even --force doesn't replace.
     private static bool CanWrite(CliContext context, string path, string shown, bool force)
     {
         if (Directory.Exists(path))
@@ -345,7 +358,26 @@ internal static class ExportCommands
             return false;
         }
 
+        if (File.Exists(path) && IsReadOnly(path))
+        {
+            context.Error.WriteLine($"Could not write {shown}: access is denied.");
+            return false;
+        }
+
         return true;
+    }
+
+    // Whether path is read-only (on Unix, a file that this user can read but not write); false when it can't be examined.
+    private static bool IsReadOnly(string path)
+    {
+        try
+        {
+            return File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     // The temporary file beside target that a file is written to before it's moved into place.
@@ -364,28 +396,33 @@ internal static class ExportCommands
         _ => $"the file system reported error 0x{ex.HResult.ToString("X8", CultureInfo.InvariantCulture)}.",
     };
 
-    // Puts back the ZIP that --force replaced, or deletes the new one when there was none, so a failed export leaves no ZIP
-    // that doesn't match the report beside it. False when the replaced ZIP couldn't be put back.
-    private static bool RestoreZip(string zipPath, string? backup, bool moved)
+    // Puts the ZIP back as it was before the export: the one --force replaced, or none. Returns a line for standard error when
+    // it can't, so what's left is said, or null.
+    private static string? RestoreZip(
+        ICliPlatform platform,
+        string zipPath,
+        string zipShown,
+        string output,
+        string? backup,
+        bool moved)
     {
-        if (backup is null)
-        {
-            if (moved)
-            {
-                DeleteIfPresent(zipPath);
-            }
-
-            return true;
-        }
-
         try
         {
-            File.Move(backup, zipPath, overwrite: true);
-            return true;
+            if (backup is not null)
+            {
+                platform.MoveFile(backup, zipPath, overwrite: true);
+            }
+            else if (moved)
+            {
+                platform.DeleteFile(zipPath);
+            }
+
+            return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return false;
+            string kept = backup is null ? string.Empty : $"The replaced {zipShown} is kept as {Path.GetFileName(backup)}.";
+            return moved ? $"{zipShown} was written, but {output} wasn't, so they don't match. {kept}".TrimEnd() : kept;
         }
     }
 

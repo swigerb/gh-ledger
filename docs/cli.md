@@ -314,7 +314,7 @@ gh ledger export [--format html] [--out <path>] [--bundle] [--repo <key> | --all
 | `--include-local-paths` | | Show the local roots of repositories without a GitHub remote. Without it, such a repository shows as its folder name, or as `(root folder)` when its root is a drive or a share, so two folders with the same name look the same. |
 | `--max-timeline-spans` | `20000` | The most requests, and the most tool calls, that the timeline draws: the latest ones. 0 to 100,000. |
 | `--generated-at` | Now | The generation time to record, in UTC, such as `2026-11-21T21:30:00Z`, to reproduce an earlier export. |
-| `--force` | | Replace existing files. If the report can't be replaced, the ZIP is put back as it was. |
+| `--force` | | Replace existing files that aren't read-only. If the report can't be replaced, the ZIP is put back as it was. |
 
 The export reads the ledger once, so the report and the bundle agree. It covers the requests that start from the first day of `--since` up to the generation time, and the tool calls of their prompt chains in the same window; breaker trips are those of the same prompt chains, and budgets those of the requests' branches, with their all-time spend as `budget list` shows it. Standard output names the files, the number of requests, the scope, and the period, and never a folder:
 

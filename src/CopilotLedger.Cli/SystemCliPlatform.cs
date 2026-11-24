@@ -68,6 +68,13 @@ public sealed class SystemCliPlatform : ICliPlatform
 
     public bool FileExists(string path) => File.Exists(path);
 
+    public void MoveFile(string source, string destination, bool overwrite) => File.Move(source, destination, overwrite);
+
+    public void DeleteFile(string path) => File.Delete(path);
+
+    public Task WriteFileAsync(string path, byte[] bytes, CancellationToken cancellationToken) =>
+        File.WriteAllBytesAsync(path, bytes, cancellationToken);
+
     public string? FindOnPath(string fileName)
     {
         string? path = Environment.GetEnvironmentVariable("PATH");
