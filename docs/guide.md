@@ -1,10 +1,10 @@
-# CopilotLedger user guide
+# gh-ledger user guide
 
-CopilotLedger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
+gh-ledger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
 
 The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). After setup and backfill, every sample starts from the same state: a month of spend, a rates overlay with Foundry BYOK prices, a budget for `feature/search`, and an open circuit-breaker trip, so early samples show things that later sections explain. The [weekly waste review](#weekly-waste-review) uses a day of agent activity instead. A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
 
-- [Set up CopilotLedger](#set-up-copilotledger)
+- [Set up gh-ledger](#set-up-gh-ledger)
 - [Backfill history after installing](#backfill-history-after-installing)
 - [See what you spent](#see-what-you-spent)
 - [Find the most expensive prompts](#find-the-most-expensive-prompts)
@@ -20,7 +20,7 @@ The samples come from one example: gh-ledger installed as the GitHub CLI extensi
 - [Update rates](#update-rates)
 - [Upgrade or uninstall](#upgrade-or-uninstall)
 
-## Set up CopilotLedger
+## Set up gh-ledger
 
 **Goal:** record what Copilot spends from now on.
 
@@ -77,9 +77,9 @@ If no spans appear, fix any warnings that `status` shows, and see [Troubleshooti
 
 ## Backfill history after installing
 
-**Goal:** add the Copilot requests you made before you installed CopilotLedger.
+**Goal:** add the Copilot requests you made before you installed gh-ledger.
 
-CopilotLedger records requests from the moment its daemon runs, but Copilot CLI and the GitHub Copilot app also keep a log of each session on your machine. `gh ledger import` records the requests in those logs, prices each one for the date it was made, and attributes it to the branch its session was on. See what it would record for this repository first:
+gh-ledger records requests from the moment its daemon runs, but Copilot CLI and the GitHub Copilot app also keep a log of each session on your machine. `gh ledger import` records the requests in those logs, prices each one for the date it was made, and attributes it to the branch its session was on. See what it would record for this repository first:
 
 <!-- sample: import-dry-run -->
 ```shell
@@ -113,7 +113,7 @@ Dry run: nothing was written.
 ```
 <!-- /sample -->
 
-Two sessions from yesterday hold five requests, including one by the `explore` subagent and a compaction, the request that summarizes a long conversation. A session in `contoso/api` is out of scope, and the session you're in now is still open, so it's skipped: CopilotLedger records it live. Import the five:
+Two sessions from yesterday hold five requests, including one by the `explore` subagent and a compaction, the request that summarizes a long conversation. A session in `contoso/api` is out of scope, and the session you're in now is still open, so it's skipped: gh-ledger records it live. Import the five:
 
 <!-- sample: import -->
 ```shell
@@ -462,7 +462,7 @@ To change the limits, or to have the daemon write a flag file that a wrapper scr
 Add this workflow to the repository as `.github/workflows/copilot-ledger-receipt.yml`:
 
 ```yaml
-name: CopilotLedger receipt
+name: gh-ledger receipt
 
 on:
   pull_request:
@@ -498,7 +498,7 @@ Commit it on the branch and push; the PR receipt action posts it on the pull req
 
 ```shell
 git add .github/copilot-ledger/receipts
-git commit -m "Add CopilotLedger receipt"
+git commit -m "Add gh-ledger receipt"
 git push
 ```
 
@@ -662,7 +662,7 @@ See [Export a report](cli.md#export-a-report) for every option and the bundle's 
 
 **Goal:** see what your Microsoft Foundry BYOK models cost, and what local models save you.
 
-CopilotLedger records requests to local runtimes, such as Foundry Local and Ollama, at $0.00 and estimates what they saved. Foundry bills BYOK requests to you directly, not through GitHub, so CopilotLedger records them unpriced until you add your prices. Create a rates overlay:
+gh-ledger records requests to local runtimes, such as Foundry Local and Ollama, at $0.00 and estimates what they saved. Foundry bills BYOK requests to you directly, not through GitHub, so gh-ledger records them unpriced until you add your prices. Create a rates overlay:
 
 ```shell
 gh ledger rates init
@@ -796,7 +796,7 @@ Restart the daemon as it says. Requests already recorded keep the prices they we
 
 ## Upgrade or uninstall
 
-**Goal:** move to a new gh-ledger release, or remove CopilotLedger.
+**Goal:** move to a new gh-ledger release, or remove gh-ledger.
 
 The daemon runs the extension's binary, and so does every Copilot session that uses the `ledger` MCP server. Windows can't replace that file while either runs it, so before you upgrade, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code if they use the MCP server, and stop the daemon:
 
@@ -840,7 +840,7 @@ Invalid rates overlay: C:\Users\you\.copilot-ledger\rates.json: githubAiCredits.
 
 A new release can build in a model name that your overlay also lists, and the daemon doesn't start until the overlay is valid. Here, the overlay prices `claude-haiku-4-5-20251001`, the name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5: gh-ledger 0.4.1 didn't know it, so you may have added it yourself, and gh-ledger 0.5.0 builds it in. Remove the entry that the message names, run `gh ledger rates validate` again, and start the daemon. See [Which model prices a request](configuration.md#which-model-prices-a-request).
 
-To remove CopilotLedger, undo `install`:
+To remove gh-ledger, undo `install`:
 
 <!-- sample: uninstall -->
 ```shell

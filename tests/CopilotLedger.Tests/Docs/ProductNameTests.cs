@@ -16,6 +16,14 @@ public sealed partial class ProductNameTests
             .Replace("\"--app-name=CopilotLedger\"", string.Empty, StringComparison.Ordinal)));
     }
 
+    [Fact]
+    public void PN2_TheReadmeAndTheDocsNameTheProductGhLedger()
+    {
+        string[] files = [RepositoryFile("README.md"), .. Directory.GetFiles(RepositoryFile("docs"), "*.md")];
+
+        Assert.Empty(Mentions(files, line => line.Replace("the `CopilotLedger` value under", string.Empty, StringComparison.Ordinal)));
+    }
+
     // "<file>:<line>" for each line that still names CopilotLedger, or Copilot Ledger, in any case, once removeAllowed and
     // Identifier have taken out what may stay.
     private static string[] Mentions(IEnumerable<string> files, Func<string, string> removeAllowed)
