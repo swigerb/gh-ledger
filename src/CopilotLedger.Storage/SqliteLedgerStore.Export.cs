@@ -22,15 +22,16 @@ public sealed partial class SqliteLedgerStore
                COALESCE((SELECT owner.ingest_source FROM spans AS owner WHERE owner.id = span_links.owner_span_row_id), 'otlp')
         """;
 
-    // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span: a
-    // correlated EXISTS, which finds each link's trace through ix_spans_trace, rather than an IN list of every selected trace
-    // that each page would build again. Unqualified columns are span_links' outside the subquery and spans' inside it.
+    // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span. The
+    // subquery is uncorrelated, so SQLite evaluates it once per statement and looks each link's trace up in its result; a
+    // correlated EXISTS tested FilterSql on every span of every unselected trace, once per link (#83). Unqualified columns
+    // are span_links' outside the subquery and spans' inside it.
     private const string ExportToolCallWhereSql = $"""
         operation_name = 'execute_tool'
           AND {EffectiveLinkSql}
           AND (@from IS NULL OR start_time_unix_ms >= @from)
           AND (@to IS NULL OR start_time_unix_ms < @to)
-          AND EXISTS (SELECT 1 FROM spans AS chain WHERE chain.trace_id = span_links.trace_id AND {FilterSql})
+          AND span_links.trace_id IN (SELECT trace_id FROM spans WHERE {FilterSql})
         """;
 
     // Rows after the cursor in (start time, trace ID, span ID) order. The plain lower bound on start_time_unix_ms lets every
