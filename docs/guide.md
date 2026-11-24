@@ -13,6 +13,7 @@ The samples come from one example: gh-ledger installed as the GitHub CLI extensi
 - [Set a budget for a branch](#set-a-budget-for-a-branch)
 - [Catch a runaway loop](#catch-a-runaway-loop)
 - [Post a receipt on a pull request](#post-a-receipt-on-a-pull-request)
+- [Attach a cost report to a pull request](#attach-a-cost-report-to-a-pull-request)
 - [Price Foundry BYOK and local models](#price-foundry-byok-and-local-models)
 - [Ask Copilot about spend](#ask-copilot-about-spend)
 - [Update rates](#update-rates)
@@ -574,6 +575,32 @@ The action posts the receipt as a comment on the pull request:
 <!-- /sample -->
 
 Before you merge, run `gh ledger export-pr` again and push, so the receipt includes the latest spend; the action updates the same comment. See the [action's README](https://github.com/swigerb/copilot-ledger-action) for its inputs and the checks it makes.
+
+## Attach a cost report to a pull request
+
+**Goal:** give reviewers a report of a branch's AI spend that opens anywhere, with the data behind it.
+
+In the repository, export the branch's report and its bundle:
+
+<!-- sample: export -->
+```shell
+gh ledger export --branch feature/search --bundle
+```
+
+```text
+Wrote copilot-ledger-report.html: 8 requests in contoso/webapp, branch feature/search (last 30 days).
+Wrote copilot-ledger-report.zip: report.html, manifest.json, and 4 telemetry files.
+```
+<!-- /sample -->
+
+Open `copilot-ledger-report.html` in any browser. It works offline and without a server, and every chart has a table, so it reads well without JavaScript too. Attach both files to the pull request, or to an audit ticket. The ZIP holds the report, the data as JSON, and `manifest.json`, which lists each file's size and SHA-256 hash, so a reviewer can check that the files weren't changed after you wrote them.
+
+- `--time-zone America/New_York` shows dates, times, and nights in another time zone than this computer's.
+- `--since all` covers the branch's whole history instead of the last 30 days.
+- `--include-local-paths` shows the local roots of repositories without a GitHub remote, which otherwise show as their folder names.
+- `--generated-at` with the manifest's `generatedAtUtc` writes the same files again from an unchanged ledger.
+
+See [Export a report](cli.md#export-a-report) for every option and the bundle's format.
 
 ## Price Foundry BYOK and local models
 
