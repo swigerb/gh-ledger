@@ -11,7 +11,7 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–8 are sequential, and each one builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–9 are sequential, and each one builds on the ones before it.
 
 **How this plan differs from Sprint 11's, archived at `.github/plans/archive/sprint-11.md`.** Sprint 11 gave every change as copy-exact code blocks generated from the files. This plan gives fixed **contracts** instead: exact public signatures, SQL, user-visible strings, documentation text, algorithms, and test vectors with exact expected values. You write the code that meets them.
 - The strings, signatures, and expected values below are fixed. Copy them character for character.
@@ -20,7 +20,7 @@
 - Sprint 11 had a rule that no test opens a socket or starts a process. This plan has one exception, Task 4's DJ7, which is Windows-only (see Decision D4). Every other test stays in-process.
 
 **Ground rules for every task:**
-- **No ledger changes.** No schema or ledger-format change: no migration, no `user_version` bump, no new table, column, or index, and no `PRAGMA` change.
+- **No ledger changes.** No schema or ledger-format change: no migration, no `user_version` bump, no new table, column, or index, and no `PRAGMA` change. Task 8's `TEMP` table isn't a ledger change: it lives in the connection's own temp database, never in the ledger file, and its read transaction never commits (D10).
 - **No version, rates, or package changes.** No change to `rates.json`, `docs/configuration.md`, the product version (0.5.0), `global.json`, `Directory.Build.props`, or any `.csproj`. No new NuGet package.
 - **Money is `decimal`.** Never `double` or `float`.
 - **Hermetic tests.** No Docker, no network outside loopback (and loopback only in DJ7), no `git`, and no real `~/.copilot-ledger`.
@@ -55,7 +55,8 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
   - `context_bloat` keeps its per-request trigger but reports one finding per agent invocation, model, and output kind, and gains a `requests` metric.
   - `tool_loop` is High only when the run is long enough and its known impact is above $0.
 - [ ] Task 7: Per-Rule Totals in the Audit Table, and the Docs (CopilotLedger.Cli, docs & tests). #80. The text table gains a `By rule:` line. Update the `docs/cli.md` rule table and "Output" paragraph, and the guide's `audit` sample.
-- [ ] Task 8: Docs Consistency and Final Verification (tests). All four issues.
+- [ ] Task 8: Unscoped Tool-Call Paging Selects the Chains Once per Snapshot (CopilotLedger.Storage & tests). #83, review finding. Task 2 made `export --all-repos --since all --bundle` 3× slower on a real ledger, because every 1,000-row page rescans the spans and sorts every selected tool call. The snapshot fills a connection-private `TEMP` table with the selected traces once per filter, and `ExportToolCallWhereSql` looks traces up in it with a unary `+`. The always-on SQ3 pins exact rows and linear paging on `LargeLedger` (D10).
+- [ ] Task 9: Docs Consistency and Final Verification (tests). All four issues.
   - DC1 checks the docs that this sprint changed.
   - Run the opt-in timing harness once more.
   - Publish a single-file `win-x64` binary and smoke-test the job check.
@@ -100,7 +101,9 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 | `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` is, in order: `BasicLimitInformation`, `IoInfo` (`IO_COUNTERS`, six `ULONGLONG`), `SIZE_T ProcessMemoryLimit`, `SIZE_T JobMemoryLimit`, `SIZE_T PeakProcessMemoryUsed`, `SIZE_T PeakJobMemoryUsed`. | [JOBOBJECT_EXTENDED_LIMIT_INFORMATION](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information) | Task 3 |
 | `QueryInformationJobObject(hJob, …)`: if `hJob` is NULL and the calling process is associated with a job, the job associated with the calling process is used; if the job is nested, the immediate job of the calling process is used. `JobObjectExtendedLimitInformation` is class 9. | [QueryInformationJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject) | Task 3 |
 | `IsProcessInJob(ProcessHandle, NULL, &result)` tests whether the process runs under any job. A process can't open its own job without its name, but `QueryInformationJobObject` with NULL works on it. | [IsProcessInJob](https://learn.microsoft.com/en-us/windows/win32/api/jobapi/nf-jobapi-isprocessinjob) | Task 3 |
-| `PublishSingleFile` is on for every RID build, with `EnableSingleFileAnalyzer` (`src/CopilotLedger.Cli/CopilotLedger.Cli.csproj:10–17`). The existing `kernel32.dll` `DllImport`s in `WindowsDetachedProcess` already ship in the single-file binary, so new `kernel32.dll` imports need nothing more. | the repository at `69ae671` | Task 3, Task 8 |
+| "Terms of the WHERE clause can be manually disqualified for use with indexes by prepending a unary + operator to the column name. The unary + is a no-op and will not generate any byte code." It also "removes type affinity from an expression". SQLite calls it a work-around, a last resort. | [SQLite: The Query Optimizer Overview, §8.1](https://www.sqlite.org/optoverview.html#disqualifying_where_clause_terms_using_unary_) | Task 8, D10 |
+| "Tables created using the "CREATE TEMP TABLE" syntax are only visible to the database connection in which the "CREATE TEMP TABLE" statement is originally evaluated." They live in a separate temporary database file that's deleted when the connection closes. | [SQLite: Temporary Files, §2.6 TEMP Databases](https://www.sqlite.org/tempfiles.html) | Task 8, D10 |
+| `PublishSingleFile` is on for every RID build, with `EnableSingleFileAnalyzer` (`src/CopilotLedger.Cli/CopilotLedger.Cli.csproj:10–17`). The existing `kernel32.dll` `DllImport`s in `WindowsDetachedProcess` already ship in the single-file binary, so new `kernel32.dll` imports need nothing more. | the repository at `69ae671` | Task 3, Task 9 |
 
 **Assumptions (not verified; the design doesn't depend on them):**
 
@@ -123,6 +126,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 
   - Results were identical.
   - A `TEMP` table would write to the temp schema inside a read transaction, and an index would change the ledger. D1 needs neither.
+  - **Amended by D10.** D1 measured single statements only. Paged reads regressed on an unscoped bundle, and Task 8 adds a connection-private `TEMP` table. The rule against an index still holds.
 - **D2: SQ1 is opt-in, SQ2 is always on.** A 50,000-span ledger takes seconds to build, so the full-size timing harness runs only with `GH_LEDGER_PERF=1`.
   - SQ2 is small enough for every run: about 16,000 spans and 16,000 links in one transaction.
   - SQ2 asserts exact counts, and a 3-second bound per scoped call. The old SQL needs ≈12 s and the new SQL needs <10 ms, so the bound is far from both and isn't flaky.
@@ -146,6 +150,56 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - **D7: The `premium_model_trivial_turn` routed exemption is deferred.** The ledger has no routed-model signal. No column records `isAuto` or `fusion.*`, and `src` has no handling for either. Adding one is a schema change, and Sprint 12's #76 may add the signal. See Deferred.
 - **D8: Per-rule totals appear in text only.** `--json`, MCP, and the bundle's `audit-findings.json` are formats, so they don't change. JSON per-rule totals are deferred.
 - **D9: #81 uses `GhExtension.CommandName`.** The daemon's `ProcessPath` is the extension's binary when the extension starts it, so the name matches how the user installed gh-ledger. `BreakerMessages` keeps `gh-ledger` as the default, so code outside the daemon, and the tests that pin it, don't change.
+- **D10: Tool-call reads look the selected chains up in a `TEMP` table that each snapshot fills once per filter.** Added in the Sprint 13 review on 2026-11-24. It amends D1 and D2.
+  - **The finding.** The coordinator validated Sprint 13 against a real ledger of 61,344 spans and 80,049 tool links, using a build at `f6c95a9` (Task 3's commit, which contains Task 2's change `906b0af`). HTML and ZIP output were byte-identical before and after.
+
+    | Command | Before Task 2 | After Task 2 |
+    |---|---|---|
+    | `audit` for the repository, 7 days and 30 days | 27.0 s, 27.2 s | 0.6 s, 0.6 s |
+    | `export --bundle` for the current repository, `--since all` | 133.4 s | 3.0 s |
+    | `export --bundle` for one conversation | 90.3 s | 1.0 s |
+    | `audit`, unscoped | 1.8–2.5 s | 1.9–2.6 s |
+    | `export`, unscoped, without `--bundle` | 4.1 s | 4.2 s |
+    | **`export --all-repos --since all --bundle`** | **6.5 s** | **19.7 s** |
+
+  - **The cause (measured).** The architect measured Task 2's page read on SQLite 3.53.3 with `EXPLAIN QUERY PLAN`. It shows `SEARCH span_links USING PRIMARY KEY (trace_id=?)`, driven by `LIST SUBQUERY` over `SCAN spans`, then `USE TEMP B-TREE FOR ORDER BY`.
+    - Each page rescans every selected span to build the list, reads every selected chain's tool calls, and sorts them, only to return 1,000 rows.
+    - Each page's cost grows with the ledger, and so does the number of pages, so an unscoped bundle grows quadratically.
+    - The bundle is the only caller that pages. The count, the latest read, and audit's read are one statement each, so they didn't regress.
+  - **The prototype.** The architect paged all tool calls 1,000 at a time, exactly as `ExportJson` does, on three ledgers created by this repository's migrations:
+    - `LargeLedger`: 192 chains, 50,000 spans, and 75,000 tool calls;
+    - 3,072 chains of 20 spans and 26 tool calls;
+    - 61,440 chains of 1 span each, with 81,920 tool calls.
+
+    Each row gives the unscoped paging time on each ledger, in that order. Every variant returned the same rows in the same order.
+
+    | Variant | Unscoped paging (`LargeLedger`; 3,072 chains; 61,440 chains) |
+    |---|---|
+    | V0: the correlated `EXISTS` from before Task 2 | 177 ms; 201 ms; 205 ms |
+    | V1: Task 2's `trace_id IN (SELECT trace_id FROM spans WHERE …)` | **2,119 ms; 2,759 ms**; – |
+    | V2: V1 with a unary `+` | 975 ms; 1,257 ms; 1,925 ms |
+    | V6: a `json_each(@traces)` parameter, read once, with `+` | 138 ms; 208 ms; **1,192 ms** |
+    | **V4: a `TEMP` table filled once (11–25 ms), with `+`** | **130 ms; 154 ms; 177 ms** |
+
+    V4 also held the scoped speedup. For the repository, it took 80–90 ms, against Task 2's 340–627 ms and 9,569 ms before Task 2. For one conversation, it took 50 ms, against 18 ms and 18,451 ms. The extra 30 ms for a conversation comes from walking the period's links in time order instead of a chain's primary key.
+  - **Why V4.**
+    - **The coordinator's hybrid** (`EXISTS` for time-only filters, `IN` for the others) restores the unscoped case. But a repository filter that selects most of the ledger keeps the per-page rescan and sort. A one-repository user's default `export --bundle` is that case.
+    - **V2** still rescans the spans on every page.
+    - **V6** writes nothing, but parses the whole list of chains on every page, so it's 6× slower than V0 when chains are small.
+    - **V4** is the fastest in every shape and filter measured, and it pays its setup once per filter.
+  - **Why a `TEMP` table is safe here.** A `TEMP` table is visible only to its connection, and it lives in the connection's own temporary database (Verified facts). Its `CREATE` and `INSERT` run inside the snapshot's read transaction, which never commits. `LedgerExportSnapshot.DisposeAsync` rolls it back. The architect verified the following on SQLite 3.53.3 with `Microsoft.Data.Sqlite` 10.0.15:
+    - While a snapshot held the table, another connection's `BEGIN IMMEDIATE` write committed in 10 ms, and the snapshot still didn't see its row.
+    - After the snapshot was disposed, the pooled connection had no temp tables.
+    - A `Mode=ReadOnly` connection can create the table too.
+    - The ledger file gains no table or index, and no `PRAGMA` or `user_version` changes.
+    - SQLite already uses temporary storage for the `USE TEMP B-TREE` sorts in this file's queries.
+  - **The unary `+`.** SQLite documents it as a work-around (Verified facts), and it's the only portable way here to keep the planner off `span_links`' primary key. It removes affinity, but both `trace_id` columns are `TEXT NOT NULL`, have `TEXT` affinity, and declare no collation, so membership is the same binary text comparison.
+  - **SQ3 is always on (amends D2).** The regression shows only with many pages, so SQ3 builds `LargeLedger`: about 3.4 s to generate and under 1 s to page. Its bound is relative to span paging on the same snapshot, so a slower machine slows both sides. The architect measured:
+    - span paging at 256–307 ms;
+    - fixed tool-call paging at 160–166 ms;
+    - Task 2's tool-call paging at 2,047–2,090 ms.
+
+    `toolMs <= 2 × spanMs + 250` therefore allows ≈770 ms, which leaves 4.7× headroom for the fix and fails the regression by 2.7×.
 
 ## Task 1: A Generated Large Ledger and an Opt-In Timing Harness, with "Before" Numbers
 
@@ -915,7 +969,170 @@ Leave the rest of the paragraph as is.
 
 **Verify:** `dotnet build CopilotLedger.slnx` reports 0 warnings. `dotnet test CopilotLedger.slnx` passes **1780** tests: 1779 + 1.
 
-## Task 8: Docs Consistency and Final Verification
+## Task 8: Unscoped Tool-Call Paging Selects the Chains Once per Snapshot
+
+**Why.** This fixes the review finding in D10: `export --all-repos --since all --bundle` went from 6.5 s to 19.7 s on a real ledger. The fix must keep:
+- Task 2's scoped speedup;
+- the same rows in the same order, so every output stays byte-identical;
+- the ledger unchanged: no schema, index, `PRAGMA`, or format change (ground rules).
+
+**Files:**
+- `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`
+- `src/CopilotLedger.Storage/LedgerExportSnapshot.cs`
+- `tests/CopilotLedger.Tests/Storage/ScopedQueryPerfTests.cs`
+
+Change nothing else. `SqliteLedgerStore.Audit.cs` needs no edit, because its tool-call statement already interpolates `ExportToolCallWhereSql`. Don't touch `ReadAuditLinksAsync`, the coverage read, or the breaker-trip read: they're single statements that keep their `IN (SELECT …)`.
+
+### Step 1: the guard first
+
+Add SQ3 (below) before you change `src`. Run `dotnet test CopilotLedger.slnx --filter "FullyQualifiedName~ScopedQueryPerfTests.SQ3"` against the unchanged Storage.
+- It must **fail** only on its timing assertion: the exactness assertions already pass.
+- Report its two printed lines as the "regressed" numbers. The architect expects about 2,000 ms for tool calls against about 260 ms for spans.
+
+Then make the change and run it again.
+
+### Change (exact)
+
+**1. `SqliteLedgerStore.Export.cs`: the `WHERE` clause.** Replace the comment and the constant `ExportToolCallWhereSql` (Task 2's text) with:
+
+```csharp
+    // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span: one
+    // in temp.export_selected_chains, which LedgerExportSnapshot fills for the filter before every tool-call read
+    // (SelectExportChainsAsync). The unary + keeps the trace term off span_links' primary key, so a page seeks
+    // ix_span_links_start, walks in ORDER BY order, and looks each link's chain up in the temp table. Driven by the chains
+    // instead, every page read and sorted all of their links, and an IN (SELECT … FROM spans) here rescanned the spans for
+    // every page (#83). Both trace_id columns are TEXT, so the affinity that + removes doesn't change the comparison.
+    // Unqualified columns are span_links'.
+    private const string ExportToolCallWhereSql = $"""
+        operation_name = 'execute_tool'
+          AND {EffectiveLinkSql}
+          AND (@from IS NULL OR start_time_unix_ms >= @from)
+          AND (@to IS NULL OR start_time_unix_ms < @to)
+          AND +span_links.trace_id IN (SELECT trace_id FROM temp.export_selected_chains)
+        """;
+```
+
+**2. `SqliteLedgerStore.Export.cs`: the new method.** Add it directly after `CountExportToolCallsAsync`:
+
+```csharp
+    // Fills temp.export_selected_chains with the trace ID of every prompt chain with a span that the filter selects: the
+    // chains whose tool calls ExportToolCallWhereSql reads. The table lives in the connection's own temp database, never in
+    // the ledger, and the snapshot's read transaction never commits, so the table is gone when the snapshot ends. DELETE
+    // clears an earlier filter's chains in the same snapshot.
+    internal static async Task SelectExportChainsAsync(
+        SqliteTransaction snapshot,
+        LedgerFilter filter,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = snapshot.Connection!.CreateCommand();
+        command.Transaction = snapshot;
+        command.CommandText = $"""
+            CREATE TEMP TABLE IF NOT EXISTS export_selected_chains (trace_id TEXT NOT NULL PRIMARY KEY) WITHOUT ROWID;
+            DELETE FROM temp.export_selected_chains;
+            INSERT INTO temp.export_selected_chains (trace_id) SELECT DISTINCT trace_id FROM spans WHERE {FilterSql};
+            """;
+        AddFilterParameters(command, filter);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+```
+
+**3. `LedgerExportSnapshot.cs`.**
+- **The field.** Add it after `_transaction`:
+
+  ```csharp
+      private LedgerFilter? _selectedChains;   // the filter whose chains temp.export_selected_chains holds, or null
+  ```
+
+- **The helper.** Add this private method before `CheckPageLimit`. It compares filters with `LedgerFilter`'s record value equality:
+
+  ```csharp
+      // Fills temp.export_selected_chains with the filter's prompt chains unless it already holds them, so every page of one
+      // read, and every read of one filter, selects the chains once.
+      private async Task SelectChainsAsync(LedgerFilter filter, CancellationToken cancellationToken)
+      {
+          if (filter == _selectedChains)
+          {
+              return;
+          }
+
+          _selectedChains = null;
+          await SqliteLedgerStore.SelectExportChainsAsync(_transaction, filter, cancellationToken);
+          _selectedChains = filter;
+      }
+  ```
+
+- **The four tool-call methods.** These are `GetToolCallsAsync`, `GetLatestToolCallsAsync`, `CountToolCallsAsync`, and `GetAuditToolCallsAsync`.
+  - Each one keeps its public signature and its comment.
+  - Each one keeps its argument check (`CheckPageLimit`, `CheckLatestLimit`, or `ArgumentNullException.ThrowIfNull`), which still throws **before** a task is returned.
+  - Each one then awaits `SelectChainsAsync(filter, cancellationToken)` and returns its existing `SqliteLedgerStore.Read…`/`Count…` call's result.
+
+  Put the awaiting part in a private `async` method or a local function, so that the public method itself isn't `async`. No other snapshot method changes. `GetAuditInputAsync` reaches the helper through `GetAuditToolCallsAsync`.
+
+### Tests
+
+**SQ3_UnscopedToolCallPaging_IsExactAndLinear** (`[Fact]`, always runs; in `ScopedQueryPerfTests`, after SQ2).
+
+1. **Setup.** `using TempDirectory temp = new();` Then `string path = Path.Combine(temp.Path, "ledger.db");` and `SqliteLedgerStore store = await LargeLedger.CreateAsync(path);`.
+2. **The reference.** Open `new SqliteConnection($"Data Source={path}")` and run, once for each scope below, the following single statement. Collect each scope's `(trace_id, span_id)` list in order, then dispose the connection:
+
+   ```sql
+   SELECT trace_id, span_id FROM span_links
+   WHERE operation_name = 'execute_tool'
+     AND trace_id IN (SELECT trace_id FROM spans WHERE accounting_state = 'effective' AND {scope})
+   ORDER BY start_time_unix_ms, trace_id, span_id;
+   ```
+
+   | Name | `{scope}` | `LedgerFilter` | Expected rows |
+   |---|---|---|---|
+   | all | `1 = 1` | `LedgerFilter.All` | 75,000 |
+   | repository | `repo_slug = 'swigerb/copilot-ledger'` | `new LedgerFilter { Repository = LargeLedger.GhLedgerRepository }` | 37,500 |
+   | conversation | `conversation_id = 'conv-0003'` | `new LedgerFilter { ConversationId = LargeLedger.Conversation }` | 300 |
+
+   Every `LargeLedger` owner is effective, so every link counts.
+3. **Exactness.** Open `await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();`. On that one snapshot, page each filter in this order: all, repository, conversation, then all again. The last one checks that changing the filter back refills the table.
+   - Page with `GetToolCallsAsync(filter, after, 1000)` (1,000 is `ExportLimits.PageSize`, which is internal to the CLI). Start with `after = null`, and stop after the first page with fewer than 1,000 rows, as `ExportJson` does.
+   - After each page, set `after = new ExportCursor(last.StartTime.ToUnixTimeMilliseconds(), last.TraceId, last.SpanId)`.
+   - **Assert:**
+     - the concatenated `(TraceId, SpanId)` sequence equals the scope's reference exactly;
+     - `await snapshot.CountToolCallsAsync(filter)` equals its length;
+     - the length equals the table's expected rows.
+4. **Linearity.** On the same snapshot, time two unscoped page loops with `Stopwatch`, using the same loop and cursor rule as step 3 and a limit of 1,000:
+   - spans, with `GetSpansAsync(LedgerFilter.All, after, 1000)`, building the cursor from `ExportSpanRow`'s `StartTime`, `TraceId`, and `SpanId`;
+   - tool calls, with `GetToolCallsAsync(LedgerFilter.All, after, 1000)`.
+
+   Run them in the order spans, tool calls, spans, tool calls. Let `spansMs` and `toolsMs` be the smaller `ElapsedMilliseconds` of each pair. Then:
+   - Write `output.WriteLine($"{"page spans unscoped",-28} {spansMs} ms")` and `output.WriteLine($"{"page tool calls unscoped",-28} {toolsMs} ms")`.
+   - Assert that the span loops returned 50,000 rows and the tool-call loops 75,000.
+   - Assert `toolsMs <= 2 * spansMs + 250` (D10).
+
+### Comparing before and after (report every number)
+
+1. **Regressed.** Before changing `src`, run SQ3 (Step 1). Also run the opt-in harness: `$env:GH_LEDGER_PERF='1'; dotnet test CopilotLedger.slnx --filter "FullyQualifiedName~ScopedQueryPerfTests" --logger "console;verbosity=detailed"`. Keep the printed lines.
+2. **Baseline before #83.** Run the same opt-in command on Task 1's commit `c827eb6`, which has SQ1 but not Task 2's SQL:
+   - `git worktree add --detach <temp>\sq-base c827eb6`, then run the command in `<temp>\sq-base`.
+   - Then run `git worktree remove --force <temp>\sq-base`.
+
+   Don't commit anything there.
+3. **Fixed.** After the change, run SQ3 and the opt-in command again.
+4. **Report** a table with a row for each of SQ1's six labels and SQ3's two labels, and three columns: baseline (`c827eb6`, SQ1's labels only), regressed, and fixed.
+   - **Expected (reported, not asserted):** the fixed `export unscoped` is no slower than the baseline's plus 1,000 ms, and faster than the regressed one.
+   - SQ1's ratio assertions still pass.
+5. **Real ledger (the coordinator, not the builder).** No test or builder step reads the real `~/.copilot-ledger`. After this task, the coordinator reruns D10's six real-ledger commands with a build of this task's commit. Expected:
+   - `export --all-repos --since all --bundle` is at most about 6.5 s, the time before Task 2;
+   - the scoped commands stay near Task 2's times (0.6 s, 3.0 s, and 1.0 s);
+   - the HTML and ZIP are byte-identical to the regressed build's, compared the same way as the coordinator's report compared them.
+
+**AC:**
+- The SQL and the method are exactly as above. The ledger file's schema, indexes, `PRAGMA`s, and `user_version` don't change.
+- `git --no-pager diff --stat HEAD -- src` lists only `SqliteLedgerStore.Export.cs` and `LedgerExportSnapshot.cs`.
+- Every existing test passes unchanged. This includes every export golden or byte-pinned output, `ExportRowTests` with its `ArgumentOutOfRangeException` checks, the audit and MCP tests, SQ1's opt-in assertions, and SQ2.
+- SQ3 failed before the change, only on its timing assertion, and passes after it.
+- The report includes the comparison table from "Comparing before and after".
+- No `double`, `float`, or `REAL` is added. No `Task.Run` or parallelism is added: a snapshot is used by one caller at a time.
+
+**Verify:** `dotnet build CopilotLedger.slnx` reports 0 warnings. `dotnet test CopilotLedger.slnx` passes **1781** tests: 1780 + 1.
+
+## Task 9: Docs Consistency and Final Verification
 
 **Files:** new `tests/CopilotLedger.Tests/Docs/SprintThirteenDocsTests.cs`, next to `AuditDocsTests.cs`, in the same namespace as `AuditDocsTests`.
 
@@ -928,8 +1145,8 @@ Leave the rest of the paragraph as is.
 
 **Final verification** (report every command and its result):
 1. Run `dotnet build CopilotLedger.slnx`: 0 warnings and 0 errors.
-2. Run `dotnet test CopilotLedger.slnx`: **1781** passed, 0 failed, 0 skipped.
-3. Run `$env:GH_LEDGER_PERF='1'; dotnet test CopilotLedger.slnx --filter "FullyQualifiedName~ScopedQueryPerfTests" --logger "console;verbosity=detailed"`. It passes. Report the six lines next to Task 1's "before" and Task 2's "after" numbers.
+2. Run `dotnet test CopilotLedger.slnx`: **1782** passed, 0 failed, 0 skipped.
+3. Run `$env:GH_LEDGER_PERF='1'; dotnet test CopilotLedger.slnx --filter "FullyQualifiedName~ScopedQueryPerfTests" --logger "console;verbosity=detailed"`. It passes. Report the six lines next to Task 1's "before" and Task 2's "after" numbers, and SQ3's two lines next to Task 8's.
 4. **Single-file publish smoke** (Windows):
    - Run `dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r win-x64 -o <temp>\publish`. It must finish with 0 warnings, the same command CI and Release use. Don't commit the output.
    - Then `$env:COPILOT_LEDGER_HOME='<temp>\home'; & '<temp>\publish\gh-ledger.exe' --version` prints `0.5.0`.
@@ -943,7 +1160,7 @@ Leave the rest of the paragraph as is.
 - DC1 passes.
 - Every final-verification step passes, and each one is reported.
 
-**Verify:** `dotnet build CopilotLedger.slnx` reports 0 warnings. `dotnet test CopilotLedger.slnx` passes **1781** tests: 1780 + 1.
+**Verify:** `dotnet build CopilotLedger.slnx` reports 0 warnings. `dotnet test CopilotLedger.slnx` passes **1782** tests: 1781 + 1.
 
 ## Test specifications
 
@@ -957,7 +1174,8 @@ Leave the rest of the paragraph as is.
 | 5 | BA1 ×2, BA2, BA3 | 1768 |
 | 6 | AR13 ×4, AR14, AR9 +3 cases, AO7 +3 cases | 1779 |
 | 7 | AO8 | 1780 |
-| 8 | DC1 | 1781 |
+| 8 | SQ3 (always on) | 1781 |
+| 9 | DC1 | 1782 |
 
 Changed expectations, with no change to the count:
 - **Task 6:** AR1, AR4 (if it pins metrics), `AuditOutputs.Json`, and the other pinned `context_bloat` JSON.
@@ -968,7 +1186,7 @@ Changed expectations, with no change to the count:
 
 **Commits.** The orchestrator commits this plan first, together with the verbatim archive `.github/plans/archive/sprint-11.md`. It then commits each task as its own commit, `Sprint 13 Task N: <Title>`, each with the trailer `Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>`, on branch `swigerb-sprint-13-perf-windows-audit`.
 
-**After Task 8, before opening the pull request:**
+**After Task 9, before opening the pull request:**
 1. Ask `ledger-architect` to review, per its review mode.
 2. Merge or rebase onto `main` once Sprint 12 has merged, and resolve any `SqliteLedgerStore.Export.cs` or `LargeLedger` `INSERT` conflicts as "Starting point" describes.
 3. Run `dotnet build CopilotLedger.slnx` and `dotnet test CopilotLedger.slnx` again.
@@ -977,7 +1195,7 @@ Changed expectations, with no change to the count:
 - **Title:** exactly "Sprint 13: Scoped-query performance, the Windows daemon, and audit quality".
 - **Body:**
   - `Fixes #83`, `Fixes #78`, `Fixes #80`, and `Fixes #81`.
-  - The "before" and "after" timings.
+  - The "before" and "after" timings, including D10's real-ledger table and Task 8's fixed numbers.
   - D3's nested-job residual risk.
   - D4's real-process test.
   - D7's deferred routed-model exemption. File it as a follow-up issue that depends on Sprint 12's #76.
