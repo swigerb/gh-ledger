@@ -69,6 +69,7 @@ public sealed class LedgerIngestor : ILedgerIngestor
                 {
                     calculation = _calculator.Calculate(attributed);
                     _ = PicoUsd.FromUsd(calculation.UsdCost);
+                    _ = PicoUsd.FromUsd(calculation.ListUsdCost);
                     _ = PicoUsd.FromUsd(calculation.EstimatedCloudSavedUsd);
                     _ = PicoUsd.FromUsd(calculation.ApiEquivalent.UsdCost ?? 0m);
                 }
@@ -98,6 +99,8 @@ public sealed class LedgerIngestor : ILedgerIngestor
             int recorded = entries.Count == 0
                 ? 0
                 : await _store.RecordAsync(entries, cancellationToken);
+            int rejectedReportedCharges = entries.Count(
+                entry => entry.Calculation.ChargeSource == ChargeSource.Rejected);
             if (batch.Links.Count > 0)
             {
                 await _store.RecordSpanLinksAsync(batch.Links, cancellationToken);
@@ -125,6 +128,7 @@ public sealed class LedgerIngestor : ILedgerIngestor
                     ?? (costRejected > 0 ? "cost out of range" : null),
                 InferenceSpans = entries.Count,
                 RecordedSpans = recorded,
+                RejectedReportedCharges = rejectedReportedCharges,
             };
         }
         finally
