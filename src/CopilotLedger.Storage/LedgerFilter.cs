@@ -9,4 +9,5 @@ public sealed record LedgerFilter
     public string? Branch { get; init; }
     public int? PullRequestNumber { get; init; }   // spans recorded with this pull request number
     public string? Agent { get; init; }            // agent name, or (none) for spans without one
+    public string? ConversationId { get; init; }   // spans of this conversation (gen_ai.conversation.id, a Copilot session)
 }
