@@ -339,6 +339,35 @@ public sealed partial class ExportTimelineTests
         Assert.DoesNotContain("0.5, width)", html, StringComparison.Ordinal);
     }
 
+    // A range that ends inside the hour that fall-back repeats has every tick: the 10-minute marks of the hour's first pass,
+    // and 01:00 of its second; and zooming never needs more than the whole axis.
+    [Fact]
+    public async Task TL14_ARangeThatEndsInARepeatedHourHasAllItsTicks()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        await store.RecordAsync(
+        [
+            Entry("conv-dst", 1, new DateTimeOffset(2026, 11, 1, 5, 1, 0, TimeSpan.Zero)),
+            Entry("conv-dst", 2, new DateTimeOffset(2026, 11, 1, 6, 1, 0, TimeSpan.Zero)),
+        ]);
+
+        await ExportAsync(
+            Harness(temp.Path),
+            temp.Path,
+            "--all-repos", "--since", "all", "--time-zone", "Test/New_York", "--generated-at", "2026-12-01T00:00:00Z");
+
+        string html = ExportFiles.ReadReport(Path.Combine(temp.Path, Report));
+        using JsonDocument data = ExportFiles.LedgerData(html);
+        JsonElement timeline = data.RootElement.GetProperty("timeline");
+        Assert.Equal(
+            ["01:10", "01:20", "01:30", "01:40", "01:50", "01:00"],
+            timeline.GetProperty("ticks").EnumerateArray().Select(tick => tick.GetProperty("label").GetString()));
+        Assert.Equal(333.148m, timeline.GetProperty("minWidth").GetDecimal());
+        Assert.Contains("var minWidth = Math.min(timeline.minWidth, width);", html, StringComparison.Ordinal);
+    }
+
     private static CliHarness Harness(string root)
     {
         FakeCliPlatform platform = new();

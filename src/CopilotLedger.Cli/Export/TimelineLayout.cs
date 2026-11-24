@@ -221,10 +221,13 @@ internal static class TimelineLayout
     private static IReadOnlyList<ExportAxisTick> Ticks(long t0, long t1, TimeZoneInfo zone, Func<long, decimal> x)
     {
         TimeSpan step = Step(t1 - t0);
-        DateTime end = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t1), zone).DateTime;
         List<(long Instant, int Level, string Label)> boundaries = [];
-        for (DateTime local = ExportTime.LocalDate(DateTimeOffset.FromUnixTimeMilliseconds(t0), zone).ToDateTime(TimeOnly.MinValue);
-             local <= end;
+
+        // Whole local days around the range, so a time that a transition repeats is reached at both of its instants, whatever
+        // local time the range ends at; instants outside [t0, t1] are dropped.
+        DateTime last = ExportTime.LocalDate(DateTimeOffset.FromUnixTimeMilliseconds(t1), zone).AddDays(1).ToDateTime(TimeOnly.MinValue);
+        for (DateTime local = ExportTime.LocalDate(DateTimeOffset.FromUnixTimeMilliseconds(t0), zone).AddDays(-1).ToDateTime(TimeOnly.MinValue);
+             local <= last;
              local += step)
         {
             if (zone.IsInvalidTime(local) && local.TimeOfDay != TimeSpan.Zero)
@@ -274,7 +277,7 @@ internal static class TimelineLayout
         range <= DayMs ? 3 : range <= 7 * DayMs ? 2 : range <= 62 * DayMs ? 1 : 0;
 
     // The narrowest view the script zooms to: twice the widest gap between two neighboring ticks, or between an end of the
-    // axis and its nearest tick, so every view holds at least two ticks to label; at least half a unit.
+    // axis and its nearest tick, so every view holds at least two ticks to label; at least half a unit, at most the axis.
     private static decimal MinWidth(IReadOnlyList<ExportAxisTick> ticks)
     {
         decimal widest = ticks.Count == 0 ? Width : Math.Max(ticks[0].X, Width - ticks[^1].X);
@@ -283,7 +286,7 @@ internal static class TimelineLayout
             widest = Math.Max(widest, ticks[index].X - ticks[index - 1].X);
         }
 
-        return Math.Max(2 * widest, 0.5m);
+        return Math.Min(Math.Max(2 * widest, 0.5m), Width);
     }
 
     private static ExportTimelineRow Row(

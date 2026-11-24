@@ -34,7 +34,7 @@
     }
 
     var width = timeline.width;
-    var minWidth = timeline.minWidth;
+    var minWidth = Math.min(timeline.minWidth, width);
     var height = Number(plot.getAttribute('height'));
     var ticks = Array.isArray(timeline.ticks) ? timeline.ticks : [];
     var view = { x: 0, w: width };
