@@ -53,6 +53,9 @@ internal static class HtmlReportWriter
         html.Append("<script type=\"application/json\" id=\"ledger-data\">");
         html.Append(Encoding.UTF8.GetString(ExportJson.LedgerData(model)));
         Line(html, "</script>");
+        Line(html, "<script>");
+        Line(html, ExportAssets.Script.TrimEnd('\n'));
+        Line(html, "</script>");
         Line(html, "</body>");
         Line(html, "</html>");
         return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(html.ToString());

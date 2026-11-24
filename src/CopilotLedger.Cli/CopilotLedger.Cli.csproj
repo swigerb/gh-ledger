@@ -32,5 +32,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Export\Assets\report.css" LogicalName="CopilotLedger.Cli.Export.Assets.report.css" />
+    <EmbeddedResource Include="Export\Assets\report.js" LogicalName="CopilotLedger.Cli.Export.Assets.report.js" />
   </ItemGroup>
 </Project>
