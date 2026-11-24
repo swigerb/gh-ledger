@@ -318,6 +318,14 @@ An overlay changes the API-equivalent prices of requests recorded from then on. 
 - Reports name the file in a `Pricing:` line, and their JSON adds `pricingSource` with its `path`, `ratesVersion`, and `apiRateCardSha256`. A receipt names the file without its folder.
 - `gh ledger rates validate --pricing <path>` checks a file with the same rules and messages.
 
+## Audit and local models
+
+`gh ledger audit` estimates what its findings cost with the rates in use, your overlay included, as import prices requests; see [Audit for wasted spend](cli.md#audit-for-wasted-spend). Its default economy model, which `premium_model_trivial_turn` compares premium models with, is `localOffload.baselineModel`. An invalid overlay stops `gh ledger audit` and `get_audit_findings`, while `gh ledger export` warns and shows its findings without that rule or repriced estimates.
+
+`--local-llm` sends a summary of the findings only to `localhost`, an address in `127.0.0.0/8`, or `[::1]`. `localOffload.additionalHosts` decides only how requests to those hosts are priced; it never makes a host a destination for `--local-llm`.
+
+Tool calls are kept for 7 days, so the audit can't see the tool calls of older requests; it says so in its summary.
+
 ## Field reference
 
 Overlay sections:
@@ -332,7 +340,7 @@ Overlay sections:
 | `githubAiCredits.models`, `foundryByok.models` | No | Priced models (see the next table) |
 | `localOffload.models` | No | Local model entries: `{ "id": "...", "aliases": ["..."] }` |
 | `localOffload.baselineModel` | No | A GitHub model id or alias used to estimate savings |
-| `localOffload.additionalHosts` | No | Hosts treated as local |
+| `localOffload.additionalHosts` | No | Hosts treated as local, for pricing only; never a destination for `gh ledger audit --local-llm` |
 | `apiEquivalent.models` | No | API list prices, as priced models (see the next table) |
 | `apiEquivalent.localBaselineModel` | No | An API-equivalent model id or alias that values local requests |
 | `apiEquivalent.description` | No | Text for your own notes |

@@ -202,6 +202,7 @@ Imported rows leave `parent_span_id`, `server_address`, `server_port`, `pull_req
 | `gh ledger agents [--repo <key>] [--since <period>] [--pricing <path>] [--json]` | Spend by agent in every repository, or in one with `--repo` |
 | `gh ledger top-prompts [--repo <key>] [--since <period>] [--limit <n>] [--pricing <path>] [--json]` | The most expensive prompt chains in every repository, or in one with `--repo`; `--limit` is 1 to 100 and defaults to 10 |
 | `gh ledger status --cache ...` | Prompt-cache efficiency; see [Prompt-cache efficiency](#prompt-cache-efficiency) |
+| `gh ledger audit ...` | Signs of wasted AI spend, as ranked review findings; see [Audit for wasted spend](#audit-for-wasted-spend) |
 
 - A repository key is an `owner/repo` slug, a local repository root for a repository whose `origin` has no `owner/repo` path, or `(none)` for spend outside any repository.
 - `--since` takes `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date; the default is `30d`.
@@ -411,6 +412,103 @@ These are the only fields export writes. In the table, `.` is a file's top level
 - Tool calls have a start and no end, so the export shows no duration. A tool call's `failed` is true for an exit code other than 0 or an error status.
 - **Never written:** prompts, responses, system instructions, tool arguments and results, file contents, error messages, working directories, data folders, and remote URLs. The ledger doesn't store any of them, and export reads nothing but the ledger.
 
+## Audit for wasted spend
+
+`gh ledger audit` looks for signs of wasted AI spend: bursts of requests, tool loops, retried failing commands, bloated or growing context, prompt-cache misses, premium models on short requests without tool calls, and prompts near the circuit breaker. Each finding is a review signal with an estimated billed cost, not proof of waste. The audit reads only the metadata the ledger already keeps, all from one read of the ledger, and writes nothing. For a walkthrough, see [Weekly waste review](guide.md#weekly-waste-review).
+
+```text
+gh ledger audit [--repo <key>] [--branch <name>] [--pr <n>] [--since <period>] [--rule <id>]...
+                [--min-severity info|warning|high] [--limit <n>] [--economy-model <id>] [--fail-on warning|high] [--json]
+                [--local-llm <url> --local-llm-model <name> [--local-llm-timeout <seconds>] [--show-llm-payload]]
+```
+
+| Option | Default | Notes |
+|---|---|---|
+| `--repo`, `--branch`, `--pr` | Every repository, branch, and pull request | Each narrows the audit on its own, as with `status --cache`. |
+| `--since` | `7d` | `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date. The audit covers the requests that start from the first day of the period up to now. |
+| `--rule` | Every rule | One rule ID; repeat it for more. |
+| `--min-severity` | `info` | Leave out findings below `warning` or `high`. |
+| `--limit` | `20` | Show at most this many findings, 1 to 200. |
+| `--economy-model` | The rates' `localOffload.baselineModel` | The GitHub AI credits model, by ID or alias, that `premium_model_trivial_turn` compares with. |
+| `--fail-on` | | `warning` or `high`: exit with code 2 when a finding is at or above it. |
+| `--json` | | Write JSON instead of a table. |
+| `--local-llm`, `--local-llm-model`, `--local-llm-timeout`, `--show-llm-payload` | | Ask a local model for suggestions; see [Local model suggestions](#local-model-suggestions). |
+
+### The rules
+
+<!-- audit-rules -->
+| Rule | Finds | Warning | High | Estimated impact |
+|---|---|---|---|---|
+| `turn_velocity` | One agent invocation sending many requests within 5 minutes | 30 requests | 60 requests | The billed cost of the busiest 5 minutes, less the typical (lower median) 5-minute cost of the conversation |
+| `tool_loop` | One agent invocation calling the same tool again and again with the same outcome | 8 calls in a row | 16 calls | The billed cost of the invocation's requests between the first call and the last |
+| `failed_tool_retry` | One agent invocation retrying a failing tool call | 3 failures in a row, always below the breaker's `--churn-failures` | One less than `--churn-failures` | As `tool_loop` |
+| `context_bloat` | A request of at least 50,000 input tokens with at least 200 times as much input as output, or no output | Info only | | None |
+| `context_growth` | One agent invocation's requests to one model whose input grew at least 4 times over 10 or more requests | Info only | | None |
+| `cache_miss_streak` | Requests in a row, of one agent invocation and model, each with at least 20,000 input tokens and less than 10% of them read from the prompt cache | 5 requests | 10 requests | What the uncached input cost above the cached input price |
+| `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
+| `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity without tripping it | Info only | | None |
+<!-- /audit-rules -->
+
+- **One lens.** Estimated impacts are billed USD: GitHub AI credits at $0.01 each, and Foundry BYOK. Repriced impacts use the rates in use, your overlay included. A local request's impact is $0. An impact that would include a request without a billed price is unknown (`-` in the table, `null` in JSON), never $0. Findings can overlap, so their impacts aren't added together, and there's no total.
+- **Agent invocations.** `turn_velocity`, `tool_loop`, `failed_tool_retry`, `context_growth`, and `cache_miss_streak` follow one agent invocation at a time. A live request's invocation is its nearest `invoke_agent` span. An imported Copilot request without an agent name belongs to its prompt's main agent, as does a sub-agent's request that import recorded without a name (import warns about those). Imported requests of named sub-agents and Codex requests have no invocation that the ledger can tell apart, so those rules skip them, and the summary counts them. Another invocation's tool calls never join or end a run. A tool call whose invocation is unknown may belong to any invocation of its trace with the same agent name, so when it starts between two calls of such an invocation, it ends that run or streak, as an unknown outcome would; an imported named sub-agent's tool calls never end the main agent's.
+- **Tool calls.** A tool call belongs to the latest request of its invocation that started before it. gh-ledger keeps tool calls for 7 days, so the tool rules can't see older ones, and older live requests have unknown tool counts: `premium_model_trivial_turn` leaves them out rather than count them as requests without tool calls. An imported request's tool count is its session log's: unknown for every Codex request, for a Copilot request whose `numToolCalls` is missing or invalid, and for a compaction that an earlier build imported; 0 for a compaction, which makes no tool calls. The ledger doesn't record which requests are compactions, so `premium_model_trivial_turn` counts a short one as it counts any request without tool calls. As in export, tool history is the 7 days before the audit, but it starts no earlier than the earliest tool call or agent link the ledger keeps, because the daemon deletes older ones by its own clock; a ledger that keeps none has no tool history, so every request may be missing its tool calls. The summary says the tool history is insufficient exactly when export says the tool calls aren't complete: when requests started before it, imported requests made tool calls whose detail the ledger doesn't keep, or imported requests have no tool-call count.
+- **Cache counters.** A request that reported no cache counters is never a miss; it ends a streak.
+- **Top quarter of output prices.** A model is in it when its first tier's output price is at least the nearest-rank 75th percentile of the first-tier output prices of every GitHub AI credits model in the rates on the request's date, of at least 4 models.
+
+### Output and exit codes
+
+The table lists the findings, most severe first, then by estimated impact; what the audit read and what it couldn't see; and the recommendation for each kind of finding shown. `--json` writes the same report: `filter`, `impactLens` (always `billed`), `ratesVersion`, `economyModel`, `thresholds` (the triggers in use, with the circuit breaker's settings), `rules`, `coverage`, `minSeverity`, `limit`, `findingsTotal`, and the findings shown, each with its `ruleId`, `severity`, `scope`, `windowStart`, `windowEnd`, `metrics` (`name`, `value`, and `unit`), `estimatedImpactUsd`, and `recommendationKey`. Its fields are those of `telemetry/audit-findings.json` in [What export includes](#what-export-includes). Money is an exact decimal number: parse it as a decimal, not a float. The table shows names from the ledger, the options, and the rates without escape sequences or control characters; `--json` keeps them as recorded.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | The audit ran. With `--fail-on`, no finding was at or above it. |
+| 1 | The options or the rates overlay were invalid, or the audit couldn't run. |
+| 2 | With `--fail-on`, a finding of the rules evaluated was at or above it, whether or not `--min-severity` and `--limit` show it. A local model's answer never changes the exit code. |
+
+### Recommendations
+
+<!-- audit-recommendations -->
+| Key | Recommendation |
+|---|---|
+| `turn_velocity` | Check whether the agent was looping: give it a narrower task or a clear stopping point, and let the circuit breaker's credit velocity rule stop runaway bursts. |
+| `tool_loop` | Check why the agent called the same tool again and again with the same outcome, and give it what it needed up front or a clear stopping point. |
+| `failed_tool_retry` | Fix the cause of the failing command, such as a missing dependency or a wrong path, before the agent retries it, because every retry costs another model request. |
+| `context_bloat` | Send less context with each request: attach smaller files and tool results, trim long instructions, or start a new session for a new task. |
+| `context_bloat_zero_output` | Check why the request returned no output, such as a cancelled or failed request: its input was still sent and billed. |
+| `context_growth` | Start a new session or compact the conversation when the context keeps growing, and keep tool results short. |
+| `cache_miss_streak` | Keep the start of each prompt stable, such as instructions, tool definitions, and earlier messages, so the prompt cache can serve it, and avoid switching models in the middle of a task. |
+| `premium_model_trivial_turn` | Consider a cheaper model or a local model for these short requests without tool calls; they're only candidates, because a short answer can still need a strong model. |
+| `velocity_near_breaker` | Check whether this burst of spend was expected; if it wasn't, lower the circuit breaker's credit velocity with gh ledger breaker config so it trips next time. |
+<!-- /audit-recommendations -->
+
+### Local model suggestions
+
+`--local-llm <url> --local-llm-model <name>` sends a summary of the findings shown to a model on this machine, and prints its suggestions after the table, marked as advisory. They're never stored, logged, or written to JSON, MCP results, or exports. Use any OpenAI-compatible server on loopback, such as Ollama (`http://localhost:11434/v1`) or Foundry Local (the endpoint `foundry service status` shows):
+
+```shell
+gh ledger audit --local-llm http://localhost:11434/v1 --local-llm-model llama3.3
+```
+
+- The URL must be `http` or `https` on `localhost`, an address in `127.0.0.0/8`, or `[::1]`, with a port from 1 to 65535 and no user name, password, query, or fragment. Every other host is rejected, including names that resolve to a loopback address, `[::ffff:127.0.0.1]`, and scoped IPv6 addresses. The rates' `localOffload.additionalHosts` doesn't allow any other host: it only decides how requests are priced.
+- gh-ledger never resolves a name. For `localhost` it connects to `127.0.0.1` and sends `Host: localhost`, so an `https` server's certificate must be for `localhost`. It uses no proxy, follows no redirect, keeps no cookies, and sends no credentials. To validate an `https` server's certificate, it uses the system's trusted roots and checks the name, but downloads no issuer certificates and checks no revocation, so nothing leaves this machine: a server that doesn't send its full certificate chain fails with the "couldn't reach" warning.
+- The request is one `POST` to `<url>/chat/completions` with `"temperature": 0`, `"stream": false`, a fixed system prompt, and the summary as the user message. The summary holds only rule IDs, severities, metrics, estimated impacts, recommendation keys, agent, model, tool, and economy model names (without control characters, at most 64 characters), and aliases such as `repo-1` and `branch-1` instead of repositories and branches: never trace, span, or conversation IDs, pull request numbers, paths, commits, or URLs. The whole body is at most 32 KiB; findings that don't fit are left out and counted in `findingsOmitted`, and if even the summary without findings didn't fit, nothing would be sent and a warning would say so.
+- `--show-llm-payload` prints that body instead, and sends nothing. To read the summary: `gh ledger audit --local-llm <url> --local-llm-model <name> --show-llm-payload | jq -r '.messages[1].content | fromjson'`.
+- The answer (`choices[0].message.content`) is shown without escape sequences, control characters, or bidirectional overrides, cut at 16 KiB. When the model doesn't answer within `--local-llm-timeout` seconds (1 to 600, default 60), answers with an error or a redirect, sends more than 256 KiB, or sends no text, a warning on standard error says so, and the audit's output and exit code don't change.
+
+The request's and the summary's fields are fixed:
+
+<!-- audit-payload-allowlist -->
+| Document | Object | Fields |
+|---|---|---|
+| `body` | `.` | `model`, `temperature`, `stream`, `messages` |
+| `body` | `messages[]` | `role`, `content` |
+| `summary` | `.` | `schemaVersion`, `source`, `period`, `windowStart`, `windowEnd`, `impactLens`, `economyModel`, `rules`, `coverage`, `findingsTotal`, `findingsOmitted`, `findings` |
+| `summary` | `coverage` | `spans`, `toolCalls`, `unpricedSpans`, `cacheAbsentSpans`, `cacheLegacyUnknownSpans`, `spansWithoutAgentIdentity`, `toolCallsWithoutAgentIdentity`, `spansWithUnknownToolCount`, `insufficientToolHistory` |
+| `summary` | `findings[]` | `ruleId`, `severity`, `scope`, `windowStart`, `windowEnd`, `metrics`, `estimatedImpactUsd`, `recommendationKey` |
+| `summary` | `findings[].scope` | `repository`, `branch`, `agent`, `model`, `tool`, `toolOutcome` |
+| `summary` | `findings[].metrics[]` | `name`, `value`, `unit` |
+<!-- /audit-payload-allowlist -->
+
 ## MCP server
 
 `gh ledger mcp` runs an MCP server on standard input and output, so Copilot can read the ledger and see the circuit breaker. Register it with Copilot CLI using the gh-ledger binary's path, which for the extension is shown under [Get gh-ledger](#get-gh-ledger). In PowerShell on Windows:
@@ -427,15 +525,16 @@ copilot mcp add ledger -- ~/.local/share/gh/extensions/gh-ledger/gh-ledger mcp
 
 That adds `ledger` to `~/.copilot/mcp-config.json`, which VS Code's Copilot agent harness also reads. The GitHub Copilot app runs the same agent runtime; if it doesn't list the server, add it in the app's MCP settings with the same command. For VS Code's Local agent harness, add the server to `mcp.json` under `servers`, with the binary's path as `"command"` and `["mcp"]` as `"args"`.
 
-The server has five tools. All but `get_cache_efficiency` use the current repository and branch unless you pass `repository` and `branch`:
+The server has six tools. All but `get_cache_efficiency` and `get_audit_findings` use the current repository and branch unless you pass `repository` and `branch`:
 
 - `get_branch_ledger`: the branch's spend, top model, budget, circuit-breaker state, and prompt-cache hit ratio.
 - `get_top_expensive_prompts`: the branch's most expensive prompt chains, with output tokens and failed tool calls; `limit` (1 to 20, default 5) and `orderBy` (`cost`, `outputTokens`, `failedToolCalls`, or `apiEquivalentUsd`, which lists the chains without an API-equivalent price last).
 - `get_agent_breakdown`: the branch's spend and prompt-cache hit ratio by agent.
 - `get_cache_efficiency`: prompt-cache efficiency in the current repository, or in `repository`, like `status --cache`. `by` groups rows by `model` (the default), `branch`, `pr`, or `agent`; `branch` and `pullRequest` keep one branch or pull request; `since` takes the same periods as `--since`; and `limit` (1 to 50, default 10) keeps the rows with the most input.
+- `get_audit_findings`: the findings of `gh ledger audit` in the current repository, or in `repository`, as `audit --json` writes them, then `circuitBreaker` and `warnings`. `branch` and `pullRequest` narrow it; `since` takes the same periods as `--since` and defaults to `7d`; `minSeverity` and `rules` choose findings; and `limit` (1 to 50, default 10) keeps the most severe. It uses the rates in use and never asks a local model.
 - `set_branch_budget`: sets the branch's budget in AI credits (`aiCredits`).
 
-The first four are read-only. `set_branch_budget` changes only the budget, so Copilot asks before running it; in prompt mode, allow it with `--allow-tool 'ledger(set_branch_budget)'`. While the breaker is open for the branch or the session, or the branch is over budget, every result starts with a `WARNING:` line; for `get_cache_efficiency`, the branch is the current one. No tool can reset the breaker.
+All but `set_branch_budget` are read-only. `set_branch_budget` changes only the budget, so Copilot asks before running it; in prompt mode, allow it with `--allow-tool 'ledger(set_branch_budget)'`. While the breaker is open for the branch or the session, or the branch is over budget, every result starts with a `WARNING:` line; for `get_cache_efficiency` and `get_audit_findings`, the branch is the current one. No tool can reset the breaker.
 
 `get_branch_ledger`, `get_top_expensive_prompts`, and `get_agent_breakdown` add `apiEquivalentUsd` (`null` when no request has an API-equivalent price), `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans` after `localSavedUsd`, as the reports do; see [API-equivalent USD](#api-equivalent-usd). They're for comparison: budgets and `billedAiCredits` count only billed spend. No tool takes a file path, so `--pricing` isn't available to Copilot.
 
@@ -450,7 +549,7 @@ See [configuration.md](configuration.md) for pricing, the overlay format, and wh
 
 ## Privacy
 
-CopilotLedger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped. `gh ledger import` keeps only the fields in [What import reads and keeps](#what-import-reads-and-keeps), and never reads prompts, responses, tool arguments or results, or compaction summaries. `gh ledger export` writes only the fields in [What export includes](#what-export-includes), and shows local repository roots only with `--include-local-paths`.
+CopilotLedger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped. `gh ledger import` keeps only the fields in [What import reads and keeps](#what-import-reads-and-keeps), and never reads prompts, responses, tool arguments or results, or compaction summaries. `gh ledger export` writes only the fields in [What export includes](#what-export-includes), and shows local repository roots only with `--include-local-paths`. `gh ledger audit` reads the same metadata; with `--local-llm`, it sends a summary of its findings only to a model on this machine, as [Local model suggestions](#local-model-suggestions) describes, and never stores the answer.
 
 ## Troubleshooting
 
@@ -465,3 +564,5 @@ CopilotLedger stores no prompt or response content, working directories, or remo
 - **Move the data directory.** Set `COPILOT_LEDGER_HOME` before running gh-ledger. The daemon started at sign-in uses it only if your sign-in session sets it too, for example as a Windows user environment variable.
 - **A console window flashes at sign-in.** Windows 11 24H2 and later start gh-ledger without a window; earlier versions show it for about a second.
 - **`gh ledger export` says `Invalid --time-zone value` on Windows.** Windows before Windows 10 version 1903 can't look up IANA time zone IDs. Pass a Windows ID, such as `Eastern Standard Time`, instead.
+- **`gh ledger audit` rejects `--local-llm`.** Only `localhost`, an address in `127.0.0.0/8`, and `[::1]` are allowed, over `http` or `https`. Use the address your local model server listens on, such as `http://127.0.0.1:11434/v1`.
+- **`gh ledger audit` warns that the local model didn't answer.** Start the server, check `--local-llm-model`, or raise `--local-llm-timeout`. An `https` server must send its full certificate chain, because gh-ledger downloads no certificates. The findings and the exit code don't depend on the model.
