@@ -49,6 +49,7 @@ Global rules for every task:
 - [x] Task 10: Re-Import Repairs Billing in Place (CopilotLedger.Storage, docs & tests). Import revision 1 re-reads every log once; imported rows are repriced, and live GitHub rows take the log's reported charge, in the real run and the dry run alike.
 - [x] Task 11: Re-Import Repairs Tool Links in Place (CopilotLedger.Storage, docs & tests). Imported links move to the request that asked for them, or are removed when that request has no imported row, in the real run and the dry run alike.
 - [x] Task 12: Upgrade Guidance and Reference Consistency (docs & tests). Format 7 in the upgrade steps, "run `gh ledger import` once after upgrading", and the reference's billing and repair notes.
+- [ ] Task 14: Review Fix: Import and Upgrade Docs Match the Code (docs & tests). `docs/cli.md`'s "Read, never stored" names both `totalNanoAiu` paths and becomes whole sentences; `docs/configuration.md`'s compaction bullet says "that GitHub billed"; `docs/guide.md`'s repair step follows the daemon-start troubleshooting; `ImportPrivacyTests.IP5` enforces the read list. Listed before Task 13 on purpose: Task 13's check 7 depends on it.
 - [ ] Task 13: Final Verification (no product change). Full build and test gates, money and privacy sweeps, boundary and version checks.
 
 ## Starting point
@@ -829,6 +830,8 @@ private static Task<int> RemoveOwnedLinksAsync(SqliteTransaction, IReadOnlyList<
 
 ## Task 13 specification: Final Verification
 
+**Prerequisite:** Task 14 is checked. If it isn't, stop and implement Task 14 first.
+
 No product change. Run and record each result in the task commit's body (the commit changes only this plan's checkbox).
 
 1. `dotnet build CopilotLedger.slnx` → 0 warnings, 0 errors.
@@ -841,6 +844,83 @@ No product change. Run and record each result in the task commit's body (the com
 8. `docs/configuration.md` describes the charged amount, the list price, rejected charges, and #79's rule as Tasks 2, 5, and 12 implemented them.
 
 **Acceptance:** all eight checks hold. Then stop; the orchestrator opens the pull request.
+
+---
+
+## Review findings (ledger-architect, 2026-11-24, at `c1d2769`)
+
+Reviewed the full diff `3b362d2..c1d2769` (57 files) against Tasks 1–12 and issues #76, #82, #85, #79, #75. `dotnet build CopilotLedger.slnx`: 0 warnings, 0 errors. `dotnet test CopilotLedger.slnx`: 1,878 passed, 0 failed, 0 skipped. Task 13's checks 3–6 already hold (no version, rates, or SDK change; no Sprint 13 file touched; the only `Double` hits are the `OtlpValueKind.Double` enum name and its comment; no new home-directory, process, network, or Docker use in tests).
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| R1 | Medium (blocks Task 13 check 7) | `docs/cli.md` "Read, never stored" doesn't name `data.usage.copilotUsage.totalNanoAiu` or `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, which `CopilotSessionLogSource` reads (`UsagePaths`, `CompactionPaths`). Its Task 7 sentence "`data.compactionAttemptId`, stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `copilotUsage` are present." has no verb. | Task 14, edit 1 and IP5 |
+| R2 | Medium (docs don't match pricing) | `docs/configuration.md` "Imported requests", first bullet, says every Copilot compaction is priced as a GitHub request; since Task 7 a BYOK compaction is `BillingSource.Provider` and priced by its provider. Line 102's paragraph begins with a stray space. | Task 14, edit 2 |
+| R3 | Medium (wrong instructions) | `docs/guide.md`: Task 12 put "Repair what earlier versions imported" between the `daemon-start` sample and "If it says instead that the daemon did not start, …", so "it" now refers to the import, and the guide asks you to import before checking that the daemon started. | Task 14, edit 3 |
+| R4 | Low | `CopilotSessionLogSource.Usage` applies 1.0.115's missing-field rules when the version is `>= MaximumVersion`, not `>= 1.0.115`. Correct today (both are 1.0.115); raising `MaximumVersion` would make 1.0.115 logs fail closed, which `Copilot115Tests.V115_1` would catch. | Deferred (S12-11) |
+| R5 | Low | The store counts surplus imported links with one span ID in one conversation as removed (`ExtraOwnedLinksAsync`); `LedgerSnapshot` doesn't, so a dry run could under-count `toolLinksRemoved`. Earlier imports aren't expected to leave that state (the fallback owner of a tool call is fixed by its log), and no test or observed ledger has it. | Deferred (S12-12) |
+
+No finding in money handling (decimal and integer only; `NanoAiu` decodes IEEE-754 bits with integer arithmetic), migration 7 (DDL exactly as specified; NULL list price for format-6 writers), privacy (only allowlisted paths; `IP_AM1`, `CC9`, and `V115_8` scan the ledger files and output), Sprint 13 boundaries, or the five issues' acceptance criteria.
+
+---
+
+## Task 14 specification: Review Fix: Import and Upgrade Docs Match the Code
+
+No product change. Docs and one test.
+
+**Files**
+
+- `docs/cli.md` (the "**Read, never stored:**" bullet of the import section only)
+- `docs/configuration.md` ("Imported requests" only)
+- `docs/guide.md` (the "Upgrade or uninstall" section only: move one block)
+- `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs` (one new test)
+
+**Edits (exact)**
+
+1. `docs/cli.md`, the line that starts `- **Read, never stored:**`: replace exactly this sentence
+
+   > `` `data.compactionAttemptId`, stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `copilotUsage` are present. ``
+
+   with exactly these two sentences
+
+   > `` `data.usage.copilotUsage.totalNanoAiu` of usage records and `data.compactionTokensUsed.copilotUsage.totalNanoAiu` of compactions, the charge Copilot reports for the request, are kept only as that charge in `spans.cost_usd_pico` and as `spans.charge_source`. `data.compactionAttemptId` of compactions is stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `data.compactionTokensUsed.copilotUsage` are present decides how a compaction is read. ``
+
+   Change nothing else on that line or in `docs/cli.md`.
+2. `docs/configuration.md`, "Imported requests":
+   1. First bullet: `- A Copilot request that GitHub billed, and a Copilot compaction, are priced` → `- A Copilot request that GitHub billed, and a Copilot compaction that GitHub billed, are priced` (rest of the bullet unchanged).
+   2. The paragraph that begins ` A compaction that Copilot billed is recorded even when it failed;` loses its one leading space. Its text is otherwise unchanged.
+3. `docs/guide.md`, "Upgrade or uninstall": cut these seven lines (today right after the `daemon-start` sample's `<!-- /sample -->`, with the blank line after them)
+
+   ````markdown
+   Repair what earlier versions imported:
+
+   ```shell
+   gh ledger import --all
+   ```
+
+   It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs).
+   ````
+
+   and paste them, followed by one blank line, immediately before the line `To remove gh-ledger, undo `install`:` (after the paragraph that ends `See [Which model prices a request](configuration.md#which-model-prices-a-request).`). Change the first pasted line to exactly `Once the daemon is running, repair what earlier versions imported:`. So `If it says instead that the daemon did not start, check your rates overlay:` follows the `daemon-start` sample again. Don't add a `<!-- sample -->` marker; touch no other line of the section.
+
+**Test** (`ImportPrivacyTests`, reading `docs/cli.md` with the class's existing `RepositoryFile` helper):
+
+- **IP5** `IP5_TheReadNeverStoredListNamesEverySprint12Path`: exactly one line of `docs/cli.md` starts with `- **Read, never stored:**`; it contains (ordinal) each of these eight strings: `` `data.usage.copilotUsage.totalNanoAiu` ``, `` `data.compactionTokensUsed.copilotUsage.totalNanoAiu` ``, `` `data.compactionAttemptId` ``, `` `data.usage.apiCallId` ``, `` `data.apiCallId` of `assistant.message` ``, `` `id` and `parentId` of `assistant.message`, `tool.execution_start`, and `tool.execution_complete` ``, `` `data.compactionTokensUsed.provider` ``, and `` `data.compactionTokensUsed.copilotUsage` are present ``; and it doesn't contain `` and `copilotUsage` are present ``.
+
+**Verification**
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+```powershell
+Select-String -Path docs/configuration.md,docs/cli.md,docs/guide.md -Pattern '^ [^ ]'          # no output
+Select-String -Path docs/guide.md -Pattern 'daemon did not start|repair what earlier|^To remove gh-ledger' | ForEach-Object LineNumber
+                                                                                              # three ascending numbers, in that order
+git --no-pager diff --stat HEAD~1 -- src                                                      # empty (run after committing)
+```
+
+**Acceptance:** 0 warnings and 0 errors; 1,879 tests pass (1,878 + IP5), 0 failed, 0 skipped; `UD1`–`UD4`, `GuideSamplesTests`, and `VersionPlacesTests` pass unchanged; the diff touches only the four files above, and in each only the lines named. Commit as `Sprint 12 Task 14: Review Fix: Import and Upgrade Docs Match the Code` with `Tests: 1879 passed` and the `Co-authored-by` trailer, check the Task 14 line, and stop (Task 13 is next).
 
 ---
 
@@ -860,6 +940,7 @@ No product change. Run and record each result in the task commit's body (the com
 | 10 | RR1–RR11 | — |
 | 11 | RL1–RL6 | tool-link store tests whose assertions name `InsertOwnedLinkAsync` behavior, if any |
 | 12 | UD3, UD4 | — |
+| 14 | IP5 | — |
 
 Exact values used across tasks:
 
@@ -880,5 +961,5 @@ After Task 13, the orchestrator pushes `swigerb-sprint-12-billing-import-fidelit
 ## Deferred to later sprints
 
 - **Billing:** using a reported charge for `unknown_model` and `no_rate_for_date` GitHub requests (S12-1); showing list price and discount (Auto, Fusion) in reports, receipts, and MCP (S12-2); a `status` line for rejected charges, and logging them in the daemon's log (S12-3); re-evaluating breaker trips after repricing (S12-4); repricing live rows from `invoke_agent` totals (never; F1).
-- **Import:** 1.0.115 BYOK usage, compaction, and `tool.execution_complete` shapes once observed (S12-5, A2); a parent chain that passes through `hook.*` or `assistant.turn_*` events (S12-6, L2); a stale imported link whose correct owner is out of scope or out of range in this run (S12-7); automatic acceptance of new Copilot versions (S12-8: a documented gate-update procedure stays manual); profiling the duplicate path on large stores (S12-9); live custom-provider spans of the GitHub Copilot app (S12-10).
+- **Import:** 1.0.115 BYOK usage, compaction, and `tool.execution_complete` shapes once observed (S12-5, A2); a parent chain that passes through `hook.*` or `assistant.turn_*` events (S12-6, L2); a stale imported link whose correct owner is out of scope or out of range in this run (S12-7); automatic acceptance of new Copilot versions (S12-8: a documented gate-update procedure stays manual); profiling the duplicate path on large stores (S12-9); live custom-provider spans of the GitHub Copilot app (S12-10); pinning 1.0.115's missing-field rules to a fixed `ProducerVersion(1, 0, 115)` instead of `MaximumVersion` before the next gate bump (S12-11, review R4); counting surplus imported links as removed in the dry run as the store does (S12-12, review R5).
 - Everything Sprint 11 deferred, unchanged (see `.github/plans/archive/sprint-11.md`, "Deferred to later sprints").
