@@ -98,6 +98,41 @@ internal static class AuditCommands
             }
         });
         Option<bool> json = new("--json") { Description = "Write JSON instead of a table." };
+        Option<string?> localLlm = new("--local-llm")
+        {
+            Description = "Ask a local model on this machine for suggestions: an OpenAI-compatible base URL on localhost, 127.0.0.0/8, or [::1].",
+        };
+        localLlm.Validators.Add(result =>
+        {
+            if (!LocalEndpointPolicy.TryValidate(result.GetValueOrDefault<string?>(), out _, out string? error))
+            {
+                result.AddError($"Invalid --local-llm value: {error}");
+            }
+        });
+        Option<string?> localLlmModel = new("--local-llm-model") { Description = "The local model's name, as its server knows it." };
+        localLlmModel.Validators.Add(result =>
+        {
+            string? value = result.GetValueOrDefault<string?>();
+            if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > 128)
+            {
+                result.AddError("--local-llm-model can't be blank or longer than 128 characters.");
+            }
+        });
+        Option<int?> localLlmTimeout = new("--local-llm-timeout")
+        {
+            Description = "Seconds to wait for the local model (1 to 600); default: 60.",
+        };
+        localLlmTimeout.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<int?>() is not (>= 1 and <= 600))
+            {
+                result.AddError("--local-llm-timeout must be from 1 to 600.");
+            }
+        });
+        Option<bool> showLlmPayload = new("--show-llm-payload")
+        {
+            Description = "Print the request --local-llm would send, and send nothing.",
+        };
         command.Add(repository);
         command.Add(branch);
         command.Add(pullRequest);
@@ -108,6 +143,43 @@ internal static class AuditCommands
         command.Add(economyModel);
         command.Add(failOn);
         command.Add(json);
+        command.Add(localLlm);
+        command.Add(localLlmModel);
+        command.Add(localLlmTimeout);
+        command.Add(showLlmPayload);
+        command.Validators.Add(result =>
+        {
+            bool local = result.GetValue(localLlm) is not null;
+            if (local && result.GetValue(localLlmModel) is null)
+            {
+                result.AddError("--local-llm requires --local-llm-model.");
+            }
+
+            if (!local && result.GetValue(localLlmModel) is not null)
+            {
+                result.AddError("--local-llm-model requires --local-llm.");
+            }
+
+            if (!local && result.GetValue(localLlmTimeout) is not null)
+            {
+                result.AddError("--local-llm-timeout requires --local-llm.");
+            }
+
+            if (!local && result.GetValue(showLlmPayload))
+            {
+                result.AddError("--show-llm-payload requires --local-llm.");
+            }
+
+            if (local && result.GetValue(json))
+            {
+                result.AddError("--local-llm can't be used with --json.");
+            }
+
+            if (result.GetValue(showLlmPayload) && result.GetValue(failOn) is not null)
+            {
+                result.AddError("--fail-on can't be used with --show-llm-payload.");
+            }
+        });
         command.SetAction((ParseResult result, CancellationToken cancellationToken) =>
         {
             string[] selected = result.GetValue(rules) ?? [];
@@ -127,6 +199,10 @@ internal static class AuditCommands
                     EconomyModel = result.GetValue(economyModel),
                     FailOn = AuditSeverities.TryParse(result.GetValue(failOn), out AuditSeverity threshold) ? threshold : null,
                     Json = result.GetValue(json),
+                    LocalLlm = LocalEndpointPolicy.TryValidate(result.GetValue(localLlm), out LocalEndpoint? endpoint, out _) ? endpoint : null,
+                    LocalLlmModel = result.GetValue(localLlmModel)?.Trim(),
+                    LocalLlmTimeoutSeconds = result.GetValue(localLlmTimeout) ?? 60,
+                    ShowLlmPayload = result.GetValue(showLlmPayload),
                 },
                 cancellationToken);
         });
@@ -201,6 +277,21 @@ internal static class AuditCommands
             },
             request.MinSeverity,
             request.Limit);
+        byte[]? body = request.LocalLlm is null ? null : AuditLlmPayload.Body(report, request.LocalLlmModel!);
+        if (request.ShowLlmPayload)
+        {
+            if (body is null)
+            {
+                context.Error.WriteLine(AuditLlmPayload.TooLargeWarning);
+            }
+            else
+            {
+                context.Out.Write(Encoding.UTF8.GetString(body) + "\n");
+            }
+
+            return 0;
+        }
+
         if (request.Json)
         {
             context.Out.Write(Encoding.UTF8.GetString(AuditJson.Serialize(report)));
@@ -208,6 +299,31 @@ internal static class AuditCommands
         else
         {
             AuditTable.Write(context.Out, report, context.TimeProvider.LocalTimeZone);
+        }
+
+        if (request.LocalLlm is not null && body is null)
+        {
+            context.Error.WriteLine(AuditLlmPayload.TooLargeWarning);
+        }
+        else if (request.LocalLlm is LocalEndpoint endpoint && body is not null)
+        {
+            LocalLlmAnswer answer = await LocalLlmAdvisor.AskAsync(
+                context.CreateLocalLlmHandler?.Invoke() ?? LocalLlmAdvisor.CreateDefaultHandler(),
+                endpoint,
+                body,
+                request.LocalLlmTimeoutSeconds,
+                cancellationToken);
+            if (answer.Suggestions is not null)
+            {
+                context.Out.WriteLine();
+                context.Out.WriteLine(
+                    $"Local model suggestions ({AdvisoryText.Label(request.LocalLlmModel, 128)}, advisory, not stored)");
+                context.Out.WriteLine(answer.Suggestions);
+            }
+            else
+            {
+                context.Error.WriteLine(answer.Warning);
+            }
         }
 
         return request.FailOn is AuditSeverity failOn && report.Findings.Any(finding => finding.Severity >= failOn) ? 2 : 0;
@@ -226,5 +342,9 @@ internal static class AuditCommands
         public string? EconomyModel { get; init; }
         public AuditSeverity? FailOn { get; init; }
         public required bool Json { get; init; }
+        public LocalEndpoint? LocalLlm { get; init; }
+        public string? LocalLlmModel { get; init; }
+        public required int LocalLlmTimeoutSeconds { get; init; }
+        public required bool ShowLlmPayload { get; init; }
     }
 }

@@ -78,7 +78,8 @@ public static class LocalLlmAdvisor
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return Warn($"the local model at {url} didn't answer within {timeoutSeconds} seconds; no suggestions.");
+            return Warn(
+                $"the local model at {url} didn't answer within {AuditText.Plural(timeoutSeconds, "second", "seconds")}; no suggestions.");
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
