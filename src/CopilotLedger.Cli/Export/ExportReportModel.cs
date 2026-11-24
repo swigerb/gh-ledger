@@ -169,6 +169,8 @@ internal sealed record ExportTimeline
     public required IReadOnlyList<ExportTimelineTool> ToolCalls { get; init; }
     public required IReadOnlyList<UtcBand> NightBands { get; init; }
     public required IReadOnlyList<ExportAxisTick> Ticks { get; init; }
+    public required decimal MinWidth { get; init; }                               // the narrowest view the script zooms to
+    public required int AxisLevel { get; init; }                                  // the finest tick level the axis draws a line for
     public required IReadOnlyList<string> Models { get; init; }                   // the models of colors m0-m6: the model rollup's first 7
     public required bool OtherModels { get; init; }                               // some drawn request has color m7
     public bool IsEmpty => Spans.Count == 0 && ToolCalls.Count == 0;

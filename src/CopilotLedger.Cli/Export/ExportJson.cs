@@ -46,6 +46,8 @@ internal static class ExportJson
                 LedgerFormat.WriteTime(writer, "fromUtc", DateTimeOffset.FromUnixTimeMilliseconds(timeline.FromUnixMs));
                 LedgerFormat.WriteTime(writer, "toUtc", DateTimeOffset.FromUnixTimeMilliseconds(timeline.ToUnixMs));
                 writer.WriteNumber("width", TimelineLayout.Width);
+                writer.WritePropertyName("minWidth");
+                writer.WriteRawValue(Number(timeline.MinWidth));
                 writer.WriteStartArray("ticks");
                 foreach (ExportAxisTick tick in timeline.Ticks)
                 {

@@ -34,6 +34,7 @@
     }
 
     var width = timeline.width;
+    var minWidth = timeline.minWidth;
     var height = Number(plot.getAttribute('height'));
     var ticks = Array.isArray(timeline.ticks) ? timeline.ticks : [];
     var view = { x: 0, w: width };
@@ -49,7 +50,7 @@
     }
 
     function apply() {
-      view.w = clamp(view.w, 0.5, width);
+      view.w = clamp(view.w, minWidth, width);
       view.x = clamp(view.x, 0, width - view.w);
       plot.setAttribute('viewBox', view.x + ' 0 ' + view.w + ' ' + height);
       axis.setAttribute('viewBox', view.x + ' 0 ' + view.w + ' 6');
@@ -100,7 +101,7 @@
 
     function zoom(factor, unit) {
       var ratio = (unit - view.x) / view.w;
-      view.w = clamp(view.w * factor, 0.5, width);
+      view.w = clamp(view.w * factor, minWidth, width);
       view.x = unit - ratio * view.w;
       apply();
     }
@@ -111,7 +112,13 @@
       apply();
     }
 
+    // Ctrl or Command with the wheel zooms, as does a trackpad pinch, which browsers send as a wheel with ctrlKey set. A plain
+    // scroll is left to the page: a timeline of many rows is taller than the window, and would otherwise trap it.
     viewport.addEventListener('wheel', function (event) {
+      if (!(event.ctrlKey || event.metaKey) || event.deltaY === 0) {
+        return;
+      }
+
       event.preventDefault();
       zoom(event.deltaY < 0 ? 1 / 1.25 : 1.25, unitAt(event.clientX));
     }, { passive: false });
@@ -144,7 +151,7 @@
         var distance = Math.max(Math.abs(positions[0] - positions[1]), 1);
         var box = plot.getBoundingClientRect();
         var middle = (positions[0] + positions[1]) / 2;
-        view.w = clamp(pinch.w * pinch.distance / distance, 0.5, width);
+        view.w = clamp(pinch.w * pinch.distance / distance, minWidth, width);
         view.x = pinch.unit - (middle - box.left) / Math.max(box.width, 1) * view.w;
         apply();
       } else if (drag) {

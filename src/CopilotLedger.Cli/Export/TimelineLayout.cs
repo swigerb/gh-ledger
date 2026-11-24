@@ -12,6 +12,9 @@ internal static class TimelineLayout
     private const long MinimumRangeMs = 3_600_000;
     private const long DayMs = 86_400_000;
 
+    // The narrowest bar: SVG draws no rectangle 0 wide, and a request without a duration still shows as its 1-pixel stroke.
+    private const decimal MinimumBarWidth = 0.001m;
+
     public static readonly ExportTimeline Empty = new()
     {
         FromUnixMs = 0,
@@ -21,6 +24,8 @@ internal static class TimelineLayout
         ToolCalls = [],
         NightBands = [],
         Ticks = [],
+        MinWidth = Width,
+        AxisLevel = 0,
         Models = [],
         OtherModels = false,
     };
@@ -130,7 +135,7 @@ internal static class TimelineLayout
                 decimal start = X(span.StartTime.ToUnixTimeMilliseconds());
                 decimal end = X(span.EndTime.ToUnixTimeMilliseconds());
                 int color = span.Model is null ? -1 : colors.IndexOf(span.Model);
-                return new ExportTimelineSpan(span, GroupOf(span.ConversationId).Row, start, Math.Max(end - start, 0m), color < 0 ? 7 : color);
+                return new ExportTimelineSpan(span, GroupOf(span.ConversationId).Row, start, Math.Max(end - start, MinimumBarWidth), color < 0 ? 7 : color);
             }),
         ];
         ExportTimelineTool[] ticks =
@@ -164,6 +169,7 @@ internal static class TimelineLayout
                 ticksByRow[ordered.Count]));
         }
 
+        IReadOnlyList<ExportAxisTick> axis = Ticks(t0, t1, zone, X);
         return new ExportTimeline
         {
             FromUnixMs = t0,
@@ -175,7 +181,9 @@ internal static class TimelineLayout
                 zone,
                 DateTimeOffset.FromUnixTimeMilliseconds(t0),
                 DateTimeOffset.FromUnixTimeMilliseconds(t1)),
-            Ticks = Ticks(t0, t1, zone, X),
+            Ticks = axis,
+            MinWidth = MinWidth(axis),
+            AxisLevel = AxisLevel(t1 - t0),
             Models = colors,
             OtherModels = bars.Any(bar => bar.Color == 7),
         };
@@ -207,37 +215,39 @@ internal static class TimelineLayout
         return [.. days.Where((_, index) => index % every == 0)];
     }
 
-    // Local boundaries from t0 to t1 as ticks: level 0 at midnight, 1 at 06:00, 12:00, and 18:00 within 62 days, 2 at other
-    // whole hours within 7 days, and 3 at other 10-minute marks within a day. A boundary that a transition skips maps to the
-    // instant of the previous one and is dropped.
+    // Local boundaries from t0 to t1 as ticks, in time order: level 0 at midnight, 1 at 06:00, 12:00, and 18:00, 2 at other
+    // whole hours, and 3 at other 10-minute marks, down to Step's. A boundary that a transition skips isn't a tick, except
+    // midnight, whose tick is then the day's first instant; one that a transition repeats is a tick each time it occurs.
     private static IReadOnlyList<ExportAxisTick> Ticks(long t0, long t1, TimeZoneInfo zone, Func<long, decimal> x)
     {
-        long range = t1 - t0;
-        TimeSpan step = range <= DayMs
-            ? TimeSpan.FromMinutes(10)
-            : range <= 7 * DayMs
-                ? TimeSpan.FromHours(1)
-                : range <= 62 * DayMs ? TimeSpan.FromHours(6) : TimeSpan.FromDays(1);
+        TimeSpan step = Step(t1 - t0);
         DateTime end = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t1), zone).DateTime;
-        List<ExportAxisTick> ticks = [];
-        long previous = long.MinValue;
+        List<(long Instant, int Level, string Label)> boundaries = [];
         for (DateTime local = ExportTime.LocalDate(DateTimeOffset.FromUnixTimeMilliseconds(t0), zone).ToDateTime(TimeOnly.MinValue);
              local <= end;
              local += step)
         {
-            long instant = ExportTime.ToUtc(local, zone).ToUnixTimeMilliseconds();
-            if (instant < t0 || instant > t1 || instant == previous)
+            if (zone.IsInvalidTime(local) && local.TimeOfDay != TimeSpan.Zero)
             {
                 continue;
             }
 
-            previous = instant;
             int level = local.TimeOfDay == TimeSpan.Zero ? 0 : local.Minute != 0 ? 3 : local.Hour % 6 == 0 ? 1 : 2;
-            ticks.Add(new ExportAxisTick(
-                x(instant),
-                level,
-                local.ToString(level == 0 ? "yyyy-MM-dd" : "HH:mm", CultureInfo.InvariantCulture)));
+            string label = local.ToString(level == 0 ? "yyyy-MM-dd" : "HH:mm", CultureInfo.InvariantCulture);
+            long[] instants = zone.IsAmbiguousTime(local)
+                ? [.. zone.GetAmbiguousTimeOffsets(local).Select(offset => new DateTimeOffset(local, offset).ToUnixTimeMilliseconds())]
+                : [ExportTime.ToUtc(local, zone).ToUnixTimeMilliseconds()];
+            boundaries.AddRange(instants.Where(instant => instant >= t0 && instant <= t1).Select(instant => (instant, level, label)));
         }
+
+        List<ExportAxisTick> ticks =
+        [
+            .. boundaries
+                .OrderBy(boundary => boundary.Instant)
+                .ThenBy(boundary => boundary.Level)
+                .DistinctBy(boundary => boundary.Instant)
+                .Select(boundary => new ExportAxisTick(x(boundary.Instant), boundary.Level, boundary.Label)),
+        ];
 
         int days = ticks.Count(tick => tick.Level == 0);
         if (days > 2_000)
@@ -248,6 +258,32 @@ internal static class TimelineLayout
         }
 
         return ticks;
+    }
+
+    // The spacing of a range's finest ticks: 10 minutes within 7 days, an hour within 62, 6 hours within 366, else a day. They
+    // are finer than the axis's lines (AxisLevel), so the script has times to label wherever it zooms.
+    private static TimeSpan Step(long range) =>
+        range <= 7 * DayMs ? TimeSpan.FromMinutes(10)
+        : range <= 62 * DayMs ? TimeSpan.FromHours(1)
+        : range <= 366 * DayMs ? TimeSpan.FromHours(6)
+        : TimeSpan.FromDays(1);
+
+    // The finest level the axis draws a line for: 10-minute marks within a day, hours within 7 days, 6-hour marks within 62,
+    // else days.
+    private static int AxisLevel(long range) =>
+        range <= DayMs ? 3 : range <= 7 * DayMs ? 2 : range <= 62 * DayMs ? 1 : 0;
+
+    // The narrowest view the script zooms to: twice the widest gap between two neighboring ticks, or between an end of the
+    // axis and its nearest tick, so every view holds at least two ticks to label; at least half a unit.
+    private static decimal MinWidth(IReadOnlyList<ExportAxisTick> ticks)
+    {
+        decimal widest = ticks.Count == 0 ? Width : Math.Max(ticks[0].X, Width - ticks[^1].X);
+        for (int index = 1; index < ticks.Count; index++)
+        {
+            widest = Math.Max(widest, ticks[index].X - ticks[index - 1].X);
+        }
+
+        return Math.Max(2 * widest, 0.5m);
     }
 
     private static ExportTimelineRow Row(

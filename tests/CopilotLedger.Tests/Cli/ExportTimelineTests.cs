@@ -199,8 +199,8 @@ public sealed partial class ExportTimelineTests
         using JsonDocument data = ExportFiles.LedgerData(html);
 
         JsonElement[] ticks = [.. data.RootElement.GetProperty("timeline").GetProperty("ticks").EnumerateArray()];
-        Assert.Equal(30, ticks.Length);
-        Assert.Equal([0, 1, 2], ticks.Select(tick => tick.GetProperty("level").GetInt32()).Distinct().Order());
+        Assert.Equal(175, ticks.Length);
+        Assert.Equal([0, 1, 2, 3], ticks.Select(tick => tick.GetProperty("level").GetInt32()).Distinct().Order());
         Assert.Equal(("0", 2, "07:00"), (ticks[0].GetProperty("x").GetRawText(), ticks[0].GetProperty("level").GetInt32(), ticks[0].GetProperty("label").GetString()));
         Assert.Equal(
             ["17.241%|12:00", "37.9303%|18:00", "58.6196%|2026-11-21", "79.3088%|06:00", "99.9981%|12:00"],
@@ -259,6 +259,84 @@ public sealed partial class ExportTimelineTests
             ["1|" + Prefix + "1", "2|" + Prefix + "2", "3|" + Prefix + "3"],
             ExportFiles.ById(page, "table-timeline").Element("tbody")!.Elements("tr").Select(row =>
                 string.Join('|', row.Elements("td").Take(2).Select(cell => cell.Value))));
+    }
+
+    // SVG draws no rectangle 0 wide, so a request without a duration, such as a Codex import, or one too short for a
+    // thousandth of a 4-week axis, is a bar 0.001 wide, which its 1-pixel stroke shows.
+    [Fact]
+    public async Task TL11_RequestsWithoutADurationAreStillDrawn()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        ImportedLedgerEntry imported = ImportEntries.Copilot("k1", "conv-i", null);
+        DateTimeOffset start = new(2026, 10, 25, 12, 0, 0, TimeSpan.Zero);
+        await store.RecordImportedAsync([imported with { Span = imported.Span with { StartTime = start, EndTime = start } }], null);
+        LedgerEntry live = Entry("conv-live", 1, new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero));
+        await store.RecordAsync([live with { Span = live.Span with { EndTime = live.Span.StartTime.AddSeconds(1) } }]);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        Assert.Equal(
+            ["0|0.001", "1000|0.001"],
+            Elements(ExportFiles.ById(page, "timeline-plot"), "rect", "span").Select(rect =>
+                $"{(string)rect.Attribute("x")!}|{(string)rect.Attribute("width")!}"));
+    }
+
+    // A time that a transition skips is no tick, so 03:00 isn't shown as 02:00; a time that it repeats is a tick each time.
+    [Theory]
+    [InlineData("2026-03-08T05:00:00Z", "2026-03-08T10:00:00Z", "2026-03-08|01:00|03:00|04:00|05:00|06:00")]
+    [InlineData("2026-11-01T04:00:00Z", "2026-11-01T08:00:00Z", "2026-11-01|01:00|01:00|02:00|03:00")]
+    public async Task TL12_AxisLabelsAreLocalTimesThatExist(string first, string last, string labels)
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        await store.RecordAsync(
+        [
+            Entry("conv-dst", 1, DateTimeOffset.Parse(first, CultureInfo.InvariantCulture)),
+            Entry("conv-dst", 2, DateTimeOffset.Parse(last, CultureInfo.InvariantCulture)),
+        ]);
+
+        XDocument page = await ExportAsync(
+            Harness(temp.Path),
+            temp.Path,
+            "--all-repos", "--since", "all", "--time-zone", "Test/New_York", "--generated-at", "2026-12-01T00:00:00Z");
+
+        Assert.Equal(labels.Split('|'), ExportFiles.ById(page, "timeline-axis-labels").Elements("span").Select(span => span.Value));
+    }
+
+    // Over 4 weeks the ticks go down to hours, though the axis draws lines only every 6 hours, and zooming stops at twice the
+    // widest gap between ticks, so every view has two times to label.
+    [Fact]
+    public async Task TL13_ZoomingStopsWhereTheAxisStillHasTwoLabels()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        await store.RecordAsync(
+        [
+            Entry("conv-month", 1, new DateTimeOffset(2026, 10, 23, 5, 0, 0, TimeSpan.Zero)),
+            Entry("conv-month", 2, new DateTimeOffset(2026, 11, 21, 17, 0, 0, TimeSpan.Zero)),
+        ]);
+
+        await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        string html = ExportFiles.ReadReport(Path.Combine(temp.Path, Report));
+        using JsonDocument data = ExportFiles.LedgerData(html);
+        JsonElement timeline = data.RootElement.GetProperty("timeline");
+        JsonElement[] ticks = [.. timeline.GetProperty("ticks").EnumerateArray()];
+        decimal[] xs = [.. ticks.Select(tick => tick.GetProperty("x").GetDecimal())];
+        decimal widest = new[] { xs[0], 1000m - xs[^1] }.Concat(xs.Zip(xs.Skip(1), (left, right) => right - left)).Max();
+        Assert.Equal(709, ticks.Length);
+        Assert.Equal([0, 1, 2], ticks.Select(tick => tick.GetProperty("level").GetInt32()).Distinct().Order());
+        Assert.Equal(2.826m, timeline.GetProperty("minWidth").GetDecimal());
+        Assert.Equal(2 * widest, timeline.GetProperty("minWidth").GetDecimal());
+        Assert.Equal(
+            ticks.Count(tick => tick.GetProperty("level").GetInt32() <= 1),
+            ExportFiles.ById(ExportFiles.Parse(html), "timeline-axis").Elements("line").Count());
+        Assert.Equal(3, Regex.Matches(html, ", minWidth, width\\);").Count);
+        Assert.DoesNotContain("0.5, width)", html, StringComparison.Ordinal);
     }
 
     private static CliHarness Harness(string root)

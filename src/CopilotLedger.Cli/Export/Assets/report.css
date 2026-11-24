@@ -94,7 +94,7 @@ svg text { fill: var(--fg); font-size: 12px; }
 .timeline-labels { display: block; width: 200px; }
 .timeline-viewport { min-width: 0; }
 .timeline-viewport > svg { display: block; width: 100%; }
-#timeline-plot { touch-action: none; cursor: grab; }
+#timeline-plot { touch-action: pan-y; cursor: grab; }
 #timeline-overview { touch-action: none; cursor: crosshair; margin-top: 4px; }
 .axis-labels { position: relative; height: 18px; font-size: 11px; color: var(--muted); }
 .axis-label { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }

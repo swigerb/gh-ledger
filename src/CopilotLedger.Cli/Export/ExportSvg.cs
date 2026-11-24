@@ -67,7 +67,7 @@ internal static class ExportSvg
         Line(html, "</g>");
         Line(html, "</svg>");
         Line(html, "<svg id=\"timeline-axis\" class=\"timeline-axis\" aria-hidden=\"true\" viewBox=\"0 0 1000 6\" preserveAspectRatio=\"none\" height=\"6\">");
-        foreach (ExportAxisTick tick in timeline.Ticks)
+        foreach (ExportAxisTick tick in timeline.Ticks.Where(tick => tick.Level <= timeline.AxisLevel))
         {
             Line(html, $"<line class=\"tick\" x1=\"{ExportJson.Number(tick.X)}\" y1=\"0\" x2=\"{ExportJson.Number(tick.X)}\" y2=\"6\" />");
         }

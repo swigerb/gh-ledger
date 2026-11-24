@@ -89,6 +89,25 @@ public sealed class ExportAssetTests
         Assert.Equal(["billed", "api", "local"], page.Descendants("figure").Select(figure => (string?)figure.Attribute("data-lens")).OfType<string>());
     }
 
+    [Fact]
+    public async Task EA4_APlainScrollOverTheTimelineScrollsThePage()
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+
+        string html = await ExportAsync(temp.Path);
+
+        XDocument page = ExportFiles.Parse(html);
+        string wheel = html[html.IndexOf("addEventListener('wheel'", StringComparison.Ordinal)..];
+        wheel = wheel[..wheel.IndexOf("}, { passive: false });", StringComparison.Ordinal)];
+        int guard = wheel.IndexOf("if (!(event.ctrlKey || event.metaKey) || event.deltaY === 0) {", StringComparison.Ordinal);
+        Assert.InRange(guard, 0, wheel.IndexOf("return;", StringComparison.Ordinal));
+        Assert.True(wheel.IndexOf("return;", StringComparison.Ordinal) < wheel.IndexOf("event.preventDefault();", StringComparison.Ordinal));
+        Assert.Contains("#timeline-plot { touch-action: pan-y; cursor: grab; }", html, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(html, "touch-action: none"));
+        Assert.StartsWith("Hold Ctrl or Command and scroll, or pinch, to zoom; drag sideways to pan;", ExportFiles.ById(page, "timeline-help").Value);
+    }
+
     private static async Task<string> ExportAsync(string root)
     {
         CliHarness cli = new(root, new FakeCliPlatform(), new ManualTimeProvider(ExportSeeds.GeneratedAt, ManualTimeProvider.UtcMinus5));

@@ -326,7 +326,7 @@ internal static class HtmlReportWriter
                 "<div class=\"timeline-controls\" id=\"timeline-controls\" hidden=\"hidden\"><button type=\"button\" id=\"timeline-reset\">Reset zoom</button>");
             Line(
                 html,
-                "<p id=\"timeline-help\">Scroll or pinch to zoom and drag to pan, or focus the timeline and use the arrow keys, + and -, and 0. Drag across the overview to choose a range.</p></div>");
+                "<p id=\"timeline-help\">Hold Ctrl or Command and scroll, or pinch, to zoom; drag sideways to pan; or focus the timeline and use the arrow keys, + and -, and 0. Drag across the overview to choose a range.</p></div>");
             Line(html, "<figure class=\"chart\" id=\"timeline-figure\">");
             ExportSvg.Timeline(html, timeline, zone);
             html.Append("<figcaption>Requests by session. <ul class=\"legend\">");
