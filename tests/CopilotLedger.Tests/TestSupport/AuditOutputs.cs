@@ -245,6 +245,11 @@ public static class AuditOutputs
               "windowEnd": "2026-11-21T17:00:02.0000000+00:00",
               "metrics": [
                 {
+                  "name": "requests",
+                  "value": 1,
+                  "unit": "requests"
+                },
+                {
                   "name": "inputTokens",
                   "value": 260000,
                   "unit": "tokens"

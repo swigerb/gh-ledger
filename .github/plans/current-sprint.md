@@ -51,7 +51,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
   - DJ7 is a Windows-only real-process test of a `KILL_ON_JOB_CLOSE` job, with and without breakaway.
   - Update `docs/cli.md`: "Install and uninstall", "The daemon", and "Troubleshooting".
 - [x] Task 5: Alerts Name the Command the Way gh-ledger Runs (CopilotLedger.Otlp, CopilotLedger.Cli, docs & tests). #81. Breaker and budget alerts say `Run: gh ledger …` when the daemon runs as the GitHub CLI extension, and `Run: gh-ledger …` otherwise, through the existing `GhExtension.CommandName`. Update the guide's `budget-alert` sample and the "Circuit breaker" section of `docs/cli.md`.
-- [ ] Task 6: `context_bloat` Reports Once per Invocation, and `tool_loop` Is High Only When It Costs Something (CopilotLedger.Core, CopilotLedger.Cli & tests). #80.
+- [x] Task 6: `context_bloat` Reports Once per Invocation, and `tool_loop` Is High Only When It Costs Something (CopilotLedger.Core, CopilotLedger.Cli & tests). #80.
   - `context_bloat` keeps its per-request trigger but reports one finding per agent invocation, model, and output kind, and gains a `requests` metric.
   - `tool_loop` is High only when the run is long enough and its known impact is above $0.
 - [ ] Task 7: Per-Rule Totals in the Audit Table, and the Docs (CopilotLedger.Cli, docs & tests). #80. The text table gains a `By rule:` line. Update the `docs/cli.md` rule table and "Output" paragraph, and the guide's `audit` sample.

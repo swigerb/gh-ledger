@@ -36,10 +36,7 @@ public static class AuditText
             AuditRuleIds.TurnVelocity => $"{Count("requests")} requests in {Count("windowMinutes")} min",
             AuditRuleIds.ToolLoop => $"{Count("calls")} calls in a row, {Outcome(finding.Scope.ToolOutcome)}",
             AuditRuleIds.FailedToolRetry => $"{Count("failures")} failures in a row",
-            AuditRuleIds.ContextBloat => finding.Metrics.Any(metric => metric.Name == "zeroOutput")
-                ? $"{Count("inputTokens")} in, no output"
-                : $"{Count("inputTokens")} in, {Count("outputTokens")} out " +
-                  $"({decimal.Round(Metric(finding, "inputOutputRatio"), 0, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture)}:1)",
+            AuditRuleIds.ContextBloat => ContextBloat(finding),
             AuditRuleIds.ContextGrowth =>
                 $"{Count("firstInputTokens")} to {Count("lastInputTokens")} input in {Count("requests")} requests " +
                 $"({decimal.Round(Metric(finding, "growthRatio"), 1, MidpointRounding.AwayFromZero).ToString("0.0", CultureInfo.InvariantCulture)}x)",
@@ -82,6 +79,20 @@ public static class AuditText
 
     private static decimal Metric(AuditFinding finding, string name) =>
         finding.Metrics.First(metric => metric.Name == name).Value;
+
+    private static string ContextBloat(AuditFinding finding)
+    {
+        AuditMetric? requests = finding.Metrics.FirstOrDefault(metric => metric.Name == "requests");
+        string prefix = requests is not null && requests.Value > 1m
+            ? $"{LedgerFormat.Count((long)requests.Value)} requests, "
+            : "";
+        string body = finding.Metrics.Any(metric => metric.Name == "zeroOutput")
+            ? $"{LedgerFormat.Count((long)Metric(finding, "inputTokens"))} in, no output"
+            : $"{LedgerFormat.Count((long)Metric(finding, "inputTokens"))} in, " +
+              $"{LedgerFormat.Count((long)Metric(finding, "outputTokens"))} out " +
+              $"({decimal.Round(Metric(finding, "inputOutputRatio"), 0, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture)}:1)";
+        return prefix + body;
+    }
 
     private static string Outcome(AuditToolOutcome? outcome) => outcome switch
     {

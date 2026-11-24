@@ -297,10 +297,11 @@ public sealed class LocalLlmTests
         using TempDirectory temp = new();
         SqliteLedgerStore store = await AuditSeeds.CreateAsync(temp.Path);
         AuditSeeds.LiveTrace bloat = new("b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1", "conv-bloat", null);
-        string agent = bloat.Agent(0, AuditSeeds.At("19:00:00"));
         for (int k = 0; k < 150; k++)
         {
-            bloat.Request(1 + k, agent, AuditSeeds.At("19:00:00").AddSeconds(20 * k), "claude-sonnet-5.5", 60_000, 50_000, 100);
+            DateTimeOffset start = AuditSeeds.At("19:00:00").AddSeconds(20 * k);
+            string agent = bloat.Agent(k, start);
+            bloat.Request(1 + k, agent, start, "claude-sonnet-5.5", 60_000, 50_000, 100);
         }
 
         await bloat.RecordAsync(store);
