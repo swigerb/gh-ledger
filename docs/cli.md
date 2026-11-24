@@ -107,8 +107,10 @@ gh ledger import (--repo <path> | --all) [--source copilot|codex]... [--since <p
 
 | Source | Versions read | Not imported |
 |---|---|---|
-| Copilot CLI and the GitHub Copilot app | 1.0.103 to 1.0.114, by `copilotVersion` in the session's first event | Sessions that an earlier version started, which log only session totals, even when a supported version resumed them; sessions of later versions, until gh-ledger supports them; a session's earlier journal files |
+| Copilot CLI and the GitHub Copilot app | 1.0.103 to 1.0.115, by `copilotVersion` in the session's first event | Sessions that an earlier version started, which log only session totals, even when a supported version resumed them; sessions of later versions, until gh-ledger supports them; a session's earlier journal files |
 | Codex | 0.153.0 to 0.171.0, by `cli_version` | Compressed rollouts (`.jsonl.zst`); tool calls, whose outcome Codex doesn't log; and the requests of another thread that a forked rollout copied |
+
+A new Copilot version is read only after gh-ledger has been checked against its logs; until then its sessions are reported as unsupported, and nothing is guessed.
 
 ### Overlap with live spans
 

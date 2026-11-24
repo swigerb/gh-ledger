@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace CopilotLedger.Tests.TestSupport;
 
-// A synthetic Copilot session log (events.jsonl) with the event shapes Copilot 1.0.103 to 1.0.114 write, as the sanitized
+// A synthetic Copilot session log (events.jsonl) with the event shapes Copilot 1.0.103 to 1.0.115 write, as the sanitized
 // captures in the design show them, and made-up values. Content-bearing fields hold Canary, which must never reach the
 // ledger, a diagnostic, or any output.
 public sealed class CopilotSessionLogs
@@ -222,6 +222,68 @@ public sealed class CopilotSessionLogs
         usage["finishReason"] = "tool_calls";
         change?.Invoke(usage);
         return Event("session.usage_record", new JsonObject { ["usage"] = usage }, agentId);
+    }
+
+    public CopilotSessionLogs Usage115(
+        string usageId,
+        string serviceRequestId,
+        long? totalNanoAiu,
+        string model = "claude-haiku-4.5",
+        string? responseModel = null,
+        long input = 1_000,
+        long output = 100,
+        long cacheRead = 0,
+        long cacheWrite = 0,
+        long duration = 1_000,
+        string initiator = "user",
+        string? agentId = null,
+        Action<JsonObject>? change = null)
+    {
+        JsonObject usage = new()
+        {
+            ["model"] = model,
+            ["provider"] = new JsonObject
+            {
+                ["id"] = "copilot",
+                ["kind"] = "copilot",
+                ["label"] = "GitHub Copilot",
+            },
+            ["modelDisplayName"] = model,
+            ["inputTokens"] = input,
+            ["outputTokens"] = output,
+            ["cacheReadTokens"] = cacheRead,
+            ["cacheWriteTokens"] = cacheWrite,
+            ["reasoningTokens"] = 0,
+            ["duration"] = duration,
+            ["initiator"] = initiator,
+            ["serviceRequestId"] = serviceRequestId,
+            ["accounting"] =
+                new JsonObject
+                {
+                    ["sourceSessionId"] = SessionId,
+                    ["sequence"] = _lines.Count,
+                    ["usageId"] = usageId,
+                },
+        };
+        if (responseModel is not null)
+        {
+            usage["responseModel"] = responseModel;
+        }
+
+        if (totalNanoAiu is not null)
+        {
+            usage["copilotUsage"] = new JsonObject
+            {
+                ["totalNanoAiu"] = totalNanoAiu.Value,
+                ["tokenDetails"] = new JsonArray(),
+            };
+        }
+
+        change?.Invoke(usage);
+        return Event(
+            "session.usage_record",
+            new JsonObject { ["usage"] = usage, ["apiCallIdFromUsageId"] = true },
+            agentId);
     }
 
     // A session.compaction_complete with the shape Copilot 1.0.114 writes: its usage in compactionTokensUsed, and content

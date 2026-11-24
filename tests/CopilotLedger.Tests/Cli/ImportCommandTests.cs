@@ -543,7 +543,7 @@ public sealed class ImportCommandTests
             "\nRecorded 1 request: 0.15 AI credits ($0.00), API equivalent $0.00.\nCoverage is incomplete only because 1 session predates Copilot 1.0.103; use --since to leave it out.\n",
             all.Out);
         Assert.Equal(
-            "Warning: Copilot session s-old, line 1 (byte 0): Copilot before 1.0.103 logs only session totals (this session: 1.0.98); 1.0.103 to 1.0.114 are supported; skipped\n",
+            "Warning: Copilot session s-old, line 1 (byte 0): Copilot before 1.0.103 logs only session totals (this session: 1.0.98); 1.0.103 to 1.0.115 are supported; skipped\n",
             all.Error);
         Assert.Equal(0, since.ExitCode);
         Assert.Contains("Skipped, out of scope            1\n", since.Out);

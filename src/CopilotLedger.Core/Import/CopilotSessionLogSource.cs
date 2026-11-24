@@ -6,11 +6,11 @@ using CopilotLedger.Core.Telemetry;
 namespace CopilotLedger.Core.Import;
 
 // The session logs that Copilot CLI and the GitHub Copilot app write, <home>/session-state/<session ID>/events.jsonl, as
-// Copilot 1.0.103 to 1.0.114 write them. Only the allowlisted metadata of known events is read.
+// Copilot 1.0.103 to 1.0.115 write them. Only the allowlisted metadata of known events is read.
 public sealed class CopilotSessionLogSource : ISessionLogSource
 {
     public static readonly ProducerVersion MinimumVersion = new(1, 0, 103);
-    public static readonly ProducerVersion MaximumVersion = new(1, 0, 114);
+    public static readonly ProducerVersion MaximumVersion = new(1, 0, 115);
 
     // The events whose allowlisted metadata is read. Every other type is skipped after its "type".
     private static readonly string[] Types =
@@ -236,6 +236,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         private bool _started;
         private bool _journal;
         private string? _version;
+        private ProducerVersion? _producerVersion;
         private ImportedGitContext? _context;
         private string? _turnKey;
         private long _parsed;
@@ -383,7 +384,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             };
         }
 
-        // The gate: this session's own session.start, from copilot-agent schema version 1 and Copilot 1.0.103 to 1.0.114.
+        // The gate: this session's own session.start, from copilot-agent schema version 1 and Copilot 1.0.103 to 1.0.115.
         // Reading stops at a session.start that fails it, so an older session's later lines are never read.
         private bool Start(JsonFields fields, long number, long offset)
         {
@@ -422,6 +423,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
 
             _started = true;
             _version = text;
+            _producerVersion = version;
             _context = Context(fields);
             return true;
         }
@@ -470,6 +472,22 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             bool? byok = fields.Boolean("data.usage.isByok");
             string? providerType = fields.String("data.usage.providerType");
             string? serviceRequestId = UsageIdentity.NormalizeServiceRequestId(fields.String("data.usage.serviceRequestId"));
+            bool v115 = _producerVersion?.CompareTo(MaximumVersion) >= 0;
+            if (v115 && cacheReported is null && !fields.IsPresent("data.usage.cacheDetailsReported"))
+            {
+                cacheReported = false;
+            }
+
+            if (v115 &&
+                byok is null &&
+                !fields.IsPresent("data.usage.isByok") &&
+                fields.String("data.usage.provider.kind") == "copilot" &&
+                serviceRequestId is not null &&
+                fields.IsPresent("data.usage.copilotUsage.totalNanoAiu"))
+            {
+                byok = false;
+            }
+
             long duration = Duration(fields.Integer("data.usage.duration")) ?? 0;
             string? failed =
                 usageId is null ? "data.usage.accounting.usageId"

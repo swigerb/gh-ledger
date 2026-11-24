@@ -20,7 +20,8 @@ public sealed class CopilotSessionGateTests
             "1.0.106-8.unstable.r43566476370.g869eef3"
         },
         { "copilot-agent", 1, "1.0.114", SessionLogStatus.Read, "1.0.114" },
-        { "copilot-agent", 1, "1.0.115-0", SessionLogStatus.UnsupportedProducerVersion, "1.0.115-0" },
+        { "copilot-agent", 1, "1.0.115", SessionLogStatus.Read, "1.0.115" },
+        { "copilot-agent", 1, "1.0.116", SessionLogStatus.UnsupportedProducerVersion, "1.0.116" },
         { "copilot-agent", 1, "1.0.120", SessionLogStatus.UnsupportedProducerVersion, "1.0.120" },
         { "copilot-agent", 1, "1.0.102", SessionLogStatus.AggregateOnly, "1.0.102" },
         { "copilot-agent", 1, "1.0.98", SessionLogStatus.AggregateOnly, "1.0.98" },
@@ -57,7 +58,7 @@ public sealed class CopilotSessionGateTests
 
     [Theory]
     [MemberData(nameof(Gates))]
-    public async Task CS2_TheGateReadsOnlyCopilot1_0_103To1_0_114(
+    public async Task CS2_TheGateReadsOnlyCopilot1_0_103To1_0_115(
         string producer,
         int schemaVersion,
         string version,
