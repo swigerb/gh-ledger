@@ -71,7 +71,7 @@ Global rules for every task:
 - [x] Task 8: Import Benchmark Report (docs/test-reports). Run the Task 1 script against a Release publish of this branch and record before and after in `docs/test-reports/<date>-import-benchmark.md`.
 - [x] Task 9: Final Verification (no product change). Build and test gates, a `publish` whose `--version` is `0.6.0`, money, privacy, and boundary sweeps, and confirmation that the rates are unchanged.
 - [x] Task 10: LX6 Reaches the Live-Span Lookups (tests only). Review fix R1: LX6 uses service request IDs that import accepts, so its two dry runs reach `UsageAuthority.GatherAsync`, and it asserts what they decided.
-- [ ] Task 11: The Oversized Rule Is Copilot's (docs only). Review fix R2: `docs/cli.md` says that only a Copilot line longer than 8 MiB can count as a skipped event. A longer Codex line is always malformed.
+- [x] Task 11: The Oversized Rule Is Copilot's (docs only). Review fix R2: `docs/cli.md` says that only a Copilot line longer than 8 MiB can count as a skipped event. A longer Codex line is always malformed.
 
 ## Starting point
 
