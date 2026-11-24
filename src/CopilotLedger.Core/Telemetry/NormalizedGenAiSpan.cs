@@ -1,3 +1,5 @@
+using CopilotLedger.Core.Pricing;
+
 namespace CopilotLedger.Core.Telemetry;
 
 public sealed record NormalizedGenAiSpan
@@ -24,4 +26,5 @@ public sealed record NormalizedGenAiSpan
     public CacheCounterState CacheWriteState { get; init; }  // Reported when it carried cache_write (or legacy cache_creation)
     public string? ServiceRequestId { get; init; }           // github.copilot.service_request_id; never stored, only its UsageIdentity
     public BillingSource BillingSource { get; init; }        // Endpoint for live spans
+    public ReportedCharge ReportedCharge { get; init; }      // github.copilot.nano_aiu, or an imported totalNanoAiu; Absent by default
 }

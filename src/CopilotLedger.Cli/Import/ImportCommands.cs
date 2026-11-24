@@ -52,6 +52,10 @@ internal static class ImportCommands
         ("Unsupported usage shapes", report => report.UnsupportedUsageShapes),
         ("Cost out of range", report => report.CostOutOfRange),
         ("Unpriced", report => report.Unpriced),
+        ("Charges rejected", report => report.ReportedChargesRejected),
+        ("Repriced", report => report.Repriced),
+        ("Live repriced", report => report.LiveRepriced),
+        ("Tool links relinked", report => report.ToolLinksRelinked),
     ];
 
     public static Command Create(CliContext context)
@@ -390,6 +394,12 @@ internal static class ImportCommands
             writer.WriteNumber("skippedEvents", source.SkippedEvents);
             writer.WriteNumber("unpriced", source.Unpriced);
             writer.WriteNumber("toolLinksRecorded", source.ToolLinksRecorded);
+            writer.WriteNumber("toolLinksRelinked", source.ToolLinksRelinked);
+            writer.WriteNumber("toolLinksRemoved", source.ToolLinksRemoved);
+            writer.WriteNumber("toolLinksFallback", source.ToolLinksFallback);
+            writer.WriteNumber("repriced", source.Repriced);
+            writer.WriteNumber("liveRepriced", source.LiveRepriced);
+            writer.WriteNumber("reportedChargesRejected", source.ReportedChargesRejected);
             WriteAmounts(writer, Totals.Of([source]));
             writer.WriteEndObject();
         }
@@ -499,6 +509,8 @@ internal static class ImportCommands
                 : $"{LedgerFormat.Count(count)} folders or files couldn't be listed; any logs there weren't imported",
             ImportDiagnosticCode.SupersededUnmatched =>
                 $"{Plural(count, "imported request")} superseded by live spans that can't be matched to {(count == 1 ? "it" : "them")}; requests the daemon missed may not count",
+            ImportDiagnosticCode.ReportedChargeRejected =>
+                $"{Plural(count, "reported charge")} couldn't be used; charged at the rate card",
             _ => throw new ArgumentOutOfRangeException(nameof(diagnostic), diagnostic.Code, null),
         };
     }

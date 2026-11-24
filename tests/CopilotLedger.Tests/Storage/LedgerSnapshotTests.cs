@@ -47,7 +47,7 @@ public sealed class LedgerSnapshotTests
         {
             ImportRecordResult result = await snapshot.EvaluateAsync([ImportEntries.Copilot("usage-1", "session-a", S1)]);
 
-            Assert.Equal(6, snapshot.SchemaVersion);
+            Assert.Equal(7, snapshot.SchemaVersion);
             Assert.Equal([ImportResolution.OverlapSkipped], result.Resolutions);
             Assert.False(File.Exists(path + "-wal"));
             Assert.False(File.Exists(path + "-shm"));
@@ -67,6 +67,10 @@ public sealed class LedgerSnapshotTests
         await store.InitializeAsync();
         await store.RecordAsync([ImportEntries.Live("session-a", S1)]);
         await LedgerSql.ExecuteAsync(path, """
+            ALTER TABLE spans DROP COLUMN list_cost_usd_pico;
+            ALTER TABLE spans DROP COLUMN charge_source;
+            ALTER TABLE import_sessions DROP COLUMN import_revision;
+            DROP INDEX ix_span_links_import_span;
             DROP TABLE import_record_aliases;
             DROP TABLE import_sessions;
             DROP INDEX ux_spans_effective_import_usage;
@@ -146,7 +150,7 @@ public sealed class LedgerSnapshotTests
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => LedgerSnapshot.OpenAsync(path));
 
-        Assert.Equal("Database user_version 99 is newer than the supported version 6.", exception.Message);
+        Assert.Equal("Database user_version 99 is newer than the supported version 7.", exception.Message);
     }
 
     [Fact]

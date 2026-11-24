@@ -1,4 +1,5 @@
 using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Core.Pricing;
 
 namespace CopilotLedger.Core.Import;
 
@@ -8,8 +9,8 @@ public sealed record ImportedUsageRecord
     public required ImportSourceKind Source { get; init; }
     public required ImportedRecordKind Kind { get; init; }
     public required string SessionId { get; init; }          // the conversation: the Copilot session ID; Codex payload.session_id
-    public required string RecordKey { get; init; }          // Copilot usageId, or a compaction's service request ID; Codex
-                                                             // response_id. Never stored.
+    public required string RecordKey { get; init; }          // Copilot usageId, or a compaction's service request ID or
+                                                             // BYOK attempt ID; Codex response_id. Never stored.
     public string? TurnKey { get; init; }                    // the user prompt whose trace the call joins; null: its own trace
     public string? ServiceRequestId { get; init; }           // normalized; GitHub-billed Copilot records only. Never stored.
     public required DateTimeOffset StartTime { get; init; }
@@ -25,6 +26,7 @@ public sealed record ImportedUsageRecord
     public required long CacheWriteInputTokens { get; init; }
     public required CacheCounterState CacheReadState { get; init; }    // Reported or Absent; an Absent counter is 0
     public required CacheCounterState CacheWriteState { get; init; }
+    public ReportedCharge ReportedCharge { get; init; }
     public long? ToolCallCount { get; init; }                // the log's own count; never expanded into calls
     public ImportedGitContext? Git { get; init; }
     public required long LineNumber { get; init; }           // 1-based; for diagnostics only

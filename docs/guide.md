@@ -106,9 +106,13 @@ Malformed lines                  0
 Unsupported usage shapes         0
 Cost out of range                0
 Unpriced                         0
+Charges rejected                 0
+Repriced                         0
+Live repriced                    0
+Tool links relinked              0
 Coverage                  complete
 
-Importing would record 5 requests: 38.70 AI credits ($0.39), API equivalent $0.39.
+Importing would record 5 requests: 42.86 AI credits ($0.43), API equivalent $0.39.
 Dry run: nothing was written.
 ```
 <!-- /sample -->
@@ -140,9 +144,13 @@ Malformed lines                  0
 Unsupported usage shapes         0
 Cost out of range                0
 Unpriced                         0
+Charges rejected                 0
+Repriced                         0
+Live repriced                    0
+Tool links relinked              0
 Coverage                  complete
 
-Recorded 5 requests: 38.70 AI credits ($0.39), API equivalent $0.39.
+Recorded 5 requests: 42.86 AI credits ($0.43), API equivalent $0.39.
 ```
 <!-- /sample -->
 
@@ -855,6 +863,14 @@ Invalid rates overlay: C:\Users\you\.copilot-ledger\rates.json: githubAiCredits.
 <!-- /sample -->
 
 A new release can build in a model name that your overlay also lists, and the daemon doesn't start until the overlay is valid. Here, the overlay prices `claude-haiku-4-5-20251001`, the name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5: gh-ledger 0.4.1 didn't know it, so you may have added it yourself, and gh-ledger 0.5.0 builds it in. Remove the entry that the message names, run `gh ledger rates validate` again, and start the daemon. See [Which model prices a request](configuration.md#which-model-prices-a-request).
+
+Once the daemon is running, repair what earlier versions imported:
+
+```shell
+gh ledger import --all
+```
+
+It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs).
 
 To remove gh-ledger, undo `install`:
 

@@ -19,7 +19,8 @@ public sealed partial class SqliteLedgerStore
             cache_read_state, cache_write_state, pull_request_number,
             api_equivalent_usd_pico, api_equivalent_status, api_rate_card_model_id,
             api_rates_version, api_rate_card_sha256,
-            ingest_source, canonical_usage_id, imported_tool_call_count
+            ingest_source, canonical_usage_id, imported_tool_call_count,
+            list_cost_usd_pico, charge_source
         ) VALUES (
             @trace_id, @span_id, @parent_span_id, @operation_name, @conversation_id,
             @agent_name, @provider_name, @request_model, @response_model, @model_id,
@@ -31,7 +32,8 @@ public sealed partial class SqliteLedgerStore
             @cache_read_state, @cache_write_state, @pull_request_number,
             @api_equivalent_usd_pico, @api_equivalent_status, @api_rate_card_model_id,
             @api_rates_version, @api_rate_card_sha256,
-            @ingest_source, @canonical_usage_id, @imported_tool_call_count
+            @ingest_source, @canonical_usage_id, @imported_tool_call_count,
+            @list_cost_usd_pico, @charge_source
         ) ON CONFLICT (trace_id, span_id) DO NOTHING
         RETURNING id;
         """;
@@ -1924,6 +1926,17 @@ public sealed partial class SqliteLedgerStore
                 "An API-equivalent cost needs its rates, and a model and breakdown exactly when it's Priced.",
                 parameterName);
         }
+
+        PicoUsd.FromUsd(entry.Calculation.UsdCost);
+        PicoUsd.FromUsd(entry.Calculation.ListUsdCost);
+        if (entry.Calculation.ChargeSource == ChargeSource.Reported
+            && (entry.Calculation.Channel != BillingChannel.GitHubAiCredits
+                || entry.Calculation.Status != PricingStatus.Priced))
+        {
+            throw new ArgumentException(
+                "A reported charge applies only to priced GitHub AI-credit requests.",
+                parameterName);
+        }
     }
 
     // A live row's provenance: OTLP, with the usage identity of a GitHub-billed span (UsageIdentity.CanonicalUsageId).
@@ -1953,14 +1966,19 @@ public sealed partial class SqliteLedgerStore
         await using SqliteCommand command = transaction.Connection!.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = InsertSql;
-        AddInsertParameters(command, span, calculation, provenance, recordedAtUnixMs);
+        AddInsertParameters(
+            command,
+            span,
+            UsageAuthority.PricingOf(calculation),
+            provenance,
+            recordedAtUnixMs);
         return await command.ExecuteScalarAsync(cancellationToken) is long id ? id : null;
     }
 
     private static void AddInsertParameters(
         SqliteCommand command,
         NormalizedGenAiSpan span,
-        CreditCalculationResult calculation,
+        UsageAuthority.StoredPricing pricing,
         RowProvenance provenance,
         long recordedAtUnixMs)
     {
@@ -1973,9 +1991,6 @@ public sealed partial class SqliteLedgerStore
         command.Parameters.AddWithValue("@provider_name", OrDbNull(span.ProviderName));
         command.Parameters.AddWithValue("@request_model", OrDbNull(span.RequestModel));
         command.Parameters.AddWithValue("@response_model", OrDbNull(span.ResponseModel));
-        command.Parameters.AddWithValue("@model_id", OrDbNull(calculation.ModelId));
-        command.Parameters.AddWithValue("@rate_card_model_id", OrDbNull(calculation.RateCardModelId));
-        command.Parameters.AddWithValue("@tier_name", OrDbNull(calculation.TierName));
         command.Parameters.AddWithValue("@server_address", OrDbNull(span.ServerAddress));
         command.Parameters.AddWithValue("@server_port", OrDbNull(span.ServerPort));
         command.Parameters.AddWithValue(
@@ -1992,19 +2007,6 @@ public sealed partial class SqliteLedgerStore
         command.Parameters.AddWithValue(
             "@cache_write_input_tokens",
             span.CacheWriteInputTokens);
-        command.Parameters.AddWithValue(
-            "@billing_channel",
-            ToDatabaseString(calculation.Channel));
-        command.Parameters.AddWithValue(
-            "@pricing_status",
-            ToDatabaseString(calculation.Status));
-        command.Parameters.AddWithValue("@rates_version", calculation.RatesVersion);
-        command.Parameters.AddWithValue(
-            "@cost_usd_pico",
-            PicoUsd.FromUsd(calculation.UsdCost));
-        command.Parameters.AddWithValue(
-            "@saved_usd_pico",
-            PicoUsd.FromUsd(calculation.EstimatedCloudSavedUsd));
         command.Parameters.AddWithValue("@repo_root", OrDbNull(provenance.RepositoryRoot));
         command.Parameters.AddWithValue("@repo_slug", OrDbNull(provenance.RepositorySlug));
         command.Parameters.AddWithValue("@branch_name", OrDbNull(provenance.BranchName));
@@ -2017,17 +2019,10 @@ public sealed partial class SqliteLedgerStore
         command.Parameters.AddWithValue(
             "@pull_request_number",
             OrDbNull(provenance.PullRequestNumber));
-        ApiEquivalentCost retail = calculation.ApiEquivalent;
-        command.Parameters.AddWithValue(
-            "@api_equivalent_usd_pico",
-            OrDbNull(retail.UsdCost is decimal retailUsd ? PicoUsd.FromUsd(retailUsd) : (long?)null));
-        command.Parameters.AddWithValue("@api_equivalent_status", ToDatabaseString(retail.Status));
-        command.Parameters.AddWithValue("@api_rate_card_model_id", OrDbNull(retail.RateCardModelId));
-        command.Parameters.AddWithValue("@api_rates_version", retail.RatesVersion);
-        command.Parameters.AddWithValue("@api_rate_card_sha256", retail.RateCardSha256);
         command.Parameters.AddWithValue("@ingest_source", provenance.IngestSource);
         command.Parameters.AddWithValue("@canonical_usage_id", OrDbNull(provenance.CanonicalUsageId));
         command.Parameters.AddWithValue("@imported_tool_call_count", OrDbNull(provenance.ImportedToolCallCount));
+        UsageAuthority.AddPricingParameters(command, pricing);
     }
 
     // A rollup's group key: its SELECT expressions, and their aliases separated by ", ".
@@ -2087,13 +2082,21 @@ public sealed partial class SqliteLedgerStore
             """;
     }
 
-    private static string ToDatabaseString(BillingChannel channel) => channel switch
+    internal static string ToDatabaseString(BillingChannel channel) => channel switch
     {
         BillingChannel.GitHubAiCredits => "github_ai_credits",
         BillingChannel.FoundryByok => "foundry_byok",
         BillingChannel.Local => "local",
         BillingChannel.Unpriced => "unpriced",
         _ => throw new ArgumentOutOfRangeException(nameof(channel), channel, null),
+    };
+
+    internal static string ChargeSourceName(ChargeSource source) => source switch
+    {
+        ChargeSource.RateCard => "rate_card",
+        ChargeSource.Reported => "reported",
+        ChargeSource.Rejected => "rejected",
+        _ => throw new ArgumentOutOfRangeException(nameof(source), source, null),
     };
 
     // The API-equivalent totals of the spans that match where, priced with whatIf instead of their recorded results, by
@@ -2174,7 +2177,7 @@ public sealed partial class SqliteLedgerStore
         _ => throw new InvalidDataException($"Unknown billing channel '{value}'."),
     };
 
-    private static string ToDatabaseString(PricingStatus status) => status switch
+    internal static string ToDatabaseString(PricingStatus status) => status switch
     {
         PricingStatus.Priced => "priced",
         PricingStatus.LocalOffload => "local_offload",
@@ -2196,7 +2199,7 @@ public sealed partial class SqliteLedgerStore
         _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
     };
 
-    private static string ToDatabaseString(ApiEquivalentStatus status) => status switch
+    internal static string ToDatabaseString(ApiEquivalentStatus status) => status switch
     {
         ApiEquivalentStatus.Priced => "priced",
         ApiEquivalentStatus.Unpriced => "unpriced",

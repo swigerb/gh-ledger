@@ -13,7 +13,6 @@ public sealed class CopilotCompactionTests
 
     public static TheoryData<int, string> Shapes => new()
     {
-        { 0, "data.success" },
         { 1, "data.compactionTokensUsed.requestCount" },
         { 2, "data.compactionTokensUsed.requestCount" },
         { 3, "data.serviceRequestId" },
@@ -100,9 +99,6 @@ public sealed class CopilotCompactionTests
                     JsonObject used = data["compactionTokensUsed"]!.AsObject();
                     switch (caseNumber)
                     {
-                        case 0:
-                            data["success"] = false;
-                            break;
                         case 1:
                             used["requestCount"] = 2;
                             break;

@@ -16,5 +16,6 @@ public sealed record ImportSessionCheckpoint
     public required long Duplicates { get; init; }
     public required long OverlapSkipped { get; init; }
     public required long AmbiguousOverlap { get; init; }
+    public int ImportRevision { get; init; } // LedgerImporter.CurrentImportRevision when written; 0 for checkpoints written before format 7
     public DateTimeOffset ImportedAt { get; init; }                  // set by the store when it writes the checkpoint
 }

@@ -20,4 +20,5 @@ public enum ImportDiagnosticCode
     CostOutOfRange,               // set by the importer
     UnreadableStore,              // set by the importer: entries of the store that couldn't be listed or examined
     SupersededUnmatched,          // set by the importer: LogId is the conversation whose imported rows live rows superseded
+    ReportedChargeRejected,       // set by the importer: requests of the log charged at the rate card because their reported charge was rejected
 }

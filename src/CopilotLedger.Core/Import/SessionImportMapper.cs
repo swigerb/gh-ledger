@@ -29,6 +29,7 @@ public static class SessionImportMapper
             CacheWriteInputTokens = record.CacheWriteInputTokens,
             CacheReadState = record.CacheReadState,
             CacheWriteState = record.CacheWriteState,
+            ReportedCharge = record.ReportedCharge,
             ServiceRequestId = record.ServiceRequestId,
             BillingSource = record.BillingSource,
         };
