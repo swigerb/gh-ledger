@@ -1,2856 +1,868 @@
-# Sprint 11: Release Readiness & Version 0.5.0
+# Sprint 12: Billing & Import Fidelity
 
 | | |
 |---|---|
 | Architect | `ledger-architect` |
 | Builder | `ledger-builder` (MAI Code 2) |
-| Target | .NET 10 (`net10.0`), SDK 10.0.x, zero Docker |
-| Plan written | 2026-11-24, against merged Sprint 10 (`main` at `5f4f4c5`) |
-| Requirements | Issue [#72](https://github.com/swigerb/gh-ledger/issues/72), "Release gh-ledger 0.5.0", and the coordinator's scope addition of 2026-11-24: the product's name is gh-ledger |
-| Status | Current sprint. Sprint 10 is complete and archived at `.github/plans/archive/sprint-10.md`, with its amendments. |
+| Target | .NET (`global.json`'s SDK), zero Docker |
+| Plan written | 2026-11-24, against `main` at `69ae671` |
+| Branch | `swigerb-sprint-12-billing-import-fidelity` |
+| Requirements | Issues [#76](https://github.com/swigerb/gh-ledger/issues/76) (reported charge), [#82](https://github.com/swigerb/gh-ledger/issues/82) (BYOK and failed compactions), [#85](https://github.com/swigerb/gh-ledger/issues/85) (tool links by `apiCallId`), [#79](https://github.com/swigerb/gh-ledger/issues/79) (local BYOK by model), [#75](https://github.com/swigerb/gh-ledger/issues/75) (Copilot CLI 1.0.115) |
+| Status | Current sprint. Sprint 11 is complete and archived verbatim at `.github/plans/archive/sprint-11.md`. A parallel Sprint 13 owns the audit, export tool-call queries, daemon start, and alert text (see "Integration boundaries"). |
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–6 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification, runs the verification commands, changes the line to `- [x]`, and stops. Tasks are sequential; each builds on the ones before it, and each is one commit, `Sprint 12 Task N: <Title>`, with the repository's `Co-authored-by` trailer.
 
-This sprint ships as one pull request, and nobody in it tags, releases, or runs the Release workflow: the coordinator does that after the pull request merges. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-10.md` and the product-name wording of `.github/copilot-instructions.md` and the two `.github/agents` files (see "Edits outside the tasks"), then each task as its own commit, `Sprint 11 Task N: <Title>`, on branch `swigerb-sprint-11-release-0-5-0`, and opens one pull request titled exactly "Sprint 11: Release readiness, gh-ledger naming & version 0.5.0", whose body says `Refs #72` and uses no closing keyword. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
+This plan is a **specification**, not copy-exact code. Each task gives the files, the public and internal contracts (names, types, and members are fixed), schemas, numbered algorithms, exact test vectors, acceptance criteria, and verification commands. Implement exactly those contracts. Where a task says "exactly", the value, string, name, or order is fixed. Where it leaves an implementation detail open (a private helper's name, a loop's shape), choose the simplest one that matches the surrounding code's style. Don't add features, options, logging, caching, or fast paths the task doesn't ask for, and don't refactor code outside the task's files.
 
-All of this plan's code, tests, and docs are **copy exactly**. The architect generated every block from the files at `5f4f4c5`, applying the edits in order, so each "replace" block is the text the file holds when you reach it. A script then applied the plan's blocks task by task, in order, to a fresh `git archive 5f4f4c5` with Windows line endings (as a `core.autocrlf=true` checkout has them), and built and tested after each task: 0 warnings, and 1732, 1732, 1733, 1734, and 1735 tests passed. Task 6, which the coordinator's review added, was generated the same way from the files at `9fecd4f` and applied to a fresh `git archive 9fecd4f`: 0 warnings, and 1740 tests passed. Copy each block character for character, including every comment line, blank line, and line of Markdown. Don't add argument checks, logging, or fast paths that the code doesn't show, and don't tidy code or reword docs.
+After **every** task:
 
-Each task's specification lists its files, says what changes and why, and then gives its code under "Code (copy exactly)". The summaries aren't code to write; the code section is. It has two kinds of blocks:
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
 
-- **New file `<path>`:** write the block as the whole file, with `\n` line breaks, one `\n` at the end, and no byte order mark.
-- **Edit k of m in `<path>`, replace: … with: …:** make a file's edits in the order given. Each "replace" block occurs exactly once in the file at the moment you make that edit, and no line before it is the block's first line, so search for it as an exact string. Blocks are shown with `\n` line breaks. The repository stores every text file with `\n` line breaks, but a `core.autocrlf=true` checkout gives them CRLF in the working tree, so match and write each block with the file's own line endings, and keep them; that includes `.github/workflows/ci.yml` (Task 5). None of the 34 files this sprint edits has a byte order mark. A block that holds Markdown fences is fenced with four backticks.
+The build must report 0 warnings and 0 errors (`TreatWarningsAsErrors` is on in `Directory.Build.props`), and the test run must report 0 failed and 0 skipped. Record the passed count in the commit message body (`Tests: <n> passed`). Before Task 1, run the suite once on the unchanged tree and record the baseline (Sprint 11 ended at 1,740; docs-only commits since then add none).
 
-Tests are code too: write every test file and test edit exactly as given, in the order given. Don't drop an assertion because it looks redundant, and don't turn an exact comparison into `Contains` or `StartsWith`. Never normalize the product's output in a test; `CliHarness` already turns `\r\n` into `\n` in `Out` and `Error`. The only `ReplaceLineEndings("\n")` calls this sprint adds are in `VersionPlacesTests`, on repository files, and in `UpgradeDocsTests`, on a constant that spans two lines; the line endings of both depend on the checkout.
+Global rules for every task:
 
-Most of this sprint changes text that tests pin. A string in `src`, the tests that expect it, and the guide sample that shows it change in the same task, so every task builds and passes on its own. No task edits `.github/copilot-instructions.md`, `.github/agents/`, or `.github/plans/` beyond its own checkbox, and no task adds a package or a project item: new test files are picked up by the SDK's globs. No test opens a socket, starts a process, runs `git`, or reads a home directory.
-
-Sprint 10's P28 ended a race in the suite for three tests; its fix at the source is still deferred. If a test fails only with `Dry run stopped: the ledger has a -wal or -shm file without the other, …`, run `dotnet test CopilotLedger.slnx` again; if it fails again, or anything else fails, stop and report it.
-
-If a block doesn't apply, the build fails, or the test count differs from the task's, stop and report it. Don't change the plan's code to make it fit.
-
-The final section, "Final step: the pull request", isn't a builder task. It has no checkbox, and `ledger-builder` never runs it.
+- **Money is `decimal` only.** No `double`, `float`, or `Math.Round` on money; no SQLite `REAL`. The one place a binary double appears is the IEEE-754 bit pattern of an OTLP `doubleValue`, which `NanoAiu.TryFromIeee754Bits` decodes with integer arithmetic only (no `BitConverter.Int64BitsToDouble`, no `double` local).
+- **Hermetic tests.** Temporary directories, `ManualTimeProvider`, `FakeCliPlatform`, `CliHarness`, synthetic `CopilotSessionLogs` fixtures. No test opens a socket, starts a process, runs `git`, uses Docker or the network, or reads `~/.copilot`, `~/.codex`, or `~/.copilot-ledger`.
+- **Privacy.** Nothing new is stored except the columns this plan lists. No prompt, response, reasoning, tool argument, tool result, or summary text is read; the new session-log paths are only those this plan allowlists.
+- **Expected money in tests is written as `decimal` literals** (`0.0473886m`), never computed from the code under test unless the task says "equals the rate-card result of the same span".
+- **No version bump.** `<Version>` stays `0.5.0`, and `src/CopilotLedger.Core/Pricing/rates.json` is unchanged (no rate changed; see "Verified facts").
+- **Stay inside the boundaries** in "Integration boundaries". If a task can't be done without touching a Sprint 13 file other than as this plan allows, stop and report it.
+- If a contract here doesn't compile against the code, a referenced line has moved, or a test vector disagrees with the code's arithmetic, **stop and report it**. Don't redesign.
 
 ## Tasks
 
-- [x] Task 1: The Upgrade Steps Check the Rates Overlay (docs & tests). Release blocker U1: after an upgrade, a rates overlay that lists a model name the new release builds in, such as `claude-haiku-4-5-20251001`, which gh-ledger 0.4.1 users priced through an overlay for #67, is invalid, so the daemon doesn't start. The guide's and the reference's upgrade steps and the troubleshooting list say how to find and remove that entry, and a guide sample that the new GS8 checks shows `rates validate`'s exact message.
-- [x] Task 2: gh-ledger in Command, Install, Status, and Report Text (CopilotLedger.Cli, docs & tests). The root command's description, the OTel environment warnings, `install` and `uninstall`, `status`'s warning about another installed copy, the `mcp` command's description, the `rates init` overlay's note, the Linux sign-in entry's name, and the HTML report's title and heading say gh-ledger, and so do the tests and guide samples that pin them.
-- [x] Task 3: gh-ledger in Alerts, MCP, and Receipts (CopilotLedger.Cli, CopilotLedger.Mcp, CopilotLedger.Otlp, docs & tests). Breaker and budget alerts, the MCP server's instructions, `set_branch_budget`'s description, MCP's `WARNING:` line, the receipt's heading, and `export-pr`'s hint, which names the PR receipt action; and `ProductNameTests.PN1`, which keeps CopilotLedger out of `src` except as an identifier.
-- [x] Task 4: gh-ledger in the README and the Docs (docs & tests). The README describes gh-ledger as a local AI-spend ledger for GitHub Copilot and an independent open-source project, not a GitHub product; the guide, the reference, the configuration page, and the release steps name the product gh-ledger and the action "the PR receipt action"; and `PN2` checks them.
-- [x] Task 5: Version 0.5.0, Where `docs/releasing.md` Lists It (CopilotLedger.Cli, CI, docs & tests). The project version, the fallback, CI's smoke test, the tests and samples that show the version, and the tag example move to 0.5.0; `docs/releasing.md` lists every place; and `VersionPlacesTests.VR1` checks the places that no other test reads.
-- [x] Task 6: The Upgrade Steps Copy the Data Directory First, and Every Version Mention Is Listed (docs & tests). Review fixes C1–C3 from the coordinator's review of PR #73: the guide's and the reference's upgrade steps copy the whole data directory after `gh ledger daemon stop` and before `gh extension upgrade ledger`, say that the format upgrade can't be undone, and put the reference's "Ledger format" before its steps (UD1, UD2); VR1 accepts a prerelease version (VR2), and EP10 no longer depends on the version's length; and step 1 of `docs/releasing.md` lists every mention of the version to leave, which the new VR3 checks.
+- [ ] Task 1: Reported-Charge Primitives (CopilotLedger.Core & tests). `ReportedChargeState`, `ReportedCharge`, and `NanoAiu`: exact validation of a nano-AIU count from a JSON number or an IEEE-754 double's bits, and its exact conversion to USD, AI credits, and pico-USD.
+- [ ] Task 2: The Calculator Bills the Reported Charge, Keeps the List Price, and Prices Local BYOK by Model (CopilotLedger.Core, docs & tests). `NormalizedGenAiSpan.ReportedCharge`; `CreditCalculationResult.ListUsdCost` and `ChargeSource`; the reported charge replaces the rate-card charge for priced GitHub AI-credit requests, and a malformed or inapplicable one is rejected; issue #79's `localOffload.models` rule for provider-billed requests.
+- [ ] Task 3: OTLP Reads `github.copilot.nano_aiu` (CopilotLedger.Otlp & tests). An exact integer from `doubleValue` in JSON and protobuf, and the normalizer's reported charge on inference spans only.
+- [ ] Task 4: Ledger Format 7 (CopilotLedger.Storage & tests). `spans.list_cost_usd_pico`, `spans.charge_source`, `import_sessions.import_revision`, and a partial index on imported tool links; the store writes and validates the new columns.
+- [ ] Task 5: Live Spans Record the Charged Amount (CopilotLedger.Otlp, CopilotLedger.Storage, docs & tests). End to end from OTLP to the ledger; `IngestResult.RejectedReportedCharges`; budgets, the breaker, and receipts use the charged amount.
+- [ ] Task 6: Import Reads `totalNanoAiu`, and the Report Gains Its Sprint 12 Counts (CopilotLedger.Core, CopilotLedger.Storage, CopilotLedger.Cli, docs & tests). Usage records and compactions bill their reported charge; `ReportedChargeRejected` diagnostics; six new report counts, table rows, and JSON fields.
+- [ ] Task 7: Import BYOK and Failed Compactions (CopilotLedger.Core, docs & tests). Issue #82's seven classification rules and `compactionAttemptId` as a BYOK compaction's record key.
+- [ ] Task 8: Link Imported Tool Calls by `apiCallId` (CopilotLedger.Core, CopilotLedger.Storage, docs & tests). `assistant.message` IDs only, parent-chain resolution at the end of the log, the fallback count, and canaries.
+- [ ] Task 9: Import Copilot CLI 1.0.115 Sessions (CopilotLedger.Core, docs & tests). The gate's maximum becomes 1.0.115, with 1.0.115's missing-field rules; 1.0.116 still fails closed.
+- [ ] Task 10: Re-Import Repairs Billing in Place (CopilotLedger.Storage, docs & tests). Import revision 1 re-reads every log once; imported rows are repriced, and live GitHub rows take the log's reported charge, in the real run and the dry run alike.
+- [ ] Task 11: Re-Import Repairs Tool Links in Place (CopilotLedger.Storage, docs & tests). Imported links move to the request that asked for them, or are removed when that request has no imported row, in the real run and the dry run alike.
+- [ ] Task 12: Upgrade Guidance and Reference Consistency (docs & tests). Format 7 in the upgrade steps, "run `gh ledger import` once after upgrading", and the reference's billing and repair notes.
+- [ ] Task 13: Final Verification (no product change). Full build and test gates, money and privacy sweeps, boundary and version checks.
 
 ## Starting point
 
-- Sprint 10 is complete. Its plan and Tasks 1–16 merged in PR #71, squash-merged on 2026-11-24 as `5f4f4c5` from branch head `170ba4c`, which has the same tree, and CI run 45367441313 passed on `5f4f4c5`. At `5f4f4c5`, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors and `dotnet test CopilotLedger.slnx` passes 1731 tests (0 failed, 0 skipped), measured with SDK 10.0.115 in a `git archive 5f4f4c5` with Windows line endings. Sprint 10's plan is archived at `.github/plans/archive/sprint-10.md`, with its amendments; this plan's commit adds it.
-- The latest release is v0.4.1, tagged at `15003fb` and published on 2026-11-22, with six binaries, `rates.json` (`schemaVersion` 1, `ratesVersion` 2026-11-20), and `gh-ledger-checksums.txt`, and no `rates.v2.json`. It reads ledger format 3. `main` migrates ledgers to format 6, and 0.4.1 then refuses them (`Database user_version 6 is newer than the supported version 3.`).
-- Issue #72 is the requirements source. The coordinator's release checks recorded there all passed: live capture from Copilot CLI 1.0.114 over `http://localhost`, billed at exactly the AI credits Copilot reports, which confirms #67; import, export, audit, `status --cache`, the backfill, and all six MCP tools on two real 1.0.114 sessions; the upgrade of a ledger that the released 0.4.1 created, with identical totals, trips, and budgets; and a migration under a running 0.4.1 daemon, with no crash or corruption. The receipt smoke pull request, the Release workflow's dry run, the tag, and the asset checks are the coordinator's, after this pull request merges.
-- The coordinator added the product's name to this sprint on 2026-11-24 (see "The product's name").
-- What this plan depends on, read from the code at `5f4f4c5`:
-  - **The version.** `<Version>` in `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`, with `IncludeSourceRevisionInInformationalVersion` false, is `GhLedgerCli.Version`, which `--version`, `status` (text and JSON), `daemon.json` and the daemon's log, receipts, the export's report, manifest, and generator tag, the MCP server's `serverInfo`, and the `User-Agent` of `rates update` and `audit --local-llm` read. The places that write the version are those that `docs/releasing.md` lists after Task 5; tests that read `GhLedgerCli.Version` or a `<version>` placeholder need no change.
-  - **Guide samples.** `GuideSamplesTests` runs every `<!-- sample: id -->` of `docs/guide.md` in a `GuideWorld` state: GS1 checks the set of IDs; GS2 runs the command samples that `Commands` lists and expects exit code 0 and no standard error; and GS3–GS7 check the samples that `OtherSamples` lists.
-  - **Overlays.** `JsonRateCardCalculator` refuses a merged card in which an overlay's model `id` or alias is a name that a built-in model of the same section already has: `duplicate model identity in the merged rates: <name> (built-in model <id>)` (`JsonRateCardCalculator.cs:593–681`). An overlay model with a built-in `id` replaces that model, aliases included. With such an overlay, `daemon run` logs `Invalid rates overlay: <message>` and exits 1 before it opens the ledger (`DaemonHost.cs:66–74`); `daemon start` then prints `gh-ledger daemon did not start; see <path of daemon.log>.` and exits 1 (`DaemonCommands.cs:115–117`); `rates validate`, `import`, and `audit` write `Invalid rates overlay: <message>` to standard error and exit 1; and `status` shows `Rates:   invalid overlay: <message>` and exits 0.
-  - **The receipt action.** swigerb/copilot-ledger-action v1.0.0, which `receipt.yml` pins, finds a receipt by its marker line and its JSON block, never by its heading (see "Verified facts").
+- `main` at `69ae671` ("Correct and extend the live end-to-end test report (#86)"), after Sprint 11's PR #73 (`ba399c3`) and two documentation commits. Product version `0.5.0` (`src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`). Ledger format 6 (`LedgerMigrations.cs:166–210`). Copilot import window 1.0.103–1.0.114 (`CopilotSessionLogSource.cs:11–12`).
+- What this plan depends on, read from the code at `69ae671`:
+  - **Calculator.** `JsonRateCardCalculator.Calculate` (`JsonRateCardCalculator.cs:122–300`): the provider-billed guard returns `OtherProvider` before local models are consulted (`:152–158`); `localByKnownModel` requires `BillingSource.Endpoint` (`:160–163`). `CreditCalculationResult.UsdCost` is the billed USD and `AiCredits = UsdCost / 0.01m` for GitHub AI credits.
+  - **OTLP.** `OtlpAnyValue` keeps no double (`OtlpModel.cs`); the JSON reader turns `doubleValue` into `Kind = Double` with no value (`OtlpJsonTraceReader.cs:157–160`); the protobuf reader discards field 4's fixed64 (`OtlpProtobufTraceReader.cs:239–243`). The normalizer builds the inference span around `GenAiSpanNormalizer.cs:190–215`.
+  - **Storage.** `cost_usd_pico` is what budgets, the breaker, receipts, export, and audit sum. `InsertSql` (`SqliteLedgerStore.cs:10–36`) and `AddInsertParameters` write a span. Import resolution is `SqliteLedgerStore.Imports.cs` with `UsageAuthority.cs`; the dry run is `LedgerSnapshot.cs`, which must decide exactly as the store does.
+  - **Import.** `CopilotSessionLogSource` reads allowlisted paths only (`PathTree`, `JsonFields`); `JsonFields.Integer` keeps only an `Int64` (`JsonFields.cs:98, 177`). Tool calls are owned by "the latest usage record of the tool's agent" (`ToolStart`, `:556–573`). A compaction must be successful and carry a service request ID (`:477–540`). `LedgerImporter` skips a complete, unchanged log (`LedgerImporter.cs:143–153`) and writes the checkpoint after the last batch (`:282–305`).
+  - **Fixtures.** `tests/CopilotLedger.Tests/TestSupport/CopilotSessionLogs.cs` writes 1.0.114 shapes. Its `Compaction` already writes `compactionTokensUsed.copilotUsage.totalNanoAiu = 11_855_545_000`, and its `Event` gives every line an `id` and a `parentId` equal to the previous line's `id`.
 
 ## Verified facts (retrieved 2026-11-24)
 
-### GitHub's Copilot pricing (retrieved 2026-11-24 at 13:52 UTC)
-
-[Models and pricing for GitHub Copilot](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing), compared with the snapshot of 2026-11-20 in `.github/plans/archive/sprint-2.md` ("GitHub price table") and with `githubAiCredits` in `src/CopilotLedger.Core/Pricing/rates.json` (`ratesVersion` 2026-11-23, `source.retrievedOn` 2026-11-20):
-
-- The page was read twice, from its Markdown rendering and by parsing its HTML. It has 48 text-model rows (OpenAI 20, Anthropic 13, Google 5, Microsoft 3, xAI 6, Moonshot AI 1), an empty "Fine-tuned (GitHub)" table, and one image model, GPT Image 2.5 Flare, which gh-ledger leaves out as before. Every row's tier, threshold, input, cached input, cache write, and output price equals the snapshot's.
-- The promotions are unchanged: Gemini 3.8 Flash "through December 31, 2026"; Gemini 4 Argon and Gemini 4 Carbon "until December 1, 2026", and Carbon then 4.00 / 0.20 / 20.00; MAI Code 2 and MAI Code 2 Flash "until May 17, 2027", then 1.00 / 0.05 / 5.00 and 0.10 / 0.01 / 0.50.
-- `rates.json` has all 34 models at these prices, tiers, and windows; Claude Opus 4.8 (fast mode) stays out because its model id is unknown. In the page's source, `github/docs`, the price table (`data/tables/copilot/models-and-pricing.yml`) last changed on 2026-11-18 and the page on 2026-11-17, both before the snapshot.
-- So GitHub's prices, models, and promotion dates haven't changed since 2026-11-20, and this sprint doesn't touch `rates.json` or its `ratesVersion`. The API-equivalent list prices weren't researched again; Sprint 7 verified them on 2026-11-23.
-
-### The release pipeline (checked 2026-11-24)
-
-- For v0.4.1, the latest release, `gh release download --repo swigerb/gh-ledger --pattern rates.v2.json` exits 1 (`no assets match the file pattern`), and `--pattern rates.json` downloads `rates.json`: `schemaVersion` 1, `ratesVersion` 2026-11-20. So the Release workflow's `rates` job compares `main`'s card (`schemaVersion` 2, 2026-11-23) with that file, finds it changed, and passes, because `2026-11-23` sorts after `2026-11-20`. The job runs in a manual run too.
-- The `release` job requires `schemaVersion` 2, which `main`'s card has, copies the card as `rates.v2.json`, and derives `rates.json` with `jq '.schemaVersion = 1 | del(.apiEquivalent)'`. The same derivation, made with `System.Text.Json`'s `JsonNode`, which keeps every number's text, and saved as `rates.downloaded.json`: a build of v0.4.1 (`15003fb`) says `using the downloaded rates (2026-11-23)`, and its `status` shows `Rates:   2026-11-23 (downloaded)`; `main` ignores the file silently, because it isn't later than its built-in 2026-11-23 rates. PR #68 checked the same with Sprint 7's card, which hasn't changed since.
-- The `build` job requires the tag to be `v` and `<Version>`, and smoke-tests `--version` against `<Version>`. CI's smoke test compares `--version` with a literal, which Task 5 moves to 0.5.0. Nothing else in `release.yml`, `ci.yml`, or `receipt.yml` names the version.
-
-### The receipt action (read 2026-11-24, at `d5eb3423731be103ef50f2720d27d661afc3d426`, v1.0.0)
-
-`receipt.ps1`, read with `gh api` and not changed: it takes the pull request's changed `.md` files under `receipts-directory` (lines 149–157); requires each one's first line to be `<!-- copilot-ledger-receipt -->` (line 102), finds its `` ```json `` block (106–117), and reads `schemaVersion` 1 and `branch` from it (119–131); picks the receipt whose `branch` is the pull request's (167); and updates the first comment by `comment-author` whose body starts with the marker (180–191), or posts one. It never reads the heading, so `### gh-ledger receipt for` works with v1.0.0, and the next push replaces a comment that an earlier receipt left. The action's own messages and README still say "CopilotLedger receipt"; renaming it is deferred.
-
-### GitHub's brand guidelines (retrieved 2026-11-24)
-
-[github.com/logos](https://github.com/logos) redirects to [brand.github.com/foundations/logo](https://brand.github.com/foundations/logo), whose "Don't do these things" says: "Do not use the GitHub name or any GitHub logo in a way that suggests you are GitHub, your offering or project is by GitHub, or that GitHub is endorsing you or your offering or project," and "Do not use GitHub trademarks, logos, or artwork without GitHub's prior written permission."
-
-### OTLP/HTTP retries (retrieved 2026-11-24)
-
-[opentelemetry-proto `docs/specification.md`](https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md), "Retryable Response Codes": 429, 502, 503, and 504 are retryable; an overloaded server should answer 429 or 503 and may send `Retry-After`, which the client should honour.
-
-### Copilot CLI (checked 2026-11-24)
-
-`gh release list --repo github/copilot-cli`: 1.0.115 became the latest release on 2026-11-24 at 13:03 UTC. Its notes change no `gen_ai` span attribute that gh-ledger reads: a custom provider configured only by its base URL is now reported as provider `openai` instead of `github`, and exporters set a random `service.instance.id`. `gh ledger import` reads Copilot 1.0.103 to 1.0.114, so it reports 1.0.115 sessions as unsupported, with exit code 2, until fixtures verify them.
-
-### Measured in scratch copies (2026-11-24)
-
-- **U1's overlay.** With `main`'s build and an overlay whose `githubAiCredits.models[0].id` is `claude-haiku-4-5-20251001`: `daemon start` prints `gh-ledger daemon did not start; see <path of daemon.log>.` and exits 1, and `daemon.log` gets `Invalid rates overlay: <path>: githubAiCredits.models[0].id: duplicate model identity in the merged rates: claude-haiku-4-5-20251001 (built-in model claude-haiku-4.5)`; `rates validate`, `import`, and `audit` print that message and exit 1; `status` shows it on its `Rates:` line and exits 0; `branch` works. The built-in GitHub models of 0.4.1 have no aliases; `main`'s have 11 vendor and dated ids on ten models (`claude-opus-5-5`, `claude-sonnet-5-5`, `gpt-5.4-nano-2026-03-17`, `claude-haiku-4-5`, `claude-haiku-4-5-20251001`, `claude-haiku-5-5`, `claude-sonnet-4-20250514`, `claude-sonnet-4-6`, `claude-opus-4-8`, `claude-fable-5-1`, and `claude-fable-5-2`), any of which an overlay may list.
-- **The backfill's write lock.** `rates backfill-api-equivalent` on a format 6 ledger with 200,000 spans without a result priced them all in 2.15 s, the process start included: well inside the daemon's 5-second busy timeout.
-
-### Copying the data directory (checked 2026-11-24, for Task 6)
-
-- **Where the data is.** The data directory is `COPILOT_LEDGER_HOME` when it's set and not blank, and `~/.copilot-ledger` otherwise (`CliContext.cs:30` and `:37–44`, `LedgerPaths.cs`). It holds the ledger, `ledger.db`, with the overlay, the downloaded rates, and `install.json`. The ledger runs in WAL mode, so `ledger.db-wal` and `ledger.db-shm` sit beside it while it's open and after an unclean exit (`docs/configuration.md`, "Where gh-ledger keeps its files"; `LedgerSnapshot.cs:34–46`).
-- **The copy commands.** Run in scratch on 2026-11-24 with a fake home directory whose `.copilot-ledger` held `ledger.db`, `ledger.db-wal`, `ledger.db-shm`, `rates.json`, and a hidden file: Task 6's two PowerShell lines, in PowerShell 7 and in Windows PowerShell 5.1, each created `<home>\copilot-ledger-backup-<yyyyMMdd-HHmmss>` holding all five files, and with `COPILOT_LEDGER_HOME` set to another directory, with a trailing `\`, they copied that directory instead. Task 6's shell line did the same in Git for Windows' bash, with and without `COPILOT_LEDGER_HOME`. `Copy-Item -Recurse` and `cp -R` make the destination a copy of the source because the timestamped destination doesn't exist yet. The shell line wasn't run on macOS (A3).
-- **Going back.** `gh extension install --help`, gh 2.103.3: "The `--pin` flag may be used to specify a tag or commit for binary and script extensions respectively, the latest version is used otherwise." Release v0.4.1 has the six binaries that a pinned install downloads.
-
-### Assumptions (not verified)
-
-| # | Assumption | If it's wrong |
+| # | Fact | Source |
 |---|---|---|
-| A1 | Copilot CLI 1.0.115 exports the `gen_ai` attributes that 1.0.114 does, as its notes suggest | Its live spans could be priced differently; the coordinator's live check after the release would show it |
-| A2 | A fork of a GitHub Copilot app session doesn't copy the parent's usage records, with their IDs, into the fork's own log (Sprint 8's A11; S8-13) | Importing such a fork could record a call again when the parent's live row of it has no canonical ID: a row that 0.4.1 recorded, or a BYOK span |
-| A3 | On macOS, zsh and BSD `cp` run Task 6's shell line as Git for Windows' bash and GNU `cp` did: `${VAR:-default}` is POSIX, and `cp -R` to a destination that doesn't exist makes it a copy of the source | The copy would fail, or land in another folder, and the user would see it before upgrading |
+| F1 | On a `chat` span, `github.copilot.nano_aiu` is the AI units this turn consumed; 1 AIU = 10⁹ nano AIU. On `invoke_agent` it's the session total, and GitHub says to read the total from the root `invoke_agent` only because summing every span double-counts. gh-ledger sums `chat` spans only and never prices `invoke_agent` (a non-billable operation), so it counts each turn once. | [OpenTelemetry reference for Copilot](https://docs.github.com/en/copilot/reference/enterprise-administrators/opentelemetry-reference) |
+| F2 | `github.copilot.cost` is a multiplier, not money; it isn't read. `github.copilot.request.type = compaction` marks compaction spans (already chat spans). | Same page |
+| F3 | 1 AI credit = $0.01. | [Models and pricing for GitHub Copilot](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) |
+| F4 | Auto model selection bills 10% less than the selected model's rate. | [Changelog 2026-07-01](https://github.blog/changelog/2026-07-01-copilot-cli-auto-model-selection-routes-based-on-task/) |
+| F5 | Copilot Fusion bills 30% less "for a limited time". | [Changelog 2026-10-28](https://github.blog/changelog/2026-10-28-route-and-orchestrate-models-with-github-copilot-fusion/) |
+| F6 | OTLP `AnyValue`: `int_value = 3` (int64, varint), `double_value = 4` (IEEE-754 double, wire type 1 fixed64, little-endian). Proto3's JSON mapping allows a double as a number or a string (`"NaN"`, `"Infinity"`, `"1.5"`). | [opentelemetry-proto `common.proto`](https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/common/v1/common.proto); [Proto3 JSON mapping](https://protobuf.dev/programming-guides/json/) |
+| F7 | `Utf8JsonReader.TryGetDecimal` (probed with the repository's SDK): `47388600`, `47388600.0`, `4.73886E7`, and `4.73886e+7` → 47388600; `1e21` → true; `9007199254740993` → true (so a range check is needed); `-0` → 0; `0.5` → 0.5; `1E-400` → **true with value 0** (underflow); `1e400` → false; `79228162514264337593543950336` → false. | Local probe, 2026-11-24 |
+| F8 | Copilot CLI 1.0.115 has been the latest release since 2026-11-24T13:03:50Z; 1.0.116-0 is a prerelease (2026-11-24T16:43Z). 1.0.115's notes list no session-log schema change. `ProducerVersion` parses `1.0.116-0` as 1.0.116 (fails closed) and `1.0.115-8` as 1.0.115. | `gh release list --repo github/copilot-cli`; release notes of v1.0.115 |
+| F9 | GitHub's published rates are unchanged since 2026-11-20, so `rates.json` doesn't change. | F3's page, compared with `rates.json`'s `ratesVersion` |
 
-## Release triage
+Local session logs (304 logs on the architect's machine) were inspected **for key names, JSON types, enum values, and counts only**, with scripts that printed nothing else:
 
-A release blocker, as #72 defines it, is (1) data loss or corruption; (2) wrong billing or double counting of newly recorded data; (3) a privacy leak, where prompt, response, or tool content is stored, logged, exported, or sent; (4) network access beyond what's documented; (5) a crash, or a failed start, upgrade, or migration; (6) a failure in the release pipeline; or (7) docs that would mislead someone upgrading.
-
-The inputs are every item under "Deferred to later sprints" in `.github/plans/archive/sprint-6.md` through `sprint-10.md`, the risk notes in those archives' "Amendments during implementation", and the risk notes in the bodies of PRs #66 ("Known bias under D1", "Other notes") and #68–#71 ("Older binaries", "Risks", "Upgrade notes", "Risks and notes"). An amendment's or a pull request's note that repeats an archive's item points to that item. A "Carried from Sprint N" bundle is one row: none of its members meets a criterion through what Sprints 6–10 changed, and S6-11 discusses the one that touches upgrading.
-
-**Result: 105 items, and one release blocker, U1 (P68-4): a rates overlay that names a model the new release builds in stops the daemon after an upgrade, and the upgrade steps don't say so. Task 1 fixes it. Every other item is resolved, or isn't a blocker for the reason its row gives.**
-
-### The close calls
-
-**(a) Old daemons after a migration (S6-10.2, S8-10, P69-3).** A 0.4.1 daemon writes with its own `INSERT`, which names only format 1 columns (`SqliteLedgerStore.cs:10–28` at `15003fb`), and checks the format only when it starts. So after a 0.5.0 command migrates the ledger (`LedgerMigrations.cs:118–210`), the rows it writes take the new columns' defaults: `legacy_unknown` cache states, even with nonzero counters; no `agent_span_id` or `pull_request_number`; no `api_*` result; and `ingest_source` `otlp`, `accounting_state` `effective`, and no `canonical_usage_id`, which is the shape migration 6 gives every earlier row, and no constraint or index rejects it. Billing: they're priced by 0.4.1's rates, as before the upgrade, and 0.5.0 never reprices billed columns. Double counting: a write-mode import stops while a daemon whose `daemon.json` lacks `importRules` holds the lock (`ImportCommands.cs:202–219`, D29), and after the restart those rows are unidentified live rows, so `UsageAuthority.Decide` defers their conversations' imports (`UsageAuthority.cs:41–103`, I2 and I3). Reports, budgets, and the breaker count each such row once; the backfill prices its API-equivalent columns like any earlier row; cache ratios count it as unreported (`ReportedSql`, `SqliteLedgerStore.cs:62`); and the audit and `--turns` leave it out of agent sequences. 0.4.1 can't start on a format 6 ledger. The coordinator ran this case: no crash or corruption, import refused until the restart, and the new binary stopped the old daemon. Only a 0.4.1 daemon started from a second, older binary in the instant between an import's D29 check and its migration escapes D29, and the calls it records would have to be ones that the import reads, which takes `--include-active`. Not a blocker.
-
-**(b) Daemon writes on a busy ledger (S7-10, S8-19).** `RecordAsync` writes an OTLP request's spans in one `BEGIN IMMEDIATE` transaction with `ON CONFLICT (trace_id, span_id) DO NOTHING` (`SqliteLedgerStore.cs:10–36` and `172–235`). When it fails, as after SQLite's 5-second busy timeout and Microsoft.Data.Sqlite's retries, the transaction rolls back, and the receiver answers `503 Service Unavailable` with `Retry-After: 5` (`OtlpReceiverApp.cs:166–176`), which OTLP/HTTP defines as retryable; a retried request records each span once. So spans are lost only if the exporter gives up while another write holds the lock, which realistic work doesn't reach: the backfill holds it for its whole run (`SqliteLedgerStore.cs:243–252`) and priced 200,000 spans in 2.15 s, and the coordinator measured Sprint 8's import batches under 2 s for 20,000 records in one session. Copilot requests of a lost batch can still be imported from Copilot's session logs. Not a blocker.
-
-**(c) U1: an overlay that names a new built-in model (P68-4), a release blocker.** 0.5.0's built-in GitHub models gain 11 vendor and dated ids as aliases (Sprint 7 Task 12, #67); 0.4.1's have none. An overlay that lists one of them as a GitHub model's `id` or alias is invalid in 0.5.0 (`JsonRateCardCalculator.cs:593–681`), and that is how a 0.4.1 user following 0.4.1's own fix for `unknown_model` ("Add the model, or an alias for it, under `githubAiCredits.models` or `foundryByok.models`") priced Claude Haiku 4.5 requests from Copilot CLI 1.0.114. After the documented upgrade, `gh ledger daemon start` prints `gh-ledger daemon did not start; see <path of daemon.log>.` and exits 1, the daemon at sign-in fails the same way, and nothing is recorded until the overlay is fixed (`docs/cli.md`: "Copilot's telemetry is lost while no daemon is running"). That's a failed start after an upgrade (criterion 5), for exactly the users who worked around the bug that 0.5.0 fixes. gh-ledger reports it precisely: `daemon.log`, `status`, and `rates validate` name the file, the entry, and the built-in model, and `docs/configuration.md` says to remove such a name. But the upgrade steps in `docs/guide.md` and `docs/cli.md` present stop, upgrade, and start as complete (criterion 7). Changing the merge rule, or starting without the overlay, would change pricing, which a release sprint shouldn't, so Task 1 completes the upgrade steps and the troubleshooting list, and a guide sample pins the message. The release notes should say it too.
-
-**(d) Repository slugs from before Sprint 8's strict rule (S9-10).** gh-ledger 0.4.1's `GitRemoteUrl.GetRepositorySlug` (at `15003fb`) took a URL's path without removing a query or a fragment, so a remote such as `https://github.com/o/r?token=…` gave the slug `o/r?token=…`; a credential in the user info was never part of it. Since Sprint 8, the slug is the path without its query or fragment and must be a strict `owner/repo` (`GitRemoteUrl.cs:31–86`), so 0.5.0 records no new such slug. An old one stays in its rows, and 0.5.0 shows it as stored in reports, MCP results, and exports (`ExportRecords.cs:101`), so an export of every repository could put it in a file that someone shares; the local model's payload never has it (`AuditLlmPayload.cs:124` writes `repo-N`). 0.4.1 already showed such a slug in reports, returned it to Copilot through MCP, and wrote it in receipts, which are committed and posted. Git's own authentication never puts a credential in a query, so the case is rare, and a credential isn't prompt, response, or tool content (criterion 3). Not a blocker; a migration that clears non-strict slugs stays deferred.
-
-**(e) Fork copies beside unidentified live rows (S8-13).** `UsageAuthority.Decide` (`UsageAuthority.cs:41–63`) records an imported call with a canonical ID that no row has unless its conversation has an unidentified live row, and a call without one (a BYOK call) unless its conversation has a live row. A fork of a session is a new conversation, so if the GitHub Copilot app's fork copied the parent's usage records, with their IDs, into the fork's log, the copies of calls that only unidentified live rows recorded would be recorded too: rows that 0.4.1 recorded, or BYOK spans. Copies of imported calls are deduplicated by their record aliases, and copies of calls that 0.5.0's daemon recorded with a service request ID are overlap-skipped. Nothing shows that forks copy usage records (assumption A2), and the coordinator's imports of two real sessions recorded nothing twice. Not a blocker; the census stays deferred, and the pull request names the risk.
-
-**(f) The upgrade docs.** Checked against 0.5.0: format 6 is one-way, and `docs/cli.md` "Ledger format" says so, quotes 0.4.1's error, and says to copy `ledger.db` first; the stop–upgrade–start steps restart the daemon, and `import` refuses an older daemon and says how to restart it (`docs/cli.md` "Import past sessions"); `rates backfill-api-equivalent` is optional, and reports mark what it would fill with `*` and a footnote (`docs/cli.md` "API-equivalent USD"); `rates update` on 0.4.1 downloads the latest release's `rates.json`, which 0.5.0's release derives and 0.4.1 accepts, while 0.5.0 downloads `rates.v2.json` (`docs/configuration.md` "Newer rates between releases", and (g)); a `rates.downloaded.json` that 0.4.1 saved is ignored, silently when it isn't later than 0.5.0's built-in rates, which covers every download of 2026-11-23 or earlier, and with the documented warning when a later `schemaVersion` 1 file is (`RateCardFiles.cs:52–60`); and `gh extension upgrade ledger` is the documented command. The one gap is U1.
-
-**(g) The release pipeline.** As "Verified facts" says: the `rates` job passes for `main`'s card (2026-11-23 after 2026-11-20), the `release` job's derivation gives a card that 0.4.1 accepts and 0.5.0 ignores, and the `build` job's tag and smoke checks read `<Version>`. Only CI's smoke test holds a literal version, which Task 5 moves. Nothing else needs to change for v0.5.0.
-
-### Every item
-
-Criteria are numbered as above; "—" means that none applies, as for a feature.
-
-| ID | Source | Item | Criteria | Classification | Reason |
-|---|---|---|---|---|---|
-| S6-1 | `archive/sprint-6.md:8913` | Migration numbers for #61 and #63 | 5 | Resolved | Sprints 7 and 8 took formats 5 and 6; a 0.4.1 ledger migrates from 3 to 6 in order, as the coordinator checked |
-| S6-2 | `archive/sprint-6.md:8914` | #61: pricing of absent cache counters | 2 | Resolved | Sprint 7 kept the pricing and metrics rules apart |
-| S6-3 | `archive/sprint-6.md:8915` | #63: `cacheDetailsReported` | 2 | Resolved | Sprint 8 (D28) |
-| S6-4 | `archive/sprint-6.md:8916` | #64: the contracts to chart | — | Resolved | Sprint 9 |
-| S6-5 | `archive/sprint-6.md:8917` | #65: cache-miss streaks | — | Resolved | Sprint 10 |
-| S6-6 | `archive/sprint-6.md:8918` | User turns | — | Not a blocker | A feature that needs attributes captured first |
-| S6-7 | `archive/sprint-6.md:8919` | Agent definitions (`gen_ai.agent.id`) | — | Not a blocker | A feature |
-| S6-8 | `archive/sprint-6.md:8920` | MCP tools for turns and bloat | — | Not a blocker | A feature; the CLI has them |
-| S6-9 | `archive/sprint-6.md:8921` | A fresh capture of cache attributes | 2 | Not a blocker | D1's assumption affects cache ratios, not billing; the coordinator's 1.0.114 capture billed exactly Copilot's credits |
-| S6-10.1 | `archive/sprint-6.md:8922`, (1) | `status --cache`'s footnote always mentions `*` | — | Not a blocker | Wording |
-| S6-10.2 | `archive/sprint-6.md:8922`, (2) | A pre-format-4 daemon running after a migration | 1, 2, 5 | Not a blocker | See (a) |
-| S6-10.3 | `archive/sprint-6.md:8922`, (3) | Growth after the period filter, deltas before it | — | Not a blocker | A report's behavior at the period's start |
-| S6-10.4 | `archive/sprint-6.md:8922`, (4) | `GetTurnBreakdownAsync` can't seek its indexes | — | Not a blocker | 29 ms over 160,000 spans |
-| S6-10.5 | `archive/sprint-6.md:8922`, (5) | `get_cache_efficiency`'s description lacks Task 12's caveat | — | Not a blocker | A tool's help text |
-| S6-10.6 | `archive/sprint-6.md:8922`, (6) | Subagent conversation IDs only from their own spans | — | Not a blocker | Attribution in `--turns --conversation` |
-| S6-11 | `archive/sprint-6.md:8923` | Carried from Sprint 5: its 19 items (`archive/sprint-5.md:3945–3963`) | 5, 6, 7 | Not a blocker | Unchanged by Sprints 6–10. The release-pipeline items (lockfiles, build provenance, Arm64 smoke tests) don't make it fail. Upgrading without stopping everything by hand: the stop–upgrade–start steps stay documented, Task 1 completes them, and (a) covers a daemon left running |
-| S7-1 | `archive/sprint-7.md:13037` | #63 guidance | — | Resolved | Sprint 8 |
-| S7-2 | `archive/sprint-7.md:13038` | #64 guidance | — | Resolved | Sprint 9 |
-| S7-3 | `archive/sprint-7.md:13039` | #65 guidance | — | Resolved | Sprint 10, with the billed lens; the API view is S10-2 |
-| S7-4 | `archive/sprint-7.md:13040` | Re-pricing unpriced rows | 2 | Not a blocker | API-equivalent amounts are a comparison, never billed, and unpriced rows are marked |
-| S7-5 | `archive/sprint-7.md:13041` | MAI list prices; GPT-5.6 Sol after 2026-11-30 | 2 | Not a blocker | No vendor publishes them; the API lens only |
-| S7-6 | `archive/sprint-7.md:13042` | Re-billing rows recorded as `unknown_model` | 2 | Not a blocker | Rows that 0.4.1 recorded before the fix, not new data; billed columns are never rewritten, as PR #68 says |
-| S7-7 | `archive/sprint-7.md:13043` | More dated ids | 2 | Not a blocker | The request-model fallback bills them when the request model is known, and a rates update can add aliases |
-| S7-8 | `archive/sprint-7.md:13044` | Longer cache lifetimes | 2 | Not a blocker | The API lens only |
-| S7-9 | `archive/sprint-7.md:13045` | A `--pricing` sample in the guide | 7 | Not a blocker | Not about upgrading; the guide describes the option |
-| S7-10 | `archive/sprint-7.md:13046` | The backfill: discoverability, wording, and write lock | 1, 5, 7 | Not a blocker | See (b); unpriced rows are marked `*` with a footnote, and the docs name the command |
-| S7-11 | `archive/sprint-7.md:13047` | What `api_rate_card_sha256` covers | 2 | Not a blocker | The provenance of a comparison |
-| S7-12 | `archive/sprint-7.md:13048` | What-if fidelity | 2 | Not a blocker | Documented since Sprint 7 Task 14; changes no billed amount |
-| S7-13 | `archive/sprint-7.md:13049` | Carried from Sprint 6 | — | Not a blocker | The S6 rows |
-| S8-1 | `archive/sprint-8.md:17058` | A Claude Code adapter | — | Not a blocker | A feature; `--source claude` is refused |
-| S8-2 | `archive/sprint-8.md:17059` | Copilot BYOK through local OpenAI-compatible servers | 2 | Not a blocker | Imported as `other_provider`: unpriced, never mispriced, as documented |
-| S8-3 | `archive/sprint-8.md:17060` | Wider version windows | 2, 5 | Not a blocker | Later versions fail closed: unsupported, exit code 2, never a wrong charge. Copilot CLI 1.0.115 became the latest release today (Risks) |
-| S8-4 | `archive/sprint-8.md:17061` | Compactions of more than one request; Codex `.jsonl.zst` and tool calls | 2 | Not a blocker | Unsupported shapes, skipped and reported |
-| S8-5 | `archive/sprint-8.md:17062` | VS Code and JetBrains stores | — | Not a blocker | A feature |
-| S8-6 | `archive/sprint-8.md:17063` | Re-scanning and incremental parsing | — | Not a blocker | A feature |
-| S8-7 | `archive/sprint-8.md:17064` | Agent-invocation grouping for imported spans | — | Not a blocker | Reports show `n/a`, as documented |
-| S8-8 | `archive/sprint-8.md:17065` | Coverage notes in reports | — | Not a blocker | A feature; import and export report coverage |
-| S8-9 | `archive/sprint-8.md:17066` | #64 and #65 guidance | — | Resolved | Sprints 9 and 10 |
-| S8-10 | `archive/sprint-8.md:17067` | Old daemons | 1, 2, 5 | Not a blocker | See (a) |
-| S8-11 | `archive/sprint-8.md:17068` | Unmatched supersession keeps coverage incomplete | — | Not a blocker | Reporting; such rows never count again |
-| S8-12 | `archive/sprint-8.md:17069` | Carried from Sprint 7 | — | Not a blocker | The S7 rows |
-| S8-13 | `archive/sprint-8.md:17070` | Fork copies beside unidentified live rows | 2 | Not a blocker | See (e); the premise is unverified (A2) |
-| S8-14 | `archive/sprint-8.md:17071` | Matching superseded rows later | — | Not a blocker | The accuracy of a coverage count |
-| S8-15 | `archive/sprint-8.md:17072` | Messages of unexpected exceptions | 3 | Not a blocker | Only gh-ledger's own refusals throw `InvalidOperationException`, and their messages hold no content |
-| S8-16 | `archive/sprint-8.md:17073` | Producer versions in warnings | 3 | Not a blocker | A validated version string, never content |
-| S8-17 | `archive/sprint-8.md:17074` | A dry run beside a running daemon | 1 | Not a blocker | It opens the ledger read-only; the review found all three files unchanged |
-| S8-18 | `archive/sprint-8.md:17075` | The cost of the unchanged check | — | Not a blocker | Performance |
-| S8-19 | `archive/sprint-8.md:17076` | Large single sessions import in quadratic time | 1, 5 | Not a blocker | See (b) |
-| S9-1 | `archive/sprint-9.md:14936` | A hash-based Content Security Policy | 3, 4 | Not a blocker | `default-src 'none'` loads nothing, and output encoding is the XSS defense |
-| S9-2 | `archive/sprint-9.md:14937` | The audit findings section | — | Resolved | Sprint 10 |
-| S9-3 | `archive/sprint-9.md:14938` | Coverage notes in reports, receipts, and MCP | — | Not a blocker | A feature |
-| S9-4 | `archive/sprint-9.md:14939` | IANA IDs on Windows 10 1703–1809 | 5 | Not a blocker | A documented error for one option; Windows IDs work |
-| S9-5 | `archive/sprint-9.md:14940` | Every prompt chain, night hours, PDF or PNG | — | Not a blocker | Features |
-| S9-6 | `archive/sprint-9.md:14941` | The ZIP container's bytes across operating systems | — | Not a blocker | Documented; the entries are identical |
-| S9-7 | `archive/sprint-9.md:14942` | Failed tool calls share the sixth model's color | — | Not a blocker | Legibility |
-| S9-8 | `archive/sprint-9.md:14943` | Same-named local repositories | — | Not a blocker | Display |
-| S9-9 | `archive/sprint-9.md:14944` | A record of the daemon's deletions | — | Not a blocker | The precision of tool history; needs a schema change |
-| S9-10 | `archive/sprint-9.md:14945` | Repository slugs recorded before Sprint 8's strict rule | 3 | Not a blocker | See (d) |
-| S9-11 | `archive/sprint-9.md:14946` | Axis lines at every zoom | — | Not a blocker | Cosmetic |
-| S9-12 | `archive/sprint-9.md:14947` | A crash mid-swap leaves only `<zip>.<pid>.bak` | 1 | Not a blocker | The earlier ZIP survives as the `.bak`, and only a killed process gets there |
-| S9-13 | `archive/sprint-9.md:14948` | Requests at the very ends of the axis | — | Not a blocker | Cosmetic |
-| S10-1 | `archive/sprint-10.md:11856` | Threshold options | — | Not a blocker | A feature |
-| S10-2 | `archive/sprint-10.md:11857` | An API-equivalent view of impacts | — | Not a blocker | A feature |
-| S10-3 | `archive/sprint-10.md:11858` | Sanitizing ledger strings in the other reports' tables | 3 | Not a blocker | Names, not content, printed as 0.4.1 printed them |
-| S10-4 | `archive/sprint-10.md:11859` | Streaming answers | — | Not a blocker | A feature |
-| S10-5 | `archive/sprint-10.md:11860` | Tool sequences older than 7 days | — | Not a blocker | A feature |
-| S10-6 | `archive/sprint-10.md:11861` | Import diagnostics per trace (A2 of Sprint 10) | — | Not a blocker | The attribution of an audit heuristic; import warns |
-| S10-7 | `archive/sprint-10.md:11862` | Compactions in the ledger (P29) | — | Not a blocker | An audit heuristic |
-| S10-8 | `archive/sprint-10.md:11863` | A sortable findings table | — | Not a blocker | A feature |
-| S10-9 | `archive/sprint-10.md:11864` | The suite's pool-clearing race | 6 | Not a blocker | P28 fixed the three tests that hit it, a CI rerun clears it, and the Release workflow runs no tests |
-| P66-1 | PR #66, "Known bias under D1" | Hit ratios too high for providers that never report cache writes | — | Not a blocker | A documented metric bias; billing is unaffected |
-| P66-2 | PR #66, "Other notes" 1 | Pull requests only from `refs/pull/<n>/head` | — | Not a blocker | A documented attribution limit |
-| P66-3 | PR #66, "Other notes" 2 | A turn is one request | — | Not a blocker | S6-6 |
-| P66-4 | PR #66, "Other notes" 3 | The review's six follow-ups | — | Not a blocker | S6-10.1–S6-10.6 |
-| P68-1 | PR #68, "Older binaries" | 0.4.1 refuses a `schemaVersion` 2 card and accepts the derived `rates.json` | 6 | Not a blocker | Checked again today with a build of 0.4.1 and the workflow's derivation; see (g) |
-| P68-2 | PR #68, "Risks" 1 | No downgrade after the new daemon runs | 5, 7 | Not a blocker | `docs/cli.md` "Ledger format" says so and how to keep a copy; 0.4.1 refuses the ledger with a clear message |
-| P68-3 | PR #68, "Risks" 2 | Older spans unpriced in the API lens until the backfill | 7 | Not a blocker | Marked `*` with a footnote; the docs name the backfill |
-| P68-4 | PR #68, "Risks" 3 | An overlay that lists a new built-in alias fails with `duplicate model identity` | 5, 7 | **Blocker U1** | See (c); Task 1 |
-| P68-5 | PR #68, "Risks" 4 | `unknown_model` rows keep 0 AI credits | 2 | Not a blocker | S7-6 |
-| P68-6 | PR #68, "Risks" 5 | The Release workflow's version 2 steps run only on a tag, and the first release needs the later `ratesVersion` | 6 | Not a blocker | See (g) |
-| P68-7 | PR #68, "Risks" 6 | MAI models and local requests unpriced in the API lens | — | Not a blocker | Documented; a comparison |
-| P69-1 | PR #69, "Upgrade notes" 1 | Earlier versions can't open format 6 | 5, 7 | Not a blocker | P68-2 |
-| P69-2 | PR #69, "Upgrade notes" 2; `archive/sprint-8.md` amendment 3 | Migration 6 was edited within Sprint 8 | 5 | Not a blocker | Only unreleased builds of Sprint 8's Tasks 2–13 wrote the earlier format 6; no release or `main` build did |
-| P69-3 | PR #69, "Upgrade notes" 3 | Restart the daemon after upgrading | 2, 7 | Not a blocker | The documented steps restart it, and `import` refuses an older daemon and says how; see (a) |
-| P69-4 | PR #69, "Upgrade notes" 4 and "Risks and notes" 1 | Supported versions; later ones fail closed | 2 | Not a blocker | S8-3 |
-| P69-5 | PR #69, "Risks and notes" 2 | `github.copilot.service_request_id` is verified by capture only | 2 | Not a blocker | A span without it is unidentified, so its session's imports are deferred, never counted twice; the coordinator's 1.0.114 capture had it |
-| P69-6 | PR #69, "Risks and notes" 3 | The Unix branch of the denied-folder tests | — | Resolved | CI run 45304384564 passed |
-| P69-7 | PR #69, "Risks and notes" 4 | Strict `owner/repo` slugs | 3 | Resolved | A hardening; older slugs are S9-10 |
-| P69-8 | PR #69, "Risks and notes" 5 | Large single sessions | 1, 5 | Not a blocker | S8-19 |
-| P69-9 | PR #69, "Risks and notes" 6 | A year-0001 timestamp | 5 | Resolved | Sprint 8 Task 13 |
-| P70-1 | PR #70, "Risks and notes" 1 | IANA zones on Linux | 5 | Resolved | CI run 45341892607 passed |
-| P70-2 | PR #70, "Risks and notes" 2 | Windows before 10 1903 has no `icu.dll` | 5 | Not a blocker | S9-4 |
-| P70-3 | PR #70, "Risks and notes" 3 | EC14 on Linux | — | Resolved | CI run 45341892607 passed |
-| P70-4 | PR #70, "Risks and notes" 4 | The ZIP container across operating systems | — | Not a blocker | S9-6 |
-| P70-5 | PR #70, "Risks and notes" 5 | No query-plan tests | — | Not a blocker | Performance; the results are pinned |
-| P70-6 | PR #70, "Risks and notes" 6; `archive/sprint-9.md` amendment 5 | One unidentified intermittent failure | 6 | Not a blocker | Probably S10-9's race |
-| P70-7 | PR #70, "Risks and notes" 7 | Sprint 10's alignment on compactions | — | Resolved | Sprint 10 (P29) |
-| P70-8 | PR #70, "Risks and notes" 8 | Compactions that an unreleased build imported keep no count | 2 | Not a blocker | Conservative: unknown tool data; no release had that reader |
-| P71-1 | PR #71, "Risks and notes" 1 | Unnamed imported sub-agents join the main agent | — | Not a blocker | S10-6 |
-| P71-2 | PR #71, "Risks and notes" 2 | A tool span exported after its agent span | — | Not a blocker | The next audit corrects the count |
-| P71-3 | PR #71, "Risks and notes" 3 | A short compaction on a premium model | — | Not a blocker | S10-7 |
-| P71-4 | PR #71, "Risks and notes" 4 | Heuristics flag legitimate patterns | — | Not a blocker | Documented as review signals |
-| P71-5 | PR #71, "Risks and notes" 5 | Agent and tool names reach a local model | 3, 4 | Not a blocker | Names, not content, capped and stripped of controls; opt-in, loopback only, and previewable with `--show-llm-payload`, as documented |
-| P71-6 | PR #71, "Risks and notes" 6 | Foundry Local's acceptance of the request is unverified | — | Not a blocker | An optional feature, whose failure is a warning |
-| P71-7 | PR #71, "Risks and notes" 8 | No version bump, tag, or release | 6 | Resolved | Task 5; the coordinator tags and releases |
-
-## The product's name
-
-The coordinator added this to the sprint on 2026-11-24, after the user asked:
-
-> With the repo named "gh-ledger" should we rename this to "GitHub Ledger" or "GitHub Copilot Ledger"? "CopilotLedger" seems incorrect now. If we do so, we need to update all documentation references.
-
-The user was unavailable, so the coordinator decided; the user can revisit it in the pull request.
-
-**Decision:** the product's display name is **gh-ledger**, in documentation and in user-visible text. "CopilotLedger" stops being the product's name.
-
-**Why:** both proposed names follow GitHub's own product naming, like "GitHub Copilot", so they would read as official GitHub products, which GitHub's brand guidelines ask projects not to suggest (see "Verified facts"). The tool also covers Codex, Foundry BYOK, and local models now, and gh-ledger matches the repository, the binary, and `gh extension install swigerb/gh-ledger`.
-
-**Rules:**
-
-1. gh-ledger is the product's name in prose. Commands stay `gh ledger <command>`, and the binary `gh-ledger`, under the docs' existing naming rule. The product is "a local AI-spend ledger for GitHub Copilot", which states compatibility, not affiliation, and the README says that gh-ledger is an independent open-source project, not a GitHub product.
-2. What changes: README.md and `docs/*.md` (Task 4); user-visible strings in `src`, with the tests and guide samples that pin them (Tasks 2 and 3); and the product-name wording of `.github/copilot-instructions.md` and the two `.github/agents` files, with no rule, model, tool, or handoff changed (the plan commit).
-3. What doesn't, because existing installs, data, and the published action rely on it: the C# namespaces, projects, and solution (`CopilotLedger.*`, `CopilotLedger.slnx`); `~/.copilot-ledger` and `COPILOT_LEDGER_HOME`; `.github/copilot-ledger/receipts/` and `<!-- copilot-ledger-receipt -->`; the sign-in items' names (the Windows Run value `CopilotLedger`, the launchd label `io.github.swigerb.copilot-ledger`, and `copilot-ledger.desktop`); the shell-profile markers `# >>> copilot-ledger >>>` and `# <<< copilot-ledger <<<`; notify-send's app name `CopilotLedger`, which notification daemons use for per-app settings and history, and the Windows toast's tag, `copilot-ledger`; the MCP registration name `ledger` and the MCP server's `serverInfo` name, `copilot-ledger`; and everything under `.github/plans/archive/`. Docs that name one of these keep its literal value. The Linux autostart entry's `Name` and `Comment` are what desktop settings show, so they change (Task 2); `install` rewrites an entry that an earlier version wrote, because it compares the whole file, and `uninstall` removes it by path either way.
-4. The receipt action keeps its published name, swigerb/copilot-ledger-action ("CopilotLedger PR Receipt"), because renaming it takes a release of that repository. Prose calls it "the PR receipt action", with its link. The receipt's new heading works with the action as it is (see "Verified facts"). Renaming the action and its Marketplace listing is deferred.
-
-### Edits outside the tasks
-
-`ledger-builder` never edits `.github/copilot-instructions.md` or `.github/agents/`, so these wording changes are in the plan's commit. `ledger-architect` made the first two; it doesn't edit its own agent definition, so the orchestrator makes the third before committing.
-
-| File | Line | Before | After |
-|---|---:|---|---|
-| `.github/copilot-instructions.md` | 1 | `# CopilotLedger: Copilot instructions` | `# gh-ledger: Copilot instructions` |
-| `.github/copilot-instructions.md` | 3 | CopilotLedger (`gh-ledger`) is a free, local-first .NET 10 utility. … | gh-ledger is a free, local-first .NET 10 utility. … |
-| `.github/agents/ledger-builder.agent.md` | 3 | `description: "CopilotLedger builder. Implements …"` | `description: "gh-ledger builder. Implements …"` |
-| `.github/agents/ledger-builder.agent.md` | 20 | … the implementation agent for CopilotLedger (`gh-ledger`). Follow … | … the implementation agent for gh-ledger. Follow … |
-| `.github/agents/ledger-architect.agent.md` | 3 | `description: "CopilotLedger architect. Designs …"` | `description: "gh-ledger architect. Designs …"` |
-| `.github/agents/ledger-architect.agent.md` | 15 | … the design and review agent for CopilotLedger (`gh-ledger`). Follow … | … the design and review agent for gh-ledger. Follow … |
-
-### What still says CopilotLedger
-
-After Task 5 and the plan commit, these 31 lines outside `.github/plans/` say CopilotLedger, in any case, other than as `CopilotLedger.<name>` (a namespace, a project, or the solution). This plan quotes the old text in its replace blocks and in this section; it becomes `archive/sprint-11.md`.
-
-| File | Lines | Why it stays |
-|---|---|---|
-| `docs/cli.md` | 36 | Names the Windows Run value, `CopilotLedger`, by its literal value |
-| `src/CopilotLedger.Cli/Install/InstallCommands.cs` | 219, 247, 357, 371 | The Run value's name, which `install` writes and checks and `uninstall` removes |
-| `src/CopilotLedger.Cli/Install/StartupItem.cs` | 14 | The Run value's registry path, which `install.json` records |
-| `src/CopilotLedger.Cli/Alerts/DesktopNotifier.cs` | 80 | notify-send's `--app-name`, which notification daemons use for per-app settings and history |
-| `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs` | 48, 65, 107, 124, 385, 694, 776 | Pin the Run value and its path |
-| `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs` | 629 | The test name `IN15_CopilotLedgerHomeWarnsBeforeRegistration`, after `COPILOT_LEDGER_HOME` |
-| `tests/CopilotLedger.Tests/Cli/AlertDaemonTests.cs` | 276 | Pins notify-send's app name |
-| `tests/CopilotLedger.Tests/TestSupport/ManualTimeProvider.cs`, `tests/CopilotLedger.Tests/Cli/ExportTimelineTests.cs` | 6, and 140 | `CopilotLedger-Test-0500`, the ID of a test's custom time zone, never shown to users |
-| `tests/CopilotLedger.Tests/TestSupport/GuideWorld.cs` | 341 | A code comment about the guide's example ("before CopilotLedger was installed") |
-| `tests/CopilotLedger.Tests/Docs/ProductNameTests.cs` | 5, 6, 11, 14, 15, 16, 24, 27, 36, 37, 60, 61 | The guard itself: what it allows, and what it looks for |
-
-## Review fixes (Task 6)
-
-The coordinator's independent review of PR #73 (`5f4f4c5..9fecd4f`), on 2026-11-24, found the build clean, all 1,735 tests passing, the identifiers intact (`uninstall` still finds 0.4.1's sign-in items and profile block, the Linux `.desktop` file changed only `Name=` and `Comment=`, and the receipt's marker, JSON, and `schemaVersion` are unchanged), and every remaining CopilotLedger an identifier. It asked for three fixes, C1–C3, as one task before it merges the pull request. Task 6 makes them on top of Task 5 and of `9fecd4f`, the commit that recorded the architect's review; Tasks 1–5 don't change. Each new test fails without its fix, as "Tests" under Task 6 says. The architect generated Task 6's blocks from the files at `9fecd4f`, and `apply-plan.py` applied them to a fresh `git archive 9fecd4f` with Windows line endings: 0 warnings, and 1740 tests passed.
-
-| Finding | Problem | Fix | Task |
-|---|---|---|---|
-| C1 (medium) | The upgrade steps never copy the ledger before the one-way format upgrade. The guide's "Upgrade or uninstall" has no copy, and `docs/cli.md` says to copy `ledger.db` only in "Ledger format", after its commands, so someone who runs the commands as they read them upgrades the ledger with no copy, and 0.4.1 can't open it after that | Both documents copy the whole data directory, `~/.copilot-ledger` or the one that `COPILOT_LEDGER_HOME` names, with any `ledger.db-wal` and `ledger.db-shm` files, to a new folder in the home directory, after `gh ledger daemon stop` and before `gh extension upgrade ledger`, in PowerShell and in a macOS or Linux shell, and say that the format upgrade can't be undone. `docs/cli.md`'s "Ledger format" comes before its steps and says how to go back with the copy. UD1 and UD2 | 6 |
-| C2 (low) | VR1 required `<Version>` to match `^\d+\.\d+\.\d+$`, but `docs/releasing.md` allows prerelease tags such as `v0.5.0-rc.1`, and the Release workflow requires the tag to be `v` plus `<Version>`, so a prerelease failed VR1 with every place updated. The architect found a second obstacle when it ran the suite with a prerelease version: EP10 pinned the receipt's size, 68,090 bytes, and the receipt shows the version twice, so a version of another length failed EP10 | VR1 allows a suffix, `^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`, and VR2 runs VR1's checks on a prerelease of the version. EP10 computes the receipt's size from the version's length | 6 |
-| C3 (low) | Step 1 of `docs/releasing.md` doesn't say to leave Task 1's mentions of 0.5.0, in `docs/cli.md`, `docs/guide.md`, and the comment on `GuideSamplesTests.HaikuOverlay`, so the next bump finds three matches that step 1 neither changes nor leaves. The architect found a fourth: the prerelease tag `v0.5.0-rc.1` in the example after the table of assets | Step 1 lists all four. VR3 fails when a line of the README, the docs, the workflows, `src`, or `tests` names the version and is neither a place to change nor a mention to leave that `VersionPlacesTests` lists, and when step 1's list of the versions to leave doesn't name each mention to leave | 6 |
-
-## Task 1 specification: The Upgrade Steps Check the Rates Overlay
-
-Release blocker U1 (P68-4; see (c) under "The close calls"). After an upgrade, a rates overlay that lists, as a GitHub model's `id` or alias, a name that a built-in GitHub model of the new release has is invalid. The daemon then doesn't start, from `gh ledger daemon start` or at sign-in, and nothing is recorded until the overlay is fixed. gh-ledger 0.4.1 users who priced Claude Haiku 4.5 requests from Copilot CLI 1.0.114 themselves, as 0.4.1's `unknown_model` fix advises, have such an overlay. gh-ledger already says what's wrong; the upgrade steps now say what to do.
-
-### Files
-
-| File | Change |
+| # | Observation |
 |---|---|
-| `docs/cli.md` | "Upgrading or removing the extension": a paragraph after the upgrade commands. "Troubleshooting": an entry for a daemon that didn't start |
-| `docs/guide.md` | "Upgrade or uninstall": after the `daemon-start` sample, the `rates-validate-upgrade` sample and what to do |
-| `tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs` | `OtherSamples` gains `rates-validate-upgrade`; new GS8 and its overlay, `HaikuOverlay` |
+| L1 | In 1.0.103–1.0.114 usage records, `data.usage.apiCallId` equals `data.usage.accounting.usageId` in all 69,286 records that have both; one record has no `apiCallId`. No `apiCallId` repeats within a log. |
+| L2 | From `tool.execution_start`, following `parentId` reaches an `assistant.message` directly in 66,474 cases and through earlier `tool.execution_start`/`tool.execution_complete` events in 30,369; about 100 pass through `hook.*`, `assistant.turn_*`, `subagent.started`, or `user.message`. 96,302 reach a message whose `data.apiCallId` matches a usage record; 631 reach a message without `apiCallId`. |
+| L3 | 1.0.115 (one session): `session.usage_record` omits `data.usage.isByok`, `cacheDetailsReported`, `numToolCalls`, `isAuto`, and `apiCallId`, and adds `data.apiCallIdFromUsageId: true`. It keeps `accounting` (`usageId`, `sequence`, `sourceSessionId`), `provider` (`kind` = `copilot`), `serviceRequestId`, `copilotUsage.totalNanoAiu` (integer), and the token fields. Its `assistant.message` has `data.apiCallId`. |
+| L4 | In the 1.0.103–1.0.115 window, every compaction with `compactionTokensUsed` has `requestCount` 1, `model`, the four token counts, and `duration`. Shapes: successful with `serviceRequestId`, `copilotUsage`, and `provider` (1,665); successful with none of the three (BYOK, 104); failed with all three (2); failed with none (11). `compactionAttemptId` and `clientRequestId` are always present, distinct, and unique across all logs. |
 
-### What changes
+### Assumptions (not verifiable from a primary source)
 
-1. The guide's upgrade walkthrough, after `gh ledger daemon start`, tells a user whose daemon didn't start to run `gh ledger rates validate`, shows its message for an overlay that prices `claude-haiku-4-5-20251001` itself, and says to remove the entry that the message names. The message is what `rates validate` prints in the guide's example, so GS8 checks it.
-2. `docs/cli.md` says the same after its upgrade commands, and its troubleshooting list explains a `gh ledger daemon start` that says the daemon did not start: `daemon.log` says why, and after an upgrade, the `duplicate model identity in the merged rates` message means an overlay entry to remove.
-3. No code changes. The overlay rule, that one name belongs to one model of a section, stays, and `docs/configuration.md` already states it ("Which model prices a request").
+- **A1.** A session log's `copilotUsage.totalNanoAiu` is the same charge, in the same unit, as the live span's `github.copilot.nano_aiu` for that request, and 1 AIU = 1 AI credit. Evidence: issue #76's measurements (Auto and Fusion requests whose reported AIU equal 0.9× and 0.7× the rate card), and Sprint 11's live check that rate-card pricing matched Copilot's own display. GitHub's pages name the unit "AI units" and price "AI credits" without stating the equality.
+- **A2.** 1.0.115's usage shape (L3) is from one session. BYOK usage records, compactions, and `tool.execution_complete` written by 1.0.115 weren't observed; Task 9's rules fail closed for any 1.0.115 shape they don't cover.
+- **A3.** Issue #76 lists "a string" as malformed. Proto3 JSON allows a double as a string (F6); this plan follows #76 and rejects any string `doubleValue` for `nano_aiu`, conservatively. An `intValue` string such as `"47388600"` is the int64 JSON mapping and is accepted (the JSON reader already reads it as `Int`).
 
-### Code (copy exactly)
+## Coordinator decisions (fixed)
 
-Edit 1 of 2 in `docs/cli.md`, replace:
+- **D1, repair in place.** Re-running `gh ledger import` updates each existing imported row's billed charge (and every other pricing column), its tool links, and logs that #82 left incomplete. Import revision 1 (`LedgerImporter.CurrentImportRevision`) makes every log that an earlier gh-ledger imported be read once more after the upgrade, even if unchanged (Task 10).
+- **D2, live spans recorded before #76.** A live row can be corrected from its session log when, and only when, the row has a canonical usage ID (recorded by a format-6 daemon with a service request ID), is `github_ai_credits`/`priced`, isn't already `reported`, and its log's record carries a valid `totalNanoAiu`. Import then sets its `cost_usd_pico` to the reported charge and `charge_source` to `reported`, and keeps its list price. A live row without a canonical ID, whose log is gone or unsupported, or whose record has no valid charge keeps its rate-card charge. This is documented in `docs/cli.md` (Task 12).
+- **D3, list price vs billed spend.** `spans.list_cost_usd_pico` keeps the rate-card price; `spans.cost_usd_pico` remains the charged amount, which budgets, the circuit breaker, receipts, export, and audit already sum. A reported charge that's malformed, or that can't apply to the request, falls back to the rate card, sets `charge_source = 'rejected'`, and is counted (`IngestResult.RejectedReportedCharges`; the import report's `reportedChargesRejected` and the `reportedChargeRejected` diagnostic).
+- **D4, #85 privacy.** From `assistant.message`, import reads only the envelope `id` and `parentId` and `data.apiCallId`; from `tool.execution_start` and `tool.execution_complete`, it adds only the envelope `id` and `parentId`. It never reads `content`, `reasoningText`, `reasoningOpaque`, `encryptedContent`, `toolRequests`, `reasoningBlocks`, or tool arguments or results. Canary tests cover the ledger, the report, and the diagnostics, and `docs/cli.md`'s allowlist and "Never read" list change in the same task.
+- **D5, schema.** This sprint owns ledger format 7 and its upgrade guidance. Sprint 13 adds no schema change.
+- **D6, version.** Product version stays `0.5.0`; `rates.json` doesn't change.
 
-````markdown
-gh extension upgrade ledger
-gh ledger daemon start
-```
-````
+## Integration boundaries (Sprint 13)
 
-with:
+Sprint 13 runs in parallel and owns these. **Don't edit them**:
 
-````markdown
-gh extension upgrade ledger
-gh ledger daemon start
-```
+- `src/CopilotLedger.Core/Audit/**`.
+- The tool-call queries in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs` and `src/CopilotLedger.Storage/SqliteLedgerStore.Audit.cs`.
+- `WindowsDetachedProcess.cs` and daemon start (`DaemonCommands`, `DaemonHost` start path).
+- Breaker and budget alert text.
+- The audit, export, daemon, and install sections of the docs, **except** the one sentence of `docs/cli.md`'s "**Ledger format.**" paragraph that names the format number, which Task 12 changes from 6 to 7 (D5 makes it ours; it's a one-word change plus one added sentence).
 
-If `gh ledger daemon start` then says that the daemon did not start, run `gh ledger rates validate`. A new release can build in a model name that your rates overlay also lists, such as `claude-haiku-4-5-20251001`, which gh-ledger 0.5.0 builds in and earlier versions priced only through an overlay. Such an overlay is invalid, and the daemon doesn't start until you remove the entry that the message names; see [Which model prices a request](configuration.md#which-model-prices-a-request).
-````
+Shared semantics, without edits: Sprint 13's audit and export read `cost_usd_pico` as billed spend, which is exactly what D3 keeps, and `span_links.owner_span_row_id`, whose meaning Task 11 keeps (an imported link's owner is the imported row of the request that asked for the tool). No query in a Sprint 13 file needs to change for this sprint.
 
-Edit 2 of 2 in `docs/cli.md`, replace:
+---
 
-```markdown
-- **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
-```
+## Task 1 specification: Reported-Charge Primitives
 
-with:
+**Files**
 
-```markdown
-- **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
-- **`gh ledger daemon start` says that the daemon did not start.** `daemon.log` in your data directory says why. After an upgrade, `Invalid rates overlay: … duplicate model identity in the merged rates: <name> (built-in model <id>)` means that your rates overlay lists a model name that the new release has built in. Remove that entry from the overlay, check it with `gh ledger rates validate`, and start the daemon.
-```
+- New `src/CopilotLedger.Core/Pricing/ReportedCharge.cs`
+- New `src/CopilotLedger.Core/Pricing/NanoAiu.cs`
+- New `tests/CopilotLedger.Tests/Pricing/NanoAiuTests.cs`
 
-Edit 1 of 1 in `docs/guide.md`, replace:
+**Contracts**
 
-````markdown
-<!-- sample: daemon-start -->
-```shell
-gh ledger daemon start
-```
-
-```text
-gh-ledger daemon started (pid 4242) on http://localhost:4318.
-```
-<!-- /sample -->
-````
-
-with:
-
-````markdown
-<!-- sample: daemon-start -->
-```shell
-gh ledger daemon start
-```
-
-```text
-gh-ledger daemon started (pid 4242) on http://localhost:4318.
-```
-<!-- /sample -->
-
-If it says instead that the daemon did not start, check your rates overlay:
-
-<!-- sample: rates-validate-upgrade -->
-```shell
-gh ledger rates validate
-```
-
-```text
-Invalid rates overlay: C:\Users\you\.copilot-ledger\rates.json: githubAiCredits.models[0].id: duplicate model identity in the merged rates: claude-haiku-4-5-20251001 (built-in model claude-haiku-4.5)
-```
-<!-- /sample -->
-
-A new release can build in a model name that your overlay also lists, and the daemon doesn't start until the overlay is valid. Here, the overlay prices `claude-haiku-4-5-20251001`, the name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5: gh-ledger 0.4.1 didn't know it, so you may have added it yourself, and gh-ledger 0.5.0 builds it in. Remove the entry that the message names, run `gh ledger rates validate` again, and start the daemon. See [Which model prices a request](configuration.md#which-model-prices-a-request).
-````
-
-Edit 1 of 2 in `tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs`, replace:
-
-```csharp
-    // The samples that GS3 to GS7 check, and the overlay that the Month state uses.
-    private static readonly string[] OtherSamples =
-        ["daemon-start", "rates-update", "budget-alert", "receipt", "mcp", "rates-overlay"];
-```
-
-with:
-
-```csharp
-    // The samples that GS3 to GS8 check, and the overlay that the Month state uses.
-    private static readonly string[] OtherSamples =
-        ["daemon-start", "rates-update", "budget-alert", "receipt", "mcp", "rates-overlay", "rates-validate-upgrade"];
-```
-
-Edit 2 of 2 in `tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs`, replace:
-
-```csharp
-        int json = text.LastIndexOf('\n') + 1;
-        Assert.Equal(sample.Text, text[..json] + Indent(text[json..]));
-    }
-```
-
-with:
-
-```csharp
-        int json = text.LastIndexOf('\n') + 1;
-        Assert.Equal(sample.Text, text[..json] + Indent(text[json..]));
-    }
-
-    [Fact]
-    public async Task GS8_RatesValidateUpgradeSampleNamesTheOverlayEntry()
-    {
-        GuideSample sample = Samples.Value["rates-validate-upgrade"];
-        Assert.Equal("gh ledger rates validate", sample.Command);
-        using TempDirectory temp = new();
-        await using GuideWorld world = await GuideWorld.CreateAsync(temp.Path, GuideState.Month, Overlay);
-        string path = world.Harness.Context.RatesOverlayPath;
-        await File.WriteAllTextAsync(path, HaikuOverlay);
-        _ = await FileRetry.ReadAllTextAsync(path);
-        CliRun run = await world.RunAsync(sample.Command!);
-        Assert.Equal(1, run.ExitCode);
-        Assert.Equal(string.Empty, run.Out);
-        Assert.Equal(sample.Text + "\n", world.Display(run.Error));
-    }
-
-    // An overlay that prices claude-haiku-4-5-20251001, the name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5, as a
-    // user of gh-ledger 0.4.1, which didn't know the name, could have written it. gh-ledger 0.5.0 builds the name in.
-    private const string HaikuOverlay = """
-        {
-          "schemaVersion": 1,
-          "githubAiCredits": {
-            "models": [
-              {
-                "id": "claude-haiku-4-5-20251001",
-                "windows": [
-                  { "tiers": [ { "name": "default", "inputPer1M": 1.00, "cachedInputPer1M": 0.10, "cacheWritePer1M": 1.25, "outputPer1M": 5.00 } ] }
-                ]
-              }
-            ]
-          }
-        }
-        """;
-```
-
-### Tests
-
-- **GS8** (new): in the guide's `Month` state, with `HaikuOverlay` as the overlay, `gh ledger rates validate` exits 1, writes nothing to standard output, and writes the `rates-validate-upgrade` sample's text to standard error, with the data directory shown as `C:\Users\you\.copilot-ledger`. It fails without the guide's sample.
-- **GS1** (changed list): `OtherSamples` names `rates-validate-upgrade`, so the guide's samples and the checked ones still match.
-
-### Acceptance criteria
-
-- The guide's "Upgrade or uninstall", and `docs/cli.md`'s "Upgrading or removing the extension" and "Troubleshooting", say what to do when the daemon doesn't start after an upgrade because the overlay names a model that the release builds in.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes 1732 tests, 0 failed, 0 skipped.
-
-### Verify
-
-```shell
-dotnet build CopilotLedger.slnx
-dotnet test CopilotLedger.slnx
-```
-
-## Task 2 specification: gh-ledger in Command, Install, Status, and Report Text
-
-The product's name (see "The product's name") in what commands print and in the files they write, apart from alerts, MCP, and receipts, which are Task 3's. The tests and guide samples that pin each string change with it.
-
-### Files
-
-| File | Change |
-|---|---|
-| `docs/guide.md` | The `install` and `uninstall` samples |
-| `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs` | The report's `<title>` and `<h1>` |
-| `src/CopilotLedger.Cli/GhLedgerCli.cs` | The root command's description |
-| `src/CopilotLedger.Cli/Install/CopilotOtelEnvironment.cs` | Three warnings |
-| `src/CopilotLedger.Cli/Install/InstallCommands.cs` | `install`'s last line and `uninstall`'s messages |
-| `src/CopilotLedger.Cli/Install/StartupItem.cs` | The Linux autostart entry's `Name` and `Comment` |
-| `src/CopilotLedger.Cli/Mcp/McpCommand.cs` | The `mcp` command's description |
-| `src/CopilotLedger.Cli/Rates/RatesCommands.cs` | The starter overlay's first note |
-| `src/CopilotLedger.Cli/Reporting/ReportCommands.cs` | `status`'s warning about another installed copy |
-| `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs` | EC9: the title |
-| `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs` | IN1, IN2, IN10, IN11, IN16, IN17, and IN18 |
-| `tests/CopilotLedger.Tests/Cli/RatesCommandTests.cs` | `Scaffold`, which RT1 compares |
-| `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs` | `Warnings`, which RP3 uses, and RP13 |
-
-### What changes
-
-| Where | Before | After |
-|---|---|---|
-| `--help` | `CopilotLedger: local AI spend ledger for GitHub Copilot` | `gh-ledger: a local AI-spend ledger for GitHub Copilot` |
-| `install` and `status` warnings | `… instead of to CopilotLedger at http://localhost:4318.`, `… instead of exporting it to CopilotLedger.`, and `… CopilotLedger accepts only http/protobuf and http/json.` | gh-ledger in each |
-| `install` | `CopilotLedger is installed. Restart …` | `gh-ledger is installed. Restart …` |
-| `uninstall` | `CopilotLedger is not installed; nothing to undo.`, `Would remove` and `Removed the CopilotLedger block from <profile>.`, `Warning: no complete CopilotLedger block in <profile>; …`, and `CopilotLedger is uninstalled. …` | gh-ledger in each; the block's markers stay `copilot-ledger` |
-| The Linux autostart entry | `Name=CopilotLedger`, `Comment=Starts the CopilotLedger daemon` | `Name=gh-ledger`, `Comment=Starts the gh-ledger daemon`; the file stays `copilot-ledger.desktop` |
-| `mcp --help` | `Run the CopilotLedger MCP server …` | `Run the gh-ledger MCP server …` |
-| `rates init`'s overlay | The note `CopilotLedger rates overlay. See docs/configuration.md in the CopilotLedger repository.` | `gh-ledger rates overlay. See docs/configuration.md in the gh-ledger repository.` |
-| `status` | `CopilotLedger was installed from <path>; …` | `gh-ledger was installed from <path>; …` |
-| `export`'s report | `<title>CopilotLedger report: …</title>` and `<h1>CopilotLedger report</h1>` | `gh-ledger report` in both |
-
-The starter overlay's note changes no rule, and `docs/configuration.md` doesn't quote it, so the pricing docs stay accurate without a change here; Task 4 renames the product there. Nothing that a test or a sample pins outside this table changes.
-
-### Code (copy exactly)
-
-Edit 1 of 2 in `docs/guide.md`, replace:
-
-```markdown
-CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
-```
-
-with:
-
-```markdown
-gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
-```
-
-Edit 2 of 2 in `docs/guide.md`, replace:
-
-```markdown
-CopilotLedger is uninstalled. Your ledger data is still in C:\Users\you\.copilot-ledger.
-```
-
-with:
-
-```markdown
-gh-ledger is uninstalled. Your ledger data is still in C:\Users\you\.copilot-ledger.
-```
-
-Edit 1 of 2 in `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs`, replace:
-
-```csharp
-        Line(html, $"<title>CopilotLedger report: {Text(header.Scope)} ({Text(header.Filter.Period)})</title>");
-```
-
-with:
-
-```csharp
-        Line(html, $"<title>gh-ledger report: {Text(header.Scope)} ({Text(header.Filter.Period)})</title>");
-```
-
-Edit 2 of 2 in `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs`, replace:
-
-```csharp
-        Line(html, "<h1>CopilotLedger report</h1>");
-```
-
-with:
-
-```csharp
-        Line(html, "<h1>gh-ledger report</h1>");
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Cli/GhLedgerCli.cs`, replace:
-
-```csharp
-            "CopilotLedger: local AI spend ledger for GitHub Copilot");
-```
-
-with:
-
-```csharp
-            "gh-ledger: a local AI-spend ledger for GitHub Copilot");
-```
-
-Edit 1 of 2 in `src/CopilotLedger.Cli/Install/CopilotOtelEnvironment.cs`, replace:
-
-```csharp
-        string? endpoint = Value(lookup, "OTEL_EXPORTER_OTLP_ENDPOINT");
-        if (endpoint is not null && !IsLocalEndpoint(endpoint))
-        {
-            warnings.Add(
-                $"OTEL_EXPORTER_OTLP_ENDPOINT is {endpoint}; Copilot exports there instead of to CopilotLedger at http://localhost:4318.");
-        }
-
-        if (Value(lookup, "COPILOT_OTEL_FILE_EXPORTER_PATH") is not null)
-        {
-            warnings.Add(
-                "COPILOT_OTEL_FILE_EXPORTER_PATH is set; Copilot writes telemetry to that file instead of exporting it to CopilotLedger.");
-```
-
-with:
-
-```csharp
-        string? endpoint = Value(lookup, "OTEL_EXPORTER_OTLP_ENDPOINT");
-        if (endpoint is not null && !IsLocalEndpoint(endpoint))
-        {
-            warnings.Add(
-                $"OTEL_EXPORTER_OTLP_ENDPOINT is {endpoint}; Copilot exports there instead of to gh-ledger at http://localhost:4318.");
-        }
-
-        if (Value(lookup, "COPILOT_OTEL_FILE_EXPORTER_PATH") is not null)
-        {
-            warnings.Add(
-                "COPILOT_OTEL_FILE_EXPORTER_PATH is set; Copilot writes telemetry to that file instead of exporting it to gh-ledger.");
-```
-
-Edit 2 of 2 in `src/CopilotLedger.Cli/Install/CopilotOtelEnvironment.cs`, replace:
-
-```csharp
-        if (value?.Equals("grpc", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            warnings.Add(
-                $"{name} is grpc; CopilotLedger accepts only http/protobuf and http/json.");
-```
-
-with:
-
-```csharp
-        if (value?.Equals("grpc", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            warnings.Add(
-                $"{name} is grpc; gh-ledger accepts only http/protobuf and http/json.");
-```
-
-Edit 1 of 5 in `src/CopilotLedger.Cli/Install/InstallCommands.cs`, replace:
-
-```csharp
-            ? "Dry run: no changes made."
-            : "CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.");
-```
-
-with:
-
-```csharp
-            ? "Dry run: no changes made."
-            : "gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.");
-```
-
-Edit 2 of 5 in `src/CopilotLedger.Cli/Install/InstallCommands.cs`, replace:
-
-```csharp
-            context.Out.WriteLine("CopilotLedger is not installed; nothing to undo.");
-```
-
-with:
-
-```csharp
-            context.Out.WriteLine("gh-ledger is not installed; nothing to undo.");
-```
-
-Edit 3 of 5 in `src/CopilotLedger.Cli/Install/InstallCommands.cs`, replace:
-
-```csharp
-                    ? $"Would remove the CopilotLedger block from {profile}."
-                    : $"Removed the CopilotLedger block from {profile}.");
-```
-
-with:
-
-```csharp
-                    ? $"Would remove the gh-ledger block from {profile}."
-                    : $"Removed the gh-ledger block from {profile}.");
-```
-
-Edit 4 of 5 in `src/CopilotLedger.Cli/Install/InstallCommands.cs`, replace:
-
-```csharp
-                    $"Warning: no complete CopilotLedger block in {profile}; edit it by hand.");
-```
-
-with:
-
-```csharp
-                    $"Warning: no complete gh-ledger block in {profile}; edit it by hand.");
-```
-
-Edit 5 of 5 in `src/CopilotLedger.Cli/Install/InstallCommands.cs`, replace:
-
-```csharp
-                $"CopilotLedger is uninstalled. Your ledger data is still in {context.DataDirectory}.");
-```
-
-with:
-
-```csharp
-                $"gh-ledger is uninstalled. Your ledger data is still in {context.DataDirectory}.");
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Cli/Install/StartupItem.cs`, replace:
-
-```csharp
-            Name=CopilotLedger
-            Comment=Starts the CopilotLedger daemon
-```
-
-with:
-
-```csharp
-            Name=gh-ledger
-            Comment=Starts the gh-ledger daemon
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Cli/Mcp/McpCommand.cs`, replace:
-
-```csharp
-            "Run the CopilotLedger MCP server on standard input and output.");
-```
-
-with:
-
-```csharp
-            "Run the gh-ledger MCP server on standard input and output.");
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Cli/Rates/RatesCommands.cs`, replace:
-
-```csharp
-            "CopilotLedger rates overlay. See docs/configuration.md in the CopilotLedger repository.",
-```
-
-with:
-
-```csharp
-            "gh-ledger rates overlay. See docs/configuration.md in the gh-ledger repository.",
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Cli/Reporting/ReportCommands.cs`, replace:
-
-```csharp
-                $"CopilotLedger was installed from {manifest.ExecutablePath}; run {command} install to use this copy instead.");
-```
-
-with:
-
-```csharp
-                $"gh-ledger was installed from {manifest.ExecutablePath}; run {command} install to use this copy instead.");
-```
-
-Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
-
-```csharp
-        Assert.Equal("CopilotLedger report: all repositories (last 30 days)", page.Root!.Element("head")!.Element("title")!.Value);
-```
-
-with:
-
-```csharp
-        Assert.Equal("gh-ledger report: all repositories (last 30 days)", page.Root!.Element("head")!.Element("title")!.Value);
-```
-
-Edit 1 of 9 in `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`, replace:
-
-```csharp
-            Warning: GitHub CLI needs sh.exe from Git for Windows to run shell aliases, so gh ledger won't work until Git for Windows is installed. Run gh-ledger directly.
-            gh-ledger will start when you sign in.
-            gh-ledger daemon started (pid {Environment.ProcessId}) on http://localhost:4318.
-            CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
-```
-
-with:
-
-```csharp
-            Warning: GitHub CLI needs sh.exe from Git for Windows to run shell aliases, so gh ledger won't work until Git for Windows is installed. Run gh-ledger directly.
-            gh-ledger will start when you sign in.
-            gh-ledger daemon started (pid {Environment.ProcessId}) on http://localhost:4318.
-            gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
-```
-
-Edit 2 of 9 in `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`, replace:
-
-```csharp
-            CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
-```
-
-with:
-
-```csharp
-            gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
-```
-
-Edit 3 of 9 in `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`, replace:
-
-```csharp
-            Assert.Contains("Removed gh alias: ledger.", uninstall.Out);
-            Assert.False(File.Exists(ManifestPath(temp.Path)));
-            Assert.EndsWith(
-                $"CopilotLedger is uninstalled. Your ledger data is still in {Path.Combine(temp.Path, "data")}.\n",
-```
-
-with:
-
-```csharp
-            Assert.Contains("Removed gh alias: ledger.", uninstall.Out);
-            Assert.False(File.Exists(ManifestPath(temp.Path)));
-            Assert.EndsWith(
-                $"gh-ledger is uninstalled. Your ledger data is still in {Path.Combine(temp.Path, "data")}.\n",
-```
-
-Edit 4 of 9 in `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`, replace:
-
-```csharp
-                "CopilotLedger is not installed; nothing to undo.\n",
-```
-
-with:
-
-```csharp
-                "gh-ledger is not installed; nothing to undo.\n",
-```
-
-Edit 5 of 9 in `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`, replace:
-
-```csharp
-            Name=CopilotLedger
-            Comment=Starts the CopilotLedger daemon
-            Exec="/opt/bin/gh-ledger" daemon start
-```
-
-with:
-
-```csharp
-            Name=gh-ledger
-            Comment=Starts the gh-ledger daemon
-            Exec="/opt/bin/gh-ledger" daemon start
-```
-
-Edit 6 of 9 in `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`, replace:
-
-```csharp
-                $"CopilotLedger is uninstalled. Your ledger data is still in {Path.Combine(temp.Path, "data")}.\n",
-```
-
-with:
-
-```csharp
-                $"gh-ledger is uninstalled. Your ledger data is still in {Path.Combine(temp.Path, "data")}.\n",
-```
-
-Edit 7 of 9 in `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`, replace:
-
-```csharp
-            "CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n",
-            run.Out);
-        Assert.Equal(string.Empty, run.Error);
-        Assert.Empty(platform.ProcessRuns);
-        Assert.Equal(
-            [("CopilotLedger", $"\"{WindowsExtension}\" daemon start")],
-```
-
-with:
-
-```csharp
-            "gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n",
-            run.Out);
-        Assert.Equal(string.Empty, run.Error);
-        Assert.Empty(platform.ProcessRuns);
-        Assert.Equal(
-            [("CopilotLedger", $"\"{WindowsExtension}\" daemon start")],
-```
-
-Edit 8 of 9 in `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`, replace:
-
-```csharp
-            "CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n",
-```
-
-with:
-
 ```csharp
-            "gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n",
-```
-
-Edit 9 of 9 in `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`, replace:
-
-```csharp
-            Name=CopilotLedger
-            Comment=Starts the CopilotLedger daemon
-```
-
-with:
-
-```csharp
-            Name=gh-ledger
-            Comment=Starts the gh-ledger daemon
-```
-
-Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/RatesCommandTests.cs`, replace:
-
-```csharp
-            "CopilotLedger rates overlay. See docs/configuration.md in the CopilotLedger repository.",
-```
-
-with:
-
-```csharp
-            "gh-ledger rates overlay. See docs/configuration.md in the gh-ledger repository.",
-```
-
-Edit 1 of 3 in `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs`, replace:
-
-```csharp
-        { "OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.contoso.com:4318", "OTEL_EXPORTER_OTLP_ENDPOINT is https://collector.contoso.com:4318; Copilot exports there instead of to CopilotLedger at http://localhost:4318.", false },
-        { "COPILOT_OTEL_FILE_EXPORTER_PATH", "/tmp/x.jsonl", "COPILOT_OTEL_FILE_EXPORTER_PATH is set; Copilot writes telemetry to that file instead of exporting it to CopilotLedger.", false },
-```
-
-with:
-
-```csharp
-        { "OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.contoso.com:4318", "OTEL_EXPORTER_OTLP_ENDPOINT is https://collector.contoso.com:4318; Copilot exports there instead of to gh-ledger at http://localhost:4318.", false },
-        { "COPILOT_OTEL_FILE_EXPORTER_PATH", "/tmp/x.jsonl", "COPILOT_OTEL_FILE_EXPORTER_PATH is set; Copilot writes telemetry to that file instead of exporting it to gh-ledger.", false },
-```
-
-Edit 2 of 3 in `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs`, replace:
-
-```csharp
-        { "OTEL_EXPORTER_OTLP_PROTOCOL", "grpc", "OTEL_EXPORTER_OTLP_PROTOCOL is grpc; CopilotLedger accepts only http/protobuf and http/json.", false },
-```
-
-with:
-
-```csharp
-        { "OTEL_EXPORTER_OTLP_PROTOCOL", "grpc", "OTEL_EXPORTER_OTLP_PROTOCOL is grpc; gh-ledger accepts only http/protobuf and http/json.", false },
-```
-
-Edit 3 of 3 in `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs`, replace:
-
-```csharp
-            "CopilotLedger was installed from /opt/old/gh-ledger; run gh-ledger install to use this copy instead.";
-```
-
-with:
-
-```csharp
-            "gh-ledger was installed from /opt/old/gh-ledger; run gh-ledger install to use this copy instead.";
-```
-
-### Tests
-
-Changed: EC9, IN1, IN2, IN10, IN11, IN16, IN17, IN18, RT1, RP3, RP13, and GS2's `install` and `uninstall` samples. Nothing is added; Task 3's PN1 checks that `src` uses the name.
-
-### Acceptance criteria
-
-- Every string in "What changes" says gh-ledger, and the identifiers that "The product's name" keeps are unchanged.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes 1732 tests, 0 failed, 0 skipped.
-
-### Verify
-
-```shell
-dotnet build CopilotLedger.slnx
-dotnet test CopilotLedger.slnx
-```
-
-## Task 3 specification: gh-ledger in Alerts, MCP, and Receipts
-
-The product's name in alerts, MCP, and receipts, with the tests and guide samples that pin it, and the guard that keeps the name out of `src` except as an identifier.
-
-### Files
-
-| File | Change |
-|---|---|
-| `docs/guide.md` | The `budget-alert`, `export-pr`, `receipt`, and `mcp` samples |
-| `src/CopilotLedger.Cli/Receipts/ReceiptCommands.cs` | `export-pr`'s hint |
-| `src/CopilotLedger.Cli/Receipts/ReceiptMarkdown.cs` | The receipt's heading |
-| `src/CopilotLedger.Mcp/LedgerMcpServer.cs` | The server's instructions |
-| `src/CopilotLedger.Mcp/LedgerMcpTools.cs` | `set_branch_budget`'s description and the open trip's `WARNING:` line |
-| `src/CopilotLedger.Otlp/Breaker/BreakerMessages.cs` | The two alert titles |
-| `tests/CopilotLedger.Tests/Breaker/BreakerRulesTests.cs` | BR4 |
-| `tests/CopilotLedger.Tests/Cli/AlertDaemonTests.cs` | `AlertA`, AD1, AD2, and AD3 |
-| `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs` | `FeatureReceipt` (EP1–EP3), `EmptyReceipt` (EP5), EP1, EP5, and EP10 |
-| `tests/CopilotLedger.Tests/Docs/ProductNameTests.cs` | New: PN1 |
-| `tests/CopilotLedger.Tests/Mcp/AuditMcpTests.cs` | AM3 |
-| `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs` | MC1, MC3, and MC14 |
-| `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs` | BM1, `AssertTripAlert`, and `AssertBudgetAlert` |
-
-### What changes
-
-| Where | Before | After |
-|---|---|---|
-| Alert titles: desktop notifications, `ALERT` lines in `daemon.log`, and the Windows toast | `CopilotLedger circuit breaker tripped`, `CopilotLedger branch budget exceeded` | `gh-ledger circuit breaker tripped`, `gh-ledger branch budget exceeded` |
-| MCP server instructions | `CopilotLedger reports the AI spend …` | `gh-ledger reports the AI spend …` |
-| `set_branch_budget`'s description | `… CopilotLedger alerts once …` | `… gh-ledger alerts once …` |
-| MCP's open-trip warning | `WARNING: CopilotLedger circuit breaker is open for …` | `WARNING: gh-ledger circuit breaker is open for …` |
-| `export-pr` | `… the CopilotLedger action posts it on the pull request.` | `… the PR receipt action posts it on the pull request.` |
-| The receipt's heading | `### CopilotLedger receipt for <branch>` | `### gh-ledger receipt for <branch>` |
-
-A receipt gets 4 bytes shorter, so EP10's oversized receipt is 68090 bytes instead of 68094. The receipt's marker, file name, JSON data, and `schemaVersion` don't change, and the action finds receipts by the marker and the JSON (see "Verified facts").
-
-**PN1** (new): every file under `src`, skipping `bin` and `obj` folders, names CopilotLedger, or Copilot Ledger, in any case, only as `CopilotLedger.<name>` or in one of three identifiers: the Run value `"CopilotLedger"` (`InstallCommands.cs`), its registry path ending `\Run\CopilotLedger"` (`StartupItem.cs`), and `"--app-name=CopilotLedger"` (`DesktopNotifier.cs`). A failure lists each offending line as `<file>:<line>`.
-
-### Code (copy exactly)
-
-Edit 1 of 5 in `docs/guide.md`, replace:
-
-```markdown
-2026-11-21T21:30:00.0000000+00:00 ALERT CopilotLedger branch budget exceeded: contoso/webapp @ feature/search: 766.75 of 750.00 AI credits spent. Run: gh-ledger budget list
-```
-
-with:
-
-```markdown
-2026-11-21T21:30:00.0000000+00:00 ALERT gh-ledger branch budget exceeded: contoso/webapp @ feature/search: 766.75 of 750.00 AI credits spent. Run: gh-ledger budget list
-```
-
-Edit 2 of 5 in `docs/guide.md`, replace:
-
-```markdown
-Commit it on the branch and push; the CopilotLedger action posts it on the pull request.
-```
-
-with:
-
-```markdown
-Commit it on the branch and push; the PR receipt action posts it on the pull request.
-```
-
-Edit 3 of 5 in `docs/guide.md`, replace:
-
-```markdown
-> ### CopilotLedger receipt for `feature/search`
-```
-
-with:
-
-```markdown
-> ### gh-ledger receipt for `feature/search`
-```
-
-Edit 4 of 5 in `docs/guide.md`, replace:
-
-````markdown
-<!-- sample: mcp -->
-```text
-WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1
-````
-
-with:
-
-````markdown
-<!-- sample: mcp -->
-```text
-WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1
-````
-
-Edit 5 of 5 in `docs/guide.md`, replace:
-
-```markdown
-    "WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1"
-```
-
-with:
-
-```markdown
-    "WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1"
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Cli/Receipts/ReceiptCommands.cs`, replace:
-
-```csharp
-            "Commit it on the branch and push; the CopilotLedger action posts it on the pull request.");
-```
-
-with:
-
-```csharp
-            "Commit it on the branch and push; the PR receipt action posts it on the pull request.");
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Cli/Receipts/ReceiptMarkdown.cs`, replace:
-
-```csharp
-        text.Append("### CopilotLedger receipt for ").Append(Code(receipt.Branch)).Append("\n\n");
-```
-
-with:
-
-```csharp
-        text.Append("### gh-ledger receipt for ").Append(Code(receipt.Branch)).Append("\n\n");
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Mcp/LedgerMcpServer.cs`, replace:
-
-```csharp
-        "CopilotLedger reports the AI spend that Copilot recorded on this machine, by Git branch. " +
-```
-
-with:
-
-```csharp
-        "gh-ledger reports the AI spend that Copilot recorded on this machine, by Git branch. " +
-```
-
-Edit 1 of 2 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
-
-```csharp
-            Description = "Sets a soft AI-credit budget for one Git branch. CopilotLedger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
-```
-
-with:
-
-```csharp
-            Description = "Sets a soft AI-credit budget for one Git branch. gh-ledger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
-```
-
-Edit 2 of 2 in `src/CopilotLedger.Mcp/LedgerMcpTools.cs`, replace:
-
-```csharp
-                $"WARNING: CopilotLedger circuit breaker is open for {trip.Repository} @ {trip.Branch}: {trip.Detail} on one prompt (trip {trip.Id}). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id {trip.Id}");
-```
-
-with:
-
-```csharp
-                $"WARNING: gh-ledger circuit breaker is open for {trip.Repository} @ {trip.Branch}: {trip.Detail} on one prompt (trip {trip.Id}). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id {trip.Id}");
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Otlp/Breaker/BreakerMessages.cs`, replace:
-
-```csharp
-    public const string TripTitle = "CopilotLedger circuit breaker tripped";
-    public const string BudgetTitle = "CopilotLedger branch budget exceeded";
-```
-
-with:
-
-```csharp
-    public const string TripTitle = "gh-ledger circuit breaker tripped";
-    public const string BudgetTitle = "gh-ledger branch budget exceeded";
-```
-
-Edit 1 of 2 in `tests/CopilotLedger.Tests/Breaker/BreakerRulesTests.cs`, replace:
-
-```csharp
-        Assert.Equal("CopilotLedger circuit breaker tripped", trip.Title);
-```
-
-with:
-
-```csharp
-        Assert.Equal("gh-ledger circuit breaker tripped", trip.Title);
-```
-
-Edit 2 of 2 in `tests/CopilotLedger.Tests/Breaker/BreakerRulesTests.cs`, replace:
-
-```csharp
-        Assert.Equal("CopilotLedger branch budget exceeded", budget.Title);
-```
-
-with:
-
-```csharp
-        Assert.Equal("gh-ledger branch budget exceeded", budget.Title);
-```
-
-Edit 1 of 6 in `tests/CopilotLedger.Tests/Cli/AlertDaemonTests.cs`, replace:
-
-```csharp
-        "ALERT CopilotLedger circuit breaker tripped: swigerb/copilot-ledger @ feature/a: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status";
-```
-
-with:
-
-```csharp
-        "ALERT gh-ledger circuit breaker tripped: swigerb/copilot-ledger @ feature/a: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status";
-```
-
-Edit 2 of 6 in `tests/CopilotLedger.Tests/Cli/AlertDaemonTests.cs`, replace:
-
-```csharp
-            "<toast><visual><binding template=\"ToastGeneric\"><text>CopilotLedger circuit breaker tripped</text><text>swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status</text></binding></visual></toast>",
-            await FileRetry.ReadAllTextAsync(
-                Path.Combine(temp.Path, "data", "alert-toast.xml")));
-        Assert.Contains(
-            "ALERT CopilotLedger circuit breaker tripped: swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status",
-```
-
-with:
-
-```csharp
-            "<toast><visual><binding template=\"ToastGeneric\"><text>gh-ledger circuit breaker tripped</text><text>swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status</text></binding></visual></toast>",
-            await FileRetry.ReadAllTextAsync(
-                Path.Combine(temp.Path, "data", "alert-toast.xml")));
-        Assert.Contains(
-            "ALERT gh-ledger circuit breaker tripped: swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status",
-```
-
-Edit 3 of 6 in `tests/CopilotLedger.Tests/Cli/AlertDaemonTests.cs`, replace:
-
-```csharp
-                        "end run",
-                        "CopilotLedger circuit breaker tripped",
-```
-
-with:
-
-```csharp
-                        "end run",
-                        "gh-ledger circuit breaker tripped",
-```
-
-Edit 4 of 6 in `tests/CopilotLedger.Tests/Cli/AlertDaemonTests.cs`, replace:
-
-```csharp
-                        "CopilotLedger branch budget exceeded",
-```
-
-with:
-
-```csharp
-                        "gh-ledger branch budget exceeded",
-```
-
-Edit 5 of 6 in `tests/CopilotLedger.Tests/Cli/AlertDaemonTests.cs`, replace:
-
-```csharp
-            "ALERT CopilotLedger branch budget exceeded: swigerb/copilot-ledger @ feature/ledger: 56.00 of 50.00 AI credits spent. Run: gh-ledger budget list",
-```
-
-with:
-
-```csharp
-            "ALERT gh-ledger branch budget exceeded: swigerb/copilot-ledger @ feature/ledger: 56.00 of 50.00 AI credits spent. Run: gh-ledger budget list",
-```
-
-Edit 6 of 6 in `tests/CopilotLedger.Tests/Cli/AlertDaemonTests.cs`, replace:
-
-```csharp
-                        "CopilotLedger circuit breaker tripped",
-```
-
-with:
-
-```csharp
-                        "gh-ledger circuit breaker tripped",
-```
-
-Edit 1 of 5 in `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs`, replace:
-
-```csharp
-        ### CopilotLedger receipt for `feature/ledger`
-```
-
-with:
-
-```csharp
-        ### gh-ledger receipt for `feature/ledger`
-```
-
-Edit 2 of 5 in `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs`, replace:
-
-```csharp
-        ### CopilotLedger receipt for `fix/@octocat-#7`
-```
-
-with:
-
-```csharp
-        ### gh-ledger receipt for `fix/@octocat-#7`
-```
-
-Edit 3 of 5 in `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs`, replace:
-
-```csharp
-            $"Wrote {FeatureFile} for feature/ledger.\n" +
-            "Commit it on the branch and push; the CopilotLedger action posts it on the pull request.\n",
-```
-
-with:
-
-```csharp
-            $"Wrote {FeatureFile} for feature/ledger.\n" +
-            "Commit it on the branch and push; the PR receipt action posts it on the pull request.\n",
-```
-
-Edit 4 of 5 in `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs`, replace:
-
-```csharp
-            "Commit it on the branch and push; the CopilotLedger action posts it on the pull request.\n",
-```
-
-with:
-
-```csharp
-            "Commit it on the branch and push; the PR receipt action posts it on the pull request.\n",
-```
-
-Edit 5 of 5 in `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs`, replace:
-
-```csharp
-            "The receipt for feature/ledger is 68094 bytes; a receipt can be at most 65536 bytes.\n";
-```
-
-with:
-
-```csharp
-            "The receipt for feature/ledger is 68090 bytes; a receipt can be at most 65536 bytes.\n";
-```
-
-New file `tests/CopilotLedger.Tests/Docs/ProductNameTests.cs`:
-
-```csharp
-using System.Text.RegularExpressions;
-
-namespace CopilotLedger.Tests.Docs;
+namespace CopilotLedger.Core.Pricing;
 
-// The product's name is gh-ledger. CopilotLedger stays only as an identifier that existing installs rely on: the namespaces
-// and projects (CopilotLedger.<name>), the Windows sign-in item's Run value, and the app name that notify-send gives
-// notification settings.
-public sealed partial class ProductNameTests
+// What a request's own billing report said it was charged, in nano AI units (1 AIU = 1 AI credit = 10^9 nano AIU).
+public enum ReportedChargeState
 {
-    [Fact]
-    public void PN1_TheSourceNamesCopilotLedgerOnlyAsAnIdentifier()
-    {
-        Assert.Empty(Mentions(FilesUnder(RepositoryFile("src")), line => line
-            .Replace("\"CopilotLedger\"", string.Empty, StringComparison.Ordinal)
-            .Replace("\\Run\\CopilotLedger\"", string.Empty, StringComparison.Ordinal)
-            .Replace("\"--app-name=CopilotLedger\"", string.Empty, StringComparison.Ordinal)));
-    }
+    Absent = 0,      // no reported charge
+    Valid,           // NanoAiu holds an exact, non-negative integer no greater than NanoAiu.MaxExact
+    Malformed,       // present but unusable: negative, fractional, NaN, infinite, above 2^53, or not a number
+}
 
-    // "<file>:<line>" for each line that still names CopilotLedger, or Copilot Ledger, in any case, once removeAllowed and
-    // Identifier have taken out what may stay.
-    private static string[] Mentions(IEnumerable<string> files, Func<string, string> removeAllowed)
-    {
-        string root = RepositoryFile();
-        return
-        [
-            .. files.Order(StringComparer.Ordinal).SelectMany(file => File.ReadAllLines(file)
-                .Select((line, index) => (Text: removeAllowed(Identifier().Replace(line, string.Empty)), Number: index + 1))
-                .Where(line => line.Text.Contains("CopilotLedger", StringComparison.OrdinalIgnoreCase)
-                    || line.Text.Contains("Copilot Ledger", StringComparison.OrdinalIgnoreCase))
-                .Select(line => $"{Path.GetRelativePath(root, file).Replace('\\', '/')}:{line.Number}")),
-        ];
-    }
+public readonly record struct ReportedCharge(ReportedChargeState State, long NanoAiu)
+{
+    public static ReportedCharge Absent => default;
+    public static ReportedCharge Malformed => new(ReportedChargeState.Malformed, 0);
+    public static ReportedCharge Valid(long nanoAiu);   // ArgumentOutOfRangeException unless 0 <= nanoAiu <= NanoAiu.MaxExact
+}
 
-    // The files under folder, recursively, skipping bin and obj folders.
-    private static IEnumerable<string> FilesUnder(string folder) =>
-        Directory.GetFiles(folder).Concat(Directory.GetDirectories(folder)
-            .Where(directory => Path.GetFileName(directory) is not ("bin" or "obj"))
-            .SelectMany(FilesUnder));
-
-    private static string RepositoryFile(params string[] parts)
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CopilotLedger.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        Assert.NotNull(directory);
-        return Path.Combine([directory.FullName, .. parts]);
-    }
-
-    // A namespace or project name: CopilotLedger followed by a dot and a letter, as in CopilotLedger.Cli.
-    [GeneratedRegex(@"CopilotLedger(?=\.[A-Za-z])")]
-    private static partial Regex Identifier();
+public static class NanoAiu
+{
+    public const long MaxExact = 9_007_199_254_740_992;            // 2^53
+    public static bool TryFromJsonNumber(ReadOnlySpan<byte> utf8Json, out long nanoAiu);
+    public static bool TryFromIeee754Bits(ulong bits, out long nanoAiu);
+    public static decimal ToUsd(long nanoAiu);        // nanoAiu * 0.00000000001m  (1 nano AIU = $10^-11)
+    public static decimal ToAiCredits(long nanoAiu);  // nanoAiu / 1_000_000_000m
+    public static long ToPicoUsd(long nanoAiu);       // checked(nanoAiu * 10)
 }
 ```
 
-Edit 1 of 1 in `tests/CopilotLedger.Tests/Mcp/AuditMcpTests.cs`, replace:
+`ToUsd`, `ToAiCredits`, and `ToPicoUsd` throw `ArgumentOutOfRangeException` for a value outside `0..MaxExact`.
+
+**Algorithm, `TryFromJsonNumber(utf8Json)`** (one JSON value, such as a property's raw text):
+
+1. Create a `Utf8JsonReader` over `utf8Json`. If `Read()` is false or `TokenType != JsonTokenType.Number`, return false. (Strings, `true`, `null`, objects, and arrays are false.)
+2. If `!reader.TryGetDecimal(out decimal value)`, return false (F7: `1e400`, values above `decimal.MaxValue`).
+3. If `value < 0` return false. If `value != decimal.Truncate(value)` return false. If `value > MaxExact` return false.
+4. If `value == 0`: the token's mantissa (the bytes of `reader.ValueSpan` before the first `e` or `E`) must contain no digit other than `0`; otherwise return false. (F7: `1E-400` reads as 0.)
+5. `nanoAiu = (long)value`; return true.
+
+**Algorithm, `TryFromIeee754Bits(bits)`** (integer arithmetic only):
+
+1. `exponent = (int)((bits >> 52) & 0x7FF)`, `mantissa = bits & 0x000F_FFFF_FFFF_FFFF`, `negative = (bits >> 63) != 0`.
+2. If `exponent == 0x7FF`: return false (NaN or infinity).
+3. If `exponent == 0 && mantissa == 0`: `nanoAiu = 0`, return true (+0 and −0).
+4. If `exponent == 0`: return false (subnormal: never an integer ≥ 1).
+5. If `negative`: return false.
+6. `significand = mantissa | (1UL << 52)`, `shift = exponent - 1075`.
+7. If `shift >= 0`: if `shift > 1` return false; `value = significand << shift`; return `value <= MaxExact` (with `nanoAiu = (long)value`). (`shift` 0 or 1 covers every integer up to 2^54; anything larger exceeds 2^53.)
+8. If `shift <= -53`: return false (a positive value below 1).
+9. `low = significand & ((1UL << -shift) - 1)`; if `low != 0` return false (fractional). `nanoAiu = (long)(significand >> -shift)`; return true.
+
+**Tests** (`NanoAiuTests`, xUnit `[Theory]` rows count as one test each):
+
+| Test | Input | Expected |
+|---|---|---|
+| NA1 `TryFromJsonNumber` accepts | `47388600`, `47388600.0`, `4.73886E7`, `4.73886e+7`, `0`, `-0`, `0.0e5`, `9007199254740992` | true; 47388600, 47388600, 47388600, 47388600, 0, 0, 0, 9007199254740992 |
+| NA2 `TryFromJsonNumber` rejects | `9007199254740993`, `1e21`, `0.5`, `-1`, `1E-400`, `1e400`, `79228162514264337593543950336`, `"47388600"`, `true`, `null`, `{}`, `[]` | false |
+| NA3 `TryFromIeee754Bits` accepts | `0x418698BDC0000000` (47388600.0), `0x4340000000000000` (2^53), `0x3FF0000000000000` (1.0), `0x41CDCD6500000000` (1e9), `0x0000000000000000` (+0), `0x8000000000000000` (−0) | true; 47388600, 9007199254740992, 1, 1000000000, 0, 0 |
+| NA4 `TryFromIeee754Bits` rejects | `0x4340000000000001` (2^53+2), `0x3FE0000000000000` (0.5), `0x7FF8000000000000` (NaN), `0x7FF0000000000000` (+∞), `0xFFF0000000000000` (−∞), `0xBFF0000000000000` (−1.0), `0x0000000000000001` (subnormal), `0x4440000000000000` (2^69) | false |
+| NA5 conversions | 47388600 | `ToUsd` = `0.000473886m`; `ToAiCredits` = `0.0473886m`; `ToPicoUsd` = `473886000` |
+| NA6 conversions at the bounds | 0; 9007199254740992 | 0m, 0m, 0; `90071.99254740992m`, `9007199.254740992m`, `90071992547409920` |
+| NA7 out of range | −1; 9007199254740993 | each of `ToUsd`, `ToAiCredits`, `ToPicoUsd`, and `ReportedCharge.Valid` throws `ArgumentOutOfRangeException` |
+| NA8 defaults | `default(ReportedCharge)` | `State == Absent`, `NanoAiu == 0`; `ReportedCharge.Absent == default` |
+| NA9 no binary floating point | the text of `NanoAiu.cs` and `ReportedCharge.cs` | contains none of `double`, `float`, `Double`, `Single`, `BitConverter` (read the files from the repository root, as `ExportPrivacyTests.EP6` does) |
+
+**Acceptance:** the nine tests pass; no other file changes.
+
+---
+
+## Task 2 specification: The Calculator Bills the Reported Charge, Keeps the List Price, and Prices Local BYOK by Model
+
+**Files**
+
+- `src/CopilotLedger.Core/Telemetry/NormalizedGenAiSpan.cs`
+- `src/CopilotLedger.Core/Pricing/CreditCalculationResult.cs`
+- New `src/CopilotLedger.Core/Pricing/ChargeSource.cs`
+- `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`
+- `tests/CopilotLedger.Tests/Pricing/BillingSourceTests.cs` (BI8's `openai` row)
+- New `tests/CopilotLedger.Tests/Pricing/ReportedChargePricingTests.cs`
+- `docs/configuration.md` ("How usage is priced", "Imported requests", "Local models and savings")
+
+**Contracts**
 
 ```csharp
-        Assert.StartsWith("WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: ", lines[0]);
-```
-
-with:
-
-```csharp
-        Assert.StartsWith("WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: ", lines[0]);
-```
-
-Edit 1 of 4 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
-
-```csharp
-                "Sets a soft AI-credit budget for one Git branch. CopilotLedger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
-```
-
-with:
-
-```csharp
-                "Sets a soft AI-credit budget for one Git branch. gh-ledger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
-```
-
-Edit 2 of 4 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
-
-```csharp
-                """["WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1","WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget."]""");
-```
-
-with:
-
-```csharp
-                """["WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1","WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget."]""");
-```
-
-Edit 3 of 4 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
-
-```csharp
-            """["WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1","WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ main: 6 failed tool calls in a row on one prompt (trip 3). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 3","WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget."]""");
-```
-
-with:
-
-```csharp
-            """["WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1","WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ main: 6 failed tool calls in a row on one prompt (trip 3). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 3","WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget."]""");
-```
-
-Edit 4 of 4 in `tests/CopilotLedger.Tests/Mcp/LedgerMcpServerTests.cs`, replace:
-
-```csharp
-            "WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1";
-```
-
-with:
-
-```csharp
-            "WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1";
-```
-
-Edit 1 of 3 in `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs`, replace:
-
-```csharp
-        Assert.Equal("CopilotLedger circuit breaker tripped", alert.Title);
-        Assert.Equal(
-            "swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status",
-```
-
-with:
-
-```csharp
-        Assert.Equal("gh-ledger circuit breaker tripped", alert.Title);
-        Assert.Equal(
-            "swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status",
-```
-
-Edit 2 of 3 in `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs`, replace:
-
-```csharp
-        Assert.Equal("CopilotLedger circuit breaker tripped", alert.Title);
-```
-
-with:
-
-```csharp
-        Assert.Equal("gh-ledger circuit breaker tripped", alert.Title);
-```
-
-Edit 3 of 3 in `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs`, replace:
-
-```csharp
-        Assert.Equal("CopilotLedger branch budget exceeded", alert.Title);
-```
-
-with:
-
-```csharp
-        Assert.Equal("gh-ledger branch budget exceeded", alert.Title);
-```
-
-### Tests
-
-Changed: BR4, AD1, AD2, AD3, BM1, BM4 and BM11 (through `AssertTripAlert` and `AssertBudgetAlert`), EP1, EP2, EP3, EP5, EP10, AM3, MC1, MC3, MC14, and GS2's `export-pr`, GS5 (`budget-alert`), GS6 (`receipt`), and GS7 (`mcp`). New: PN1, which fails on `main` at every string that Tasks 2 and 3 change.
-
-### Acceptance criteria
-
-- Every string in "What changes" says gh-ledger or names the PR receipt action, and PN1 passes.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes 1733 tests, 0 failed, 0 skipped.
-
-### Verify
-
-```shell
-dotnet build CopilotLedger.slnx
-dotnet test CopilotLedger.slnx
-```
-
-## Task 4 specification: gh-ledger in the README and the Docs
-
-The product's name in README.md and `docs/`, and the guard that keeps it there.
-
-### Files
-
-| File | Change |
-|---|---|
-| `README.md` | The title; the description, "a local AI-spend ledger for GitHub Copilot"; the sentence that gh-ledger is an independent open-source project, not a GitHub product; the action's name twice; three more mentions |
-| `docs/cli.md` | Three mentions, and the action's name |
-| `docs/configuration.md` | The title, the files heading, and 16 more mentions |
-| `docs/guide.md` | The title, the introduction, the setup heading and its contents link, and eight more lines, including the sample workflow's `name` and the commit message |
-| `docs/releasing.md` | The action's name |
-| `tests/CopilotLedger.Tests/Docs/ProductNameTests.cs` | New: PN2 |
-
-### What changes
-
-1. The README opens with "gh-ledger is a local AI-spend ledger for GitHub Copilot." and ends its introduction with "gh-ledger is an independent open-source project, not a GitHub product."
-2. Every other "CopilotLedger" in prose in README.md and `docs/*.md` becomes gh-ledger, lowercase even at the start of a sentence, as the docs already write it. "The CopilotLedger PR Receipt action" becomes "the PR receipt action", with the same link. `docs/cli.md`'s mention of the Run value `CopilotLedger` stays.
-3. Two headings change, and their anchors with them: the guide's "Set up gh-ledger", whose contents link becomes `#set-up-gh-ledger`, and configuration.md's "Where gh-ledger keeps its files", which nothing links to.
-4. **PN2** (new): README.md and every `docs/*.md` file name CopilotLedger only as `CopilotLedger.<name>` (project paths and the solution) or in "the `CopilotLedger` value under", the Run value. Like PN1, it checks Copilot Ledger too, in any case.
-
-### Code (copy exactly)
-
-Edit 1 of 6 in `README.md`, replace:
-
-```markdown
-# CopilotLedger
-
-CopilotLedger shows what GitHub Copilot costs you. Through Copilot's OpenTelemetry export, it records the GitHub AI credits that Copilot CLI, the GitHub Copilot app, and VS Code spend, and attributes them to repository, branch, model, agent, and prompt. It also tracks Microsoft Foundry BYOK spend and what local models save you.
-
-It runs on your machine as the `gh ledger` GitHub CLI extension, with no Docker or cloud service, and it never stores prompt or response content.
-```
-
-with:
-
-```markdown
-# gh-ledger
-
-gh-ledger is a local AI-spend ledger for GitHub Copilot. It shows what Copilot costs you: through Copilot's OpenTelemetry export, it records the GitHub AI credits that Copilot CLI, the GitHub Copilot app, and VS Code spend, and attributes them to repository, branch, model, agent, and prompt. It also tracks Microsoft Foundry BYOK spend and what local models save you.
-
-It runs on your machine as the `gh ledger` GitHub CLI extension, with no Docker or cloud service, and it never stores prompt or response content. gh-ledger is an independent open-source project, not a GitHub product.
-```
-
-Edit 2 of 6 in `README.md`, replace:
-
-```markdown
-- Pull request receipts, posted by the [CopilotLedger PR Receipt action](https://github.com/swigerb/copilot-ledger-action)
-```
-
-with:
-
-```markdown
-- Pull request receipts, posted by the [PR receipt action](https://github.com/swigerb/copilot-ledger-action)
-```
-
-Edit 3 of 6 in `README.md`, replace:
-
-```markdown
-- `gh ledger import`: backfill the requests in your Copilot CLI and GitHub Copilot app session logs, and in Codex's, from before you installed CopilotLedger
-```
-
-with:
-
-```markdown
-- `gh ledger import`: backfill the requests in your Copilot CLI and GitHub Copilot app session logs, and in Codex's, from before you installed gh-ledger
-```
-
-Edit 4 of 6 in `README.md`, replace:
-
-```markdown
-- Git repositories, for per-branch attribution. CopilotLedger reads `.git` directly and never runs `git`.
-```
-
-with:
-
-```markdown
-- Git repositories, for per-branch attribution. gh-ledger reads `.git` directly and never runs `git`.
-```
-
-Edit 5 of 6 in `README.md`, replace:
-
-```markdown
-The ledger stays on your machine, and CopilotLedger never stores prompt or response content. `gh ledger import` reads Copilot's and Codex's session logs in place and keeps only what pricing, attribution, and later imports need: session IDs; models and providers; token counts and times; agent names; the repository root, branch, commit, and `owner/repo` slug that a session recorded; tool names, outcomes, exit codes, and counts; SHA-256 hashes of request and tool call IDs; and each log's size, last-write time, and SHA-256 hash. It never reads prompts, responses, tool arguments or results, or compaction summaries, and it doesn't read Claude Code's logs. See [What import reads and keeps](docs/cli.md#what-import-reads-and-keeps). `gh ledger export` writes only the fields in [What export includes](docs/cli.md#what-export-includes): never prompts, responses, tool arguments or results, or file contents, and local repository roots only with `--include-local-paths`. `gh ledger audit --local-llm` sends a summary of its findings, never content or identifiers, only to a model on this machine, and never stores the answer.
-```
-
-with:
-
-```markdown
-The ledger stays on your machine, and gh-ledger never stores prompt or response content. `gh ledger import` reads Copilot's and Codex's session logs in place and keeps only what pricing, attribution, and later imports need: session IDs; models and providers; token counts and times; agent names; the repository root, branch, commit, and `owner/repo` slug that a session recorded; tool names, outcomes, exit codes, and counts; SHA-256 hashes of request and tool call IDs; and each log's size, last-write time, and SHA-256 hash. It never reads prompts, responses, tool arguments or results, or compaction summaries, and it doesn't read Claude Code's logs. See [What import reads and keeps](docs/cli.md#what-import-reads-and-keeps). `gh ledger export` writes only the fields in [What export includes](docs/cli.md#what-export-includes): never prompts, responses, tool arguments or results, or file contents, and local repository roots only with `--include-local-paths`. `gh ledger audit --local-llm` sends a summary of its findings, never content or identifiers, only to a model on this machine, and never stores the answer.
-```
-
-Edit 6 of 6 in `README.md`, replace:
-
-```markdown
-- [CopilotLedger PR Receipt action](https://github.com/swigerb/copilot-ledger-action): posting receipts on pull requests
-```
-
-with:
-
-```markdown
-- [PR receipt action](https://github.com/swigerb/copilot-ledger-action): posting receipts on pull requests
-```
-
-Edit 1 of 4 in `docs/cli.md`, replace:
-
-```markdown
-`install` and `status` warn about settings that keep Copilot's telemetry from reaching CopilotLedger:
-```
-
-with:
-
-```markdown
-`install` and `status` warn about settings that keep Copilot's telemetry from reaching gh-ledger:
-```
-
-Edit 2 of 4 in `docs/cli.md`, replace:
-
-```markdown
-- `OTEL_EXPORTER_OTLP_PROTOCOL` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` set to `grpc`; CopilotLedger accepts only `http/protobuf` and `http/json`.
-```
-
-with:
-
-```markdown
-- `OTEL_EXPORTER_OTLP_PROTOCOL` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` set to `grpc`; gh-ledger accepts only `http/protobuf` and `http/json`.
-```
-
-Edit 3 of 4 in `docs/cli.md`, replace:
-
-```markdown
-`gh ledger export-pr` writes the current branch's AI spend receipt to `.github/copilot-ledger/receipts/<branch>-<hash>.md` in the repository, where `<branch>` is the branch name with characters other than letters, digits, `.`, `_`, and `-` replaced by `-`. Commit the file on the branch and push it; the [CopilotLedger PR Receipt action](https://github.com/swigerb/copilot-ledger-action), `uses: swigerb/copilot-ledger-action@v1`, posts it on the pull request.
-```
-
-with:
-
-```markdown
-`gh ledger export-pr` writes the current branch's AI spend receipt to `.github/copilot-ledger/receipts/<branch>-<hash>.md` in the repository, where `<branch>` is the branch name with characters other than letters, digits, `.`, `_`, and `-` replaced by `-`. Commit the file on the branch and push it; the [PR receipt action](https://github.com/swigerb/copilot-ledger-action), `uses: swigerb/copilot-ledger-action@v1`, posts it on the pull request.
-```
-
-Edit 4 of 4 in `docs/cli.md`, replace:
-
-```markdown
-CopilotLedger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped. `gh ledger import` keeps only the fields in [What import reads and keeps](#what-import-reads-and-keeps), and never reads prompts, responses, tool arguments or results, or compaction summaries. `gh ledger export` writes only the fields in [What export includes](#what-export-includes), and shows local repository roots only with `--include-local-paths`. `gh ledger audit` reads the same metadata; with `--local-llm`, it sends a summary of its findings only to a model on this machine, as [Local model suggestions](#local-model-suggestions) describes, and never stores the answer.
-```
-
-with:
-
-```markdown
-gh-ledger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped. `gh ledger import` keeps only the fields in [What import reads and keeps](#what-import-reads-and-keeps), and never reads prompts, responses, tool arguments or results, or compaction summaries. `gh ledger export` writes only the fields in [What export includes](#what-export-includes), and shows local repository roots only with `--include-local-paths`. `gh ledger audit` reads the same metadata; with `--local-llm`, it sends a summary of its findings only to a model on this machine, as [Local model suggestions](#local-model-suggestions) describes, and never stores the answer.
-```
-
-Edit 1 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-# Configuring CopilotLedger
-
-CopilotLedger works with no configuration. This page explains how it prices usage and how to change that with one optional file.
-
-## Where CopilotLedger keeps its files
-```
-
-with:
-
-```markdown
-# Configuring gh-ledger
-
-gh-ledger works with no configuration. This page explains how it prices usage and how to change that with one optional file.
-
-## Where gh-ledger keeps its files
-```
-
-Edit 2 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-CopilotLedger never stores prompt or response content, and it strips credentials from Git remote URLs before saving them.
-```
-
-with:
-
-```markdown
-gh-ledger never stores prompt or response content, and it strips credentials from Git remote URLs before saving them.
-```
-
-Edit 3 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-- GitHub hasn't published the prices that follow the promotions for Gemini 4 Argon (ending 2026-12-01) and Gemini 3.8 Flash (ending after 2026-12-31). Later requests for them are recorded with status `no_rate_for_date` until you add a price window or a CopilotLedger update adds the price.
-```
-
-with:
-
-```markdown
-- GitHub hasn't published the prices that follow the promotions for Gemini 4 Argon (ending 2026-12-01) and Gemini 3.8 Flash (ending after 2026-12-31). Later requests for them are recorded with status `no_rate_for_date` until you add a price window or a gh-ledger update adds the price.
-```
-
-Edit 4 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-The built-in GitHub models have the vendors' API ids and dated snapshot ids as aliases, the same ones as their API list prices. If your overlay adds one of these names as a GitHub model or alias, for example to price `claude-haiku-4-5-20251001` before CopilotLedger did, remove it: a name that a built-in model of the same section already uses makes the overlay invalid.
-```
-
-with:
-
-```markdown
-The built-in GitHub models have the vendors' API ids and dated snapshot ids as aliases, the same ones as their API list prices. If your overlay adds one of these names as a GitHub model or alias, for example to price `claude-haiku-4-5-20251001` before gh-ledger did, remove it: a name that a built-in model of the same section already uses makes the overlay invalid.
-```
-
-Edit 5 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-Besides what each request is billed, CopilotLedger records what the same request would cost at its model's API list prices, from the `apiEquivalent` section of the rates (see [API list prices](#api-list-prices)). This API-equivalent cost is a comparison. It's never added to billed spend, and budgets and the circuit breaker ignore it.
-```
-
-with:
-
-```markdown
-Besides what each request is billed, gh-ledger records what the same request would cost at its model's API list prices, from the `apiEquivalent` section of the rates (see [API list prices](#api-list-prices)). This API-equivalent cost is a comparison. It's never added to billed spend, and budgets and the circuit breaker ignore it.
-```
-
-Edit 6 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-Each request keeps the API-equivalent result it was recorded with, along with the rates version and the SHA-256 of the API list prices that gave it. Requests recorded before gh-ledger had API list prices have none, and reports count them as unpriced until you run `gh ledger rates backfill-api-equivalent`. It prices them with the rates in use, your overlay included, as of each request's start time, and records that rates version and hash beside the request's billing rates version. It never changes what a request was billed or saved, and it skips requests that already have a result. With `--dry-run`, it shows the counts and writes nothing. A request whose API-equivalent cost would be beyond the ledger's range of about $9.2 million keeps no result; CopilotLedger doesn't record a new request with such a cost at all.
-```
-
-with:
-
-```markdown
-Each request keeps the API-equivalent result it was recorded with, along with the rates version and the SHA-256 of the API list prices that gave it. Requests recorded before gh-ledger had API list prices have none, and reports count them as unpriced until you run `gh ledger rates backfill-api-equivalent`. It prices them with the rates in use, your overlay included, as of each request's start time, and records that rates version and hash beside the request's billing rates version. It never changes what a request was billed or saved, and it skips requests that already have a result. With `--dry-run`, it shows the counts and writes nothing. A request whose API-equivalent cost would be beyond the ledger's range of about $9.2 million keeps no result; gh-ledger doesn't record a new request with such a cost at all.
-```
-
-Edit 7 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-With bring-your-own-key (BYOK), Microsoft Foundry bills you directly, not GitHub. Azure prices depend on region, deployment type, and your agreement, so CopilotLedger can't know yours.
-```
-
-with:
-
-```markdown
-With bring-your-own-key (BYOK), Microsoft Foundry bills you directly, not GitHub. Azure prices depend on region, deployment type, and your agreement, so gh-ledger can't know yours.
-```
-
-Edit 8 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-CopilotLedger's base rates are `rates.downloaded.json` when that file is valid, newer than the built-in rates, and has `schemaVersion` 2, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read, and a newer one with `schemaVersion` 1, such as one that an older gh-ledger saved, are ignored with a warning in `gh ledger status`, `gh ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh ledger status` shows `(downloaded)` after the rates version when the download is in use.
-```
-
-with:
-
-```markdown
-gh-ledger's base rates are `rates.downloaded.json` when that file is valid, newer than the built-in rates, and has `schemaVersion` 2, and the built-in rates otherwise. So after you upgrade gh-ledger to newer built-in rates, an older download is ignored. A download that can't be read, and a newer one with `schemaVersion` 1, such as one that an older gh-ledger saved, are ignored with a warning in `gh ledger status`, `gh ledger rates validate`, and the daemon log. Your overlay applies on top of either. `gh ledger status` shows `(downloaded)` after the rates version when the download is in use.
-```
-
-Edit 9 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-To change pricing, create `~/.copilot-ledger/rates.json`. CopilotLedger merges it over the built-in rates when it loads them, so you only write what you want to change.
-```
-
-with:
-
-```markdown
-To change pricing, create `~/.copilot-ledger/rates.json`. gh-ledger merges it over the built-in rates when it loads them, so you only write what you want to change.
-```
-
-Edit 10 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-If the file is invalid, CopilotLedger refuses to load it and reports the first problem it finds. It never silently ignores a broken file. Each error starts with the file's path, then says where the problem is and what's wrong:
-```
-
-with:
-
-```markdown
-If the file is invalid, gh-ledger refuses to load it and reports the first problem it finds. It never silently ignores a broken file. Each error starts with the file's path, then says where the problem is and what's wrong:
-```
-
-Edit 11 of 16 in `docs/configuration.md`, replace:
-
-````markdown
-CopilotLedger reports:
-
-```text
-/home/me/.copilot-ledger/rates.json: foundryByok.models[0].windows[0].tiers[0].outputPer1M: is required
-````
-
-with:
-
-````markdown
-gh-ledger reports:
-
-```text
-/home/me/.copilot-ledger/rates.json: foundryByok.models[0].windows[0].tiers[0].outputPer1M: is required
-````
-
-Edit 12 of 16 in `docs/configuration.md`, replace:
-
-````markdown
-CopilotLedger reports:
-
-```text
-/home/me/.copilot-ledger/rates.json: localOffload.baselineModel: does not resolve to a githubAiCredits model in the merged rates: gpt-missing
-````
-
-with:
-
-````markdown
-gh-ledger reports:
-
-```text
-/home/me/.copilot-ledger/rates.json: localOffload.baselineModel: does not resolve to a githubAiCredits model in the merged rates: gpt-missing
-````
-
-Edit 13 of 16 in `docs/configuration.md`, replace:
-
-````markdown
-CopilotLedger reports:
-
-```text
-/home/me/.copilot-ledger/rates.json: line 4, column 1: invalid JSON
-````
-
-with:
-
-````markdown
-gh-ledger reports:
-
-```text
-/home/me/.copilot-ledger/rates.json: line 4, column 1: invalid JSON
-````
-
-Edit 14 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-Local runtimes such as Foundry Local, Ollama, and LM Studio run models on your own GPU, so local requests cost $0.00. CopilotLedger recognizes them by their `localhost` endpoint.
-```
-
-with:
-
-```markdown
-Local runtimes such as Foundry Local, Ollama, and LM Studio run models on your own GPU, so local requests cost $0.00. gh-ledger recognizes them by their `localhost` endpoint.
-```
-
-Edit 15 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-To show what running locally is worth, CopilotLedger prices the same tokens at **MAI Code 2**'s GitHub rates, a deliberately conservative comparison. That amount is reported as local savings and is never billed.
-```
-
-with:
-
-```markdown
-To show what running locally is worth, gh-ledger prices the same tokens at **MAI Code 2**'s GitHub rates, a deliberately conservative comparison. That amount is reported as local savings and is never billed.
-```
-
-Edit 16 of 16 in `docs/configuration.md`, replace:
-
-```markdown
-If GitHub adds a model or changes a price before CopilotLedger ships updated rates, add or replace the model under `githubAiCredits.models`, using the same shape as the Foundry example.
-```
-
-with:
-
-```markdown
-If GitHub adds a model or changes a price before gh-ledger ships updated rates, add or replace the model under `githubAiCredits.models`, using the same shape as the Foundry example.
-```
-
-Edit 1 of 10 in `docs/guide.md`, replace:
-
-```markdown
-# CopilotLedger user guide
-
-CopilotLedger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
-```
-
-with:
-
-```markdown
-# gh-ledger user guide
-
-gh-ledger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
-```
-
-Edit 2 of 10 in `docs/guide.md`, replace:
-
-```markdown
-- [Set up CopilotLedger](#set-up-copilotledger)
-```
-
-with:
-
-```markdown
-- [Set up gh-ledger](#set-up-gh-ledger)
-```
-
-Edit 3 of 10 in `docs/guide.md`, replace:
-
-```markdown
-## Set up CopilotLedger
-```
-
-with:
-
-```markdown
-## Set up gh-ledger
-```
-
-Edit 4 of 10 in `docs/guide.md`, replace:
-
-```markdown
-**Goal:** add the Copilot requests you made before you installed CopilotLedger.
-
-CopilotLedger records requests from the moment its daemon runs, but Copilot CLI and the GitHub Copilot app also keep a log of each session on your machine. `gh ledger import` records the requests in those logs, prices each one for the date it was made, and attributes it to the branch its session was on. See what it would record for this repository first:
-```
-
-with:
-
-```markdown
-**Goal:** add the Copilot requests you made before you installed gh-ledger.
-
-gh-ledger records requests from the moment its daemon runs, but Copilot CLI and the GitHub Copilot app also keep a log of each session on your machine. `gh ledger import` records the requests in those logs, prices each one for the date it was made, and attributes it to the branch its session was on. See what it would record for this repository first:
-```
-
-Edit 5 of 10 in `docs/guide.md`, replace:
-
-```markdown
-Two sessions from yesterday hold five requests, including one by the `explore` subagent and a compaction, the request that summarizes a long conversation. A session in `contoso/api` is out of scope, and the session you're in now is still open, so it's skipped: CopilotLedger records it live. Import the five:
-```
-
-with:
-
-```markdown
-Two sessions from yesterday hold five requests, including one by the `explore` subagent and a compaction, the request that summarizes a long conversation. A session in `contoso/api` is out of scope, and the session you're in now is still open, so it's skipped: gh-ledger records it live. Import the five:
-```
-
-Edit 6 of 10 in `docs/guide.md`, replace:
-
-```markdown
-name: CopilotLedger receipt
-```
-
-with:
-
-```markdown
-name: gh-ledger receipt
-```
-
-Edit 7 of 10 in `docs/guide.md`, replace:
-
-```markdown
-git commit -m "Add CopilotLedger receipt"
-```
-
-with:
-
-```markdown
-git commit -m "Add gh-ledger receipt"
-```
-
-Edit 8 of 10 in `docs/guide.md`, replace:
-
-```markdown
-CopilotLedger records requests to local runtimes, such as Foundry Local and Ollama, at $0.00 and estimates what they saved. Foundry bills BYOK requests to you directly, not through GitHub, so CopilotLedger records them unpriced until you add your prices. Create a rates overlay:
-```
-
-with:
-
-```markdown
-gh-ledger records requests to local runtimes, such as Foundry Local and Ollama, at $0.00 and estimates what they saved. Foundry bills BYOK requests to you directly, not through GitHub, so gh-ledger records them unpriced until you add your prices. Create a rates overlay:
-```
-
-Edit 9 of 10 in `docs/guide.md`, replace:
-
-```markdown
-**Goal:** move to a new gh-ledger release, or remove CopilotLedger.
-```
-
-with:
-
-```markdown
-**Goal:** move to a new gh-ledger release, or remove gh-ledger.
-```
-
-Edit 10 of 10 in `docs/guide.md`, replace:
-
-```markdown
-To remove CopilotLedger, undo `install`:
-```
-
-with:
-
-```markdown
-To remove gh-ledger, undo `install`:
-```
-
-Edit 1 of 1 in `docs/releasing.md`, replace:
-
-```markdown
-Releases are GitHub Releases of this repository. They make `gh extension install swigerb/gh-ledger` work, and `gh ledger rates update` downloads their `rates.v2.json`. The CopilotLedger PR Receipt action is released from [its own repository](https://github.com/swigerb/copilot-ledger-action).
-```
-
-with:
-
-```markdown
-Releases are GitHub Releases of this repository. They make `gh extension install swigerb/gh-ledger` work, and `gh ledger rates update` downloads their `rates.v2.json`. The PR receipt action is released from [its own repository](https://github.com/swigerb/copilot-ledger-action).
-```
-
-Edit 1 of 1 in `tests/CopilotLedger.Tests/Docs/ProductNameTests.cs`, replace:
-
-```csharp
-            .Replace("\"--app-name=CopilotLedger\"", string.Empty, StringComparison.Ordinal)));
-    }
-```
-
-with:
-
-```csharp
-            .Replace("\"--app-name=CopilotLedger\"", string.Empty, StringComparison.Ordinal)));
-    }
-
-    [Fact]
-    public void PN2_TheReadmeAndTheDocsNameTheProductGhLedger()
-    {
-        string[] files = [RepositoryFile("README.md"), .. Directory.GetFiles(RepositoryFile("docs"), "*.md")];
-
-        Assert.Empty(Mentions(files, line => line.Replace("the `CopilotLedger` value under", string.Empty, StringComparison.Ordinal)));
-    }
-```
-
-### Tests
-
-New: PN2, which fails on `main`. No guide sample changes in this task, and the docs that tests read keep the parts they read: `RateOverlayTests.DocsExamples_MatchRealMessages` (configuration.md's error examples), `AuditDocsTests`, `ExportAllowlistTests`, and `ImportPrivacyTests` (cli.md's tables).
-
-### Acceptance criteria
-
-- README.md and the docs name the product gh-ledger, and PN2 passes.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes 1734 tests, 0 failed, 0 skipped.
-
-### Verify
-
-```shell
-dotnet build CopilotLedger.slnx
-dotnet test CopilotLedger.slnx
-```
-
-## Task 5 specification: Version 0.5.0, Where `docs/releasing.md` Lists It
-
-### Files
-
-| File | Change |
-|---|---|
-| `.github/workflows/ci.yml` | The version that the smoke test compares `--version` with |
-| `docs/cli.md` | The manifest sample's `toolVersion` |
-| `docs/guide.md` | The `status-first` and `status` samples, and the receipt sample's footer and `generator` |
-| `docs/releasing.md` | Step 1 lists every place that holds the version; step 4 tags `v0.5.0` |
-| `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj` | `<Version>0.5.0</Version>` |
-| `src/CopilotLedger.Cli/GhLedgerCli.cs` | The `AssemblyInformationalVersionAttribute` comment and the fallback after `??` |
-| `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs` | DM1 |
-| `tests/CopilotLedger.Tests/Cli/ExportBundleTests.cs` | EB2 |
-| `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs` | EC5 |
-| `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs` | `StatusText`, which RP1, RP10, RP12, and RP13 compare |
-| `tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs` | New: VR1 |
-
-### What changes
-
-1. 0.4.1 becomes 0.5.0 in every place that `docs/releasing.md` step 1 lists after this task: `<Version>`; the comment and the fallback in `GhLedgerCli.cs`; CI's smoke test; DM1, `StatusText`, EC5, and EB2; the guide's `status-first` and `status` samples and the receipt, which shows the version twice; `docs/cli.md`'s manifest sample; and the tag example.
-2. These name an earlier version on purpose and don't change: "gh-ledger 0.4.1 and earlier" in `docs/configuration.md` and in the assets table of `docs/releasing.md`; the comments in `ModelResolutionTests` and `RatesUpdateTests`; the earlier daemon's `daemon.json` in `ImportCommandTests`; and the historical mentions that Task 1 adds. `v0.5.0-rc.1`, `docs/releasing.md`'s example of a prerelease tag, stays.
-3. `docs/releasing.md` step 1 names every place, adds EC5, EB2, the manifest sample, and the tag, and says which test checks what, what reads the version as it runs, and which earlier versions to leave.
-4. **VR1** (new): with `GhLedgerCli.Version`, which is `<Version>`, `GhLedgerCli.cs` holds `    // AssemblyInformationalVersionAttribute: "<version>"` and `        ?? "<version>";`, `ci.yml` holds `--version | tr -d '\r')" = "<version>"`, `docs/cli.md` holds `  "toolVersion": "<version>",`, and `docs/releasing.md` holds `   git tag v<version>` followed by `   git push origin v<version>`. The other places have their own tests, so a release that misses any place fails a test.
-
-### Code (copy exactly)
-
-Edit 1 of 1 in `.github/workflows/ci.yml`, replace:
-
-```yaml
-          test "$(./artifacts/gh-ledger/gh-ledger --version | tr -d '\r')" = "0.4.1"
-```
-
-with:
-
-```yaml
-          test "$(./artifacts/gh-ledger/gh-ledger --version | tr -d '\r')" = "0.5.0"
-```
-
-Edit 1 of 1 in `docs/cli.md`, replace:
-
-```markdown
-  "toolVersion": "0.4.1",
-```
-
-with:
-
-```markdown
-  "toolVersion": "0.5.0",
-```
-
-Edit 1 of 4 in `docs/guide.md`, replace:
-
-````markdown
-<!-- sample: status-first -->
-```shell
-gh ledger status
-```
-
-```text
-gh-ledger 0.4.1 (GitHub CLI extension)
-````
-
-with:
-
-````markdown
-<!-- sample: status-first -->
-```shell
-gh ledger status
-```
-
-```text
-gh-ledger 0.5.0 (GitHub CLI extension)
-````
-
-Edit 2 of 4 in `docs/guide.md`, replace:
-
-````markdown
-<!-- sample: status -->
-```shell
-gh ledger status
-```
-
-```text
-gh-ledger 0.4.1 (GitHub CLI extension)
-````
-
-with:
-
-````markdown
-<!-- sample: status -->
-```shell
-gh ledger status
-```
-
-```text
-gh-ledger 0.5.0 (GitHub CLI extension)
-````
-
-Edit 3 of 4 in `docs/guide.md`, replace:
-
-```markdown
-> Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.4.1
-```
-
-with:
-
-```markdown
-> Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.5.0
-```
-
-Edit 4 of 4 in `docs/guide.md`, replace:
-
-```markdown
->   "generator": "gh-ledger 0.4.1",
-```
-
-with:
-
-```markdown
->   "generator": "gh-ledger 0.5.0",
-```
-
-Edit 1 of 2 in `docs/releasing.md`, replace:
-
-```markdown
-1. Change the version everywhere it's written, and merge that change:
-   - `<Version>` in `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`;
-   - in `src/CopilotLedger.Cli/GhLedgerCli.cs`, the `AssemblyInformationalVersionAttribute` comment and the fallback after `??`;
-   - the version that the smoke test in `.github/workflows/ci.yml` compares with;
-   - the tests that expect it: `DaemonCommandTests.DM1` and `ReportCommandTests.StatusText`;
-   - the samples in `docs/guide.md` that show it: both `status` samples and the receipt. `GuideSamplesTests` fails until they match.
-```
-
-with:
-
-```markdown
-1. Change the version everywhere it's written, and merge that change:
-   - `<Version>` in `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`;
-   - in `src/CopilotLedger.Cli/GhLedgerCli.cs`, the `AssemblyInformationalVersionAttribute` comment and the fallback after `??`;
-   - the version that the smoke test in `.github/workflows/ci.yml` compares with;
-   - the tests that expect it: `DaemonCommandTests.DM1`, `ReportCommandTests.StatusText`, `ExportCommandTests.EC5`, and `ExportBundleTests.EB2`;
-   - the samples in `docs/guide.md` that show it: `status-first`, `status`, and the receipt, which shows it twice. `GuideSamplesTests` fails until they match;
-   - the manifest sample under "The bundle" in `docs/cli.md`, as `"toolVersion"`;
-   - the tag in step 4.
-
-   `VersionPlacesTests.VR1` fails until the comment, the fallback, the smoke test, the manifest sample, and the tag show the `<Version>`. Everything else reads the version as it runs: `--version`, `status`, `daemon.json` and the daemon's log, receipts, exports, the MCP server, and the `User-Agent` that `rates update` and `audit --local-llm` send. Leave the earlier versions that the docs and tests name on purpose: "gh-ledger 0.4.1 and earlier" in `docs/configuration.md` and in the table of assets below, the comments in `ModelResolutionTests` and `RatesUpdateTests`, and the earlier daemon's `daemon.json` in `ImportCommandTests`.
-```
-
-Edit 2 of 2 in `docs/releasing.md`, replace:
-
-```markdown
-   git tag v0.4.1
-   git push origin v0.4.1
-```
-
-with:
-
-```markdown
-   git tag v0.5.0
-   git push origin v0.5.0
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`, replace:
-
-```xml
-    <Version>0.4.1</Version>
-```
-
-with:
-
-```xml
-    <Version>0.5.0</Version>
-```
-
-Edit 1 of 1 in `src/CopilotLedger.Cli/GhLedgerCli.cs`, replace:
-
-```csharp
-    // AssemblyInformationalVersionAttribute: "0.4.1"
-    public static string Version { get; } =
-        typeof(GhLedgerCli).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion
-        ?? "0.4.1";
-```
-
-with:
-
-```csharp
-    // AssemblyInformationalVersionAttribute: "0.5.0"
-    public static string Version { get; } =
-        typeof(GhLedgerCli).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion
-        ?? "0.5.0";
-```
-
-Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs`, replace:
-
-```csharp
-        Assert.Equal("0.4.1", root.GetProperty("version").GetString());
-```
-
-with:
-
-```csharp
-        Assert.Equal("0.5.0", root.GetProperty("version").GetString());
-```
-
-Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ExportBundleTests.cs`, replace:
-
-```csharp
-        Assert.Equal((1, "gh-ledger", "0.4.1"), (root.GetProperty("schemaVersion").GetInt32(), root.GetProperty("tool").GetString(), root.GetProperty("toolVersion").GetString()));
-```
-
-with:
-
-```csharp
-        Assert.Equal((1, "gh-ledger", "0.5.0"), (root.GetProperty("schemaVersion").GetInt32(), root.GetProperty("tool").GetString(), root.GetProperty("toolVersion").GetString()));
-```
-
-Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
-
-```csharp
-        Assert.Equal("2026-11-20 22:00 by gh-ledger 0.4.1", ExportFiles.Meta(page, "Generated"));
-```
-
-with:
-
-```csharp
-        Assert.Equal("2026-11-20 22:00 by gh-ledger 0.5.0", ExportFiles.Meta(page, "Generated"));
-```
-
-Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs`, replace:
-
-```csharp
-    private static string StatusText(string root) =>
-        Normalize($"""
-        gh-ledger 0.4.1
-```
-
-with:
-
-```csharp
-    private static string StatusText(string root) =>
-        Normalize($"""
-        gh-ledger 0.5.0
-```
-
-New file `tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs`:
-
-```csharp
-using CopilotLedger.Cli;
-
-namespace CopilotLedger.Tests.Docs;
-
-// Step 1 of docs/releasing.md lists every place that writes the version. The places that no other test reads must show the
-// project's <Version> too, so a release that misses one fails here.
-public sealed class VersionPlacesTests
+// NormalizedGenAiSpan gains:
+public ReportedCharge ReportedCharge { get; init; }     // github.copilot.nano_aiu, or an imported totalNanoAiu; Absent by default
+
+// New file ChargeSource.cs
+namespace CopilotLedger.Core.Pricing;
+public enum ChargeSource
 {
-    [Fact]
-    public void VR1_TheListedPlacesShowTheProjectVersion()
-    {
-        string version = GhLedgerCli.Version;
-        string cli = Text("src", "CopilotLedger.Cli", "GhLedgerCli.cs");
-
-        Assert.Matches(@"^\d+\.\d+\.\d+$", version);
-        Assert.Contains($"    // AssemblyInformationalVersionAttribute: \"{version}\"\n", cli);
-        Assert.Contains($"        ?? \"{version}\";\n", cli);
-        Assert.Contains($"--version | tr -d '\\r')\" = \"{version}\"\n", Text(".github", "workflows", "ci.yml"));
-        Assert.Contains($"  \"toolVersion\": \"{version}\",\n", Text("docs", "cli.md"));
-        Assert.Contains($"   git tag v{version}\n   git push origin v{version}\n", Text("docs", "releasing.md"));
-    }
-
-    // A repository file's text with \n line breaks, whatever the checkout's.
-    private static string Text(params string[] parts)
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CopilotLedger.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        Assert.NotNull(directory);
-        return File.ReadAllText(Path.Combine([directory.FullName, .. parts])).ReplaceLineEndings("\n");
-    }
+    RateCard = 0,   // UsdCost is the rate card's price
+    Reported,       // UsdCost is the request's valid reported charge
+    Rejected,       // a reported charge was present but malformed or inapplicable; UsdCost is the rate card's price
 }
+
+// CreditCalculationResult gains:
+public decimal ListUsdCost { get; init; }               // the rate card's billed USD for this request, whatever was charged
+public ChargeSource ChargeSource { get; init; }         // where UsdCost came from
 ```
 
-### Tests
+The existing comment on `UsdCost` becomes `// charged USD: the reported charge when ChargeSource is Reported, else the rate card's`. `AiCredits` keeps its definition (`UsdCost / 0.01m` for GitHub AI credits).
 
-Changed: DM1, RP1, RP10, RP12, and RP13 (through `StatusText`), EC5, EB2, and GS2's `status-first` and `status` and GS6 (`receipt`). New: VR1.
+**Algorithm, `Calculate(span)`:**
 
-### Acceptance criteria
+1. Rename today's body to `private CreditCalculationResult CalculateAtRateCard(NormalizedGenAiSpan span)` and make every `Result(...)` it returns set `ListUsdCost = UsdCost` and `ChargeSource = ChargeSource.RateCard`.
+2. Apply issue #79 inside `CalculateAtRateCard`:
+   1. Compute `localModel` (today's `_localModels.FirstOrDefault(item => item.Matches(model))`, null when `model` is null) **before** the provider-billed guard.
+   2. The guard returns `OtherProvider` only when `span.BillingSource == BillingSource.Provider && !MatchesValue(span.ProviderName, _localProviders) && !MatchesValue(span.ProviderName, _foundryProviders) && localModel is null`.
+   3. The local condition gains a fifth alternative: `span.BillingSource == BillingSource.Provider && localModel is not null && !MatchesValue(span.ProviderName, _foundryProviders)`. (A provider listed under `foundryByok.providerNames` stays Foundry BYOK even when its model is a local model.)
+3. `Calculate(span)`: `rateCard = CalculateAtRateCard(span)`, then by `span.ReportedCharge.State`:
+   1. `Absent` → return `rateCard`.
+   2. `Malformed` → return `rateCard with { ChargeSource = ChargeSource.Rejected }`, unless `rateCard.Status == PricingStatus.NotBillableOperation`, which returns `rateCard` unchanged (non-inference spans never count a charge).
+   3. `Valid(n)` and `rateCard.Channel == BillingChannel.GitHubAiCredits && rateCard.Status == PricingStatus.Priced` → return `rateCard with { UsdCost = NanoAiu.ToUsd(n), AiCredits = NanoAiu.ToAiCredits(n), ChargeSource = ChargeSource.Reported }`. `ListUsdCost`, `Breakdown`, `TierName`, `EstimatedCloudSavedUsd`, and `ApiEquivalent` stay the rate card's.
+   4. `Valid(0)` on any other channel or status → `rateCard` unchanged (a zero charge doesn't contradict a request GitHub didn't bill, such as BYOK or local).
+   5. `Valid(n > 0)` on any other channel or status, except `NotBillableOperation` → `rateCard with { ChargeSource = ChargeSource.Rejected }`. (`NotBillableOperation` → `rateCard` unchanged.) Using a charge for `unknown_model` or `no_rate_for_date` requests is deferred.
 
-- `gh-ledger --version` prints `0.5.0`, and every place that `docs/releasing.md` lists shows it.
-- Outside `.github/plans/`, `0.4.1` appears only in the historical places of item 2.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes 1735 tests, 0 failed, 0 skipped.
+**Tests** (`ReportedChargePricingTests`, using the embedded rates and a fixed `StartTime` of `2026-11-20T00:00:00Z`; the "chat span" is `OperationName = chat`, no endpoint, `RequestModel = ResponseModel = "claude-haiku-4.5"`, `InputTokens = 1000`, `OutputTokens = 100`, `BillingSource.Endpoint`):
 
-### Verify
+| Test | Span | Expected |
+|---|---|---|
+| RCP1 | chat span, `ReportedCharge.Valid(47388600)` | `Channel` GitHubAiCredits, `Status` Priced, `UsdCost == 0.000473886m`, `AiCredits == 0.0473886m`, `ChargeSource == Reported`, `ListUsdCost` equals `UsdCost` of the same span with `ReportedCharge.Absent`, and `Breakdown` equals that span's `Breakdown` |
+| RCP2 | the same span without a charge | `ChargeSource == RateCard`, `ListUsdCost == UsdCost` |
+| RCP3 | `Malformed` | the rate-card result with `ChargeSource == Rejected` |
+| RCP4 | `OperationName = invoke_agent`, `Valid(47388600)` | `Status == NotBillableOperation`, `UsdCost == 0m`, `ChargeSource == RateCard` |
+| RCP5 | `ServerAddress = "localhost"` (local), `Valid(0)` then `Valid(5)` | `ChargeSource == RateCard`, then `Rejected`; `UsdCost == 0m` both times |
+| RCP6 | an unknown model `zz-unknown`, `Valid(47388600)` | `Status == UnknownModel`, `ChargeSource == Rejected`, `UsdCost == 0m` |
+| RCP7 | `Valid(9007199254740992)` | `UsdCost == 90071.99254740992m`, `AiCredits == 9007199.254740992m` |
+| RCP8 (#79) | `BillingSource.Provider`, `ProviderName = "openai"`, `RequestModel = "qwen3.8-27b-cuda-gpu:1"` | `Channel == Local`, `Status == LocalOffload`, `ModelId == "qwen3.8-27b"`, `EstimatedCloudSavedUsd > 0m`, `UsdCost == 0m` |
+| RCP9 (#79) | the same with `RequestModel = "gpt-oss-unlisted"` | `Status == OtherProvider` |
+| RCP10 (#79) | an overlay calculator whose `foundryByok.providerNames` lists `"contoso"`, `ProviderName = "contoso"`, local model `qwen3.8-27b` | `Channel == FoundryByok` (not Local) |
 
-```shell
-dotnet build CopilotLedger.slnx
-dotnet test CopilotLedger.slnx
-```
+`BillingSourceTests.BI8`: the `openai` row (a provider-billed `openai` request whose model is a local model) now expects `(BillingChannel.Local, PricingStatus.LocalOffload)`; the Foundry row is unchanged. If BI8's `openai` row uses a model that isn't a local model, leave the row and add RCP8 only; report which applied.
 
-## Task 6 specification: The Upgrade Steps Copy the Data Directory First, and Every Version Mention Is Listed
+**Docs (`docs/configuration.md`)**
 
-Review fixes C1–C3 (see "Review fixes (Task 6)"). gh-ledger 0.5.0 upgrades the ledger to format 6 the first time anything opens it, and 0.4.1 can't open it after that, so the upgrade steps must copy the ledger before `gh extension upgrade ledger`, not mention a copy afterward. And the list of where the version is written, which Task 5 completed, misses Task 1's mentions and rejects a prerelease.
+- "How usage is priced", GitHub AI Credits row, "What's recorded": `AI credits and USD: the charge Copilot reports for the request (github.copilot.nano_aiu, or totalNanoAiu in a session log) when it's valid, which includes discounts such as Auto's 10% and Copilot Fusion's; otherwise GitHub's published prices (1 AI credit = $0.01)`.
+- After that table, add a paragraph: "**Charged amount and list price.** gh-ledger records both. The charged amount is what budgets, the circuit breaker, receipts, reports, export, and audit use. The list price is the rate card's price for the same tokens. A reported charge that isn't a whole number of nano AI units from 0 to 2^53 (negative, fractional, NaN, infinite, too large, or text), or that's reported for a request GitHub didn't bill at a known price, isn't trusted: the request is charged at the rate card and counted as a rejected charge."
+- "Imported requests": replace the BYOK bullet and the closing paragraph about `openai` with: "A Copilot BYOK request is local when its `providerType` is in `localOffload.providerNames`, or when its model is one of `localOffload.models` and its `providerType` isn't in `foundryByok.providerNames`; Foundry BYOK when its `providerType` is in `foundryByok.providerNames`; and `other_provider` otherwise. So a BYOK request through a local server that speaks OpenAI's API, which Copilot logs with provider type `openai`, is local when its model is listed in `localOffload.models`, such as Qwen3.8-27B's `qwen3.8-27b-cuda-gpu:1`, and `other_provider` when it isn't." Keep the Codex bullet; append "with the same model rule" to it.
+- "Local models and savings": add one sentence after the first paragraph: "A request that its provider billed, such as an imported BYOK request, is local too when its model is one of `localOffload.models`."
 
-### Files
+**Acceptance:** RCP1–RCP10 pass; BI8 updated as above; every existing pricing test passes unchanged otherwise; the docs say what the code does.
 
-| File | Change |
-|---|---|
-| `docs/cli.md` | "Upgrading or removing the extension": "Ledger format" comes before the steps, says that the format upgrade can't be undone, and says how to go back; the steps copy the data directory between `gh ledger daemon stop` and `gh extension upgrade ledger` (C1) |
-| `docs/guide.md` | "Upgrade or uninstall": the same copy, after the `daemon-stop` sample and before `gh extension upgrade ledger` (C1) |
-| `docs/releasing.md` | Step 1 names VR3 and lists every mention of the version to leave (C3) |
-| `tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs` | VR1's checks move to `AssertTheListedPlacesShow`, whose pattern allows a prerelease suffix (C2); new VR2 (C2) and VR3 (C3) |
-| `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs` | EP10 computes the oversized receipt's size from the version's length (C2) |
-| `tests/CopilotLedger.Tests/Docs/UpgradeDocsTests.cs` | New: UD1 and UD2 (C1) |
+---
 
-### What changes
+## Task 3 specification: OTLP Reads `github.copilot.nano_aiu`
 
-1. **C1, the copy.** After the Copilot sessions that run the MCP server are closed and the daemon has stopped, and before `gh extension upgrade ledger`, both documents copy the whole data directory to a new folder in the home directory, `copilot-ledger-backup-<yyyyMMdd-HHmmss>`, outside the data directory. The two PowerShell lines and the macOS and Linux line are the same in both documents, and, like gh-ledger, they use `COPILOT_LEDGER_HOME` when it's set. Copying the directory, not only `ledger.db`, keeps a `ledger.db-wal` file, which can hold the latest changes, with the ledger, and the overlay and `install.json` that go with it. Both documents say the format upgrade can't be undone. In `docs/cli.md`, "Ledger format" moves above the steps and says how to go back: stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin <tag>`, put the copy in place of the data directory, and start the daemon. The guide points there. The new commands are plain blocks, not guide samples, so `GuideSamplesTests` doesn't change, and they name no version.
-2. **C2, prereleases.** VR1's checks move to `AssertTheListedPlacesShow(version, text)`, whose pattern is `^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`. VR2 runs them on `<Version>-rc.1`, reading each file with the version replaced by that prerelease, as a release of it would write them. EP10's oversized receipt shows the version twice, in its footer and in its JSON's `generator`, so its size, 68,090 bytes with a version of five characters, is `68_080 + 2 * GhLedgerCli.Version.Length`; a pinned 68090 failed with any version of another length, such as a prerelease.
-3. **C3, the mentions to leave.** Step 1's list of versions to leave adds the prerelease tag in the example after the table of assets; the versions that the upgrade steps' rates overlay example names, in `docs/cli.md` and `docs/guide.md`, and in the comment on `GuideSamplesTests.HaikuOverlay` (all from Task 1); and the mentions to leave that `VersionPlacesTests` lists. "Leave the earlier versions" becomes "Leave the versions", because an example tag isn't an earlier version.
-4. **VR3.** Every line of README.md, `docs/*.md`, `.github/workflows/*.yml`, `src`, and `tests` (without `bin`, `obj`, and `TestResults` folders, and without `VersionPlacesTests.cs` itself, which writes the mentions out) that names `GhLedgerCli.Version` as a whole version, not as part of a longer one, holds the text of one of `Places` for its file. `Places` has the 14 texts of the places to change, with `{version}` for the version, and the 4 mentions to leave, with the version they name written out, so that changing one at the next bump fails VR3. Step 1's list of versions to leave must also name each mention to leave, in the words that `Places` gives. At 0.5.0, 19 lines name the version: 15 places to change and the 4 mentions to leave.
+**Files**
 
-### Code (copy exactly)
+- `src/CopilotLedger.Otlp/Decoding/OtlpModel.cs`
+- `src/CopilotLedger.Otlp/Decoding/OtlpJsonTraceReader.cs`
+- `src/CopilotLedger.Otlp/Decoding/OtlpProtobufTraceReader.cs`
+- `src/CopilotLedger.Otlp/Normalization/GenAiAttributeNames.cs`
+- `src/CopilotLedger.Otlp/Normalization/GenAiSpanNormalizer.cs`
+- New `tests/CopilotLedger.Tests/Otlp/NanoAiuAttributeTests.cs`
 
-Edit 1 of 1 in `docs/cli.md`, replace:
-
-````markdown
-**Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server. To upgrade:
-
-```shell
-gh ledger daemon stop
-gh extension upgrade ledger
-gh ledger daemon start
-```
-
-If `gh ledger daemon start` then says that the daemon did not start, run `gh ledger rates validate`. A new release can build in a model name that your rates overlay also lists, such as `claude-haiku-4-5-20251001`, which gh-ledger 0.5.0 builds in and earlier versions priced only through an overlay. Such an overlay is invalid, and the daemon doesn't start until you remove the entry that the message names; see [Which model prices a request](configuration.md#which-model-prices-a-request).
-
-**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 6, for `gh ledger import`, the first time its daemon or any command opens it. To keep the option of going back to an earlier version, copy `ledger.db` while the daemon is stopped, before you upgrade.
-````
-
-with:
-
-````markdown
-**Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server.
-
-**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 6, for `gh ledger import`, the first time its daemon or any command opens it. That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
-
-To upgrade, close the Copilot sessions and apps that use the MCP server, and stop the daemon:
-
-```shell
-gh ledger daemon stop
-```
-
-Copy your data directory to a new folder outside it: all of it, not only `ledger.db`, so that a `ledger.db-wal` file, which can hold the latest changes, comes with it. The data directory is `~/.copilot-ledger` (`%USERPROFILE%\.copilot-ledger` on Windows), or the directory that `COPILOT_LEDGER_HOME` names. In PowerShell:
-
-```powershell
-$data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
-Copy-Item -LiteralPath $data -Destination "$HOME\copilot-ledger-backup-$(Get-Date -Format yyyyMMdd-HHmmss)" -Recurse
-```
-
-On macOS and Linux:
-
-```shell
-cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
-```
-
-Then upgrade the extension, and start the daemon:
-
-```shell
-gh extension upgrade ledger
-gh ledger daemon start
-```
-
-If `gh ledger daemon start` then says that the daemon did not start, run `gh ledger rates validate`. A new release can build in a model name that your rates overlay also lists, such as `claude-haiku-4-5-20251001`, which gh-ledger 0.5.0 builds in and earlier versions priced only through an overlay. Such an overlay is invalid, and the daemon doesn't start until you remove the entry that the message names; see [Which model prices a request](configuration.md#which-model-prices-a-request).
-````
-
-Edit 1 of 1 in `docs/guide.md`, replace:
-
-````markdown
-<!-- sample: daemon-stop -->
-```shell
-gh ledger daemon stop
-```
-
-```text
-gh-ledger daemon stopped.
-```
-<!-- /sample -->
-
-```shell
-gh extension upgrade ledger
-```
-````
-
-with:
-
-````markdown
-<!-- sample: daemon-stop -->
-```shell
-gh ledger daemon stop
-```
-
-```text
-gh-ledger daemon stopped.
-```
-<!-- /sample -->
-
-A new release can upgrade the ledger's format the first time it opens the ledger, and that can't be undone: an earlier release can't open the ledger afterward. So before you upgrade, copy your data directory to a new folder outside it: all of it, not only `ledger.db`, so that a `ledger.db-wal` file, which can hold the latest changes, comes with it. The data directory is `C:\Users\you\.copilot-ledger` here, or `~/.copilot-ledger` on macOS and Linux, unless `COPILOT_LEDGER_HOME` names another one. In PowerShell:
-
-```powershell
-$data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
-Copy-Item -LiteralPath $data -Destination "$HOME\copilot-ledger-backup-$(Get-Date -Format yyyyMMdd-HHmmss)" -Recurse
-```
-
-On macOS and Linux:
-
-```shell
-cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
-```
-
-Keep the copy until you're sure you'll stay on the new release; [Upgrading or removing the extension](cli.md#install-and-uninstall) says how to go back with it. Upgrade the extension:
-
-```shell
-gh extension upgrade ledger
-```
-````
-
-Edit 1 of 1 in `docs/releasing.md`, replace:
-
-```markdown
-   `VersionPlacesTests.VR1` fails until the comment, the fallback, the smoke test, the manifest sample, and the tag show the `<Version>`. Everything else reads the version as it runs: `--version`, `status`, `daemon.json` and the daemon's log, receipts, exports, the MCP server, and the `User-Agent` that `rates update` and `audit --local-llm` send. Leave the earlier versions that the docs and tests name on purpose: "gh-ledger 0.4.1 and earlier" in `docs/configuration.md` and in the table of assets below, the comments in `ModelResolutionTests` and `RatesUpdateTests`, and the earlier daemon's `daemon.json` in `ImportCommandTests`.
-```
-
-with:
-
-```markdown
-   `VersionPlacesTests.VR1` fails until the comment, the fallback, the smoke test, the manifest sample, and the tag show the `<Version>`, and `VersionPlacesTests.VR3` fails while a line names it that isn't one of these places or a mention to leave that `VersionPlacesTests` lists. Everything else reads the version as it runs: `--version`, `status`, `daemon.json` and the daemon's log, receipts, exports, the MCP server, and the `User-Agent` that `rates update` and `audit --local-llm` send. Leave the versions that the docs and tests name on purpose: "gh-ledger 0.4.1 and earlier" in `docs/configuration.md` and in the table of assets below; the prerelease tag in the example after that table; the versions that the upgrade steps' rates overlay example names, in `docs/cli.md` and `docs/guide.md`, and in the comment on `GuideSamplesTests.HaikuOverlay`; the comments in `ModelResolutionTests` and `RatesUpdateTests`; the earlier daemon's `daemon.json` in `ImportCommandTests`; and the mentions to leave that `VersionPlacesTests` lists.
-```
-
-Edit 1 of 2 in `tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs`, replace:
+**Contracts**
 
 ```csharp
-using CopilotLedger.Cli;
+// OtlpValueKind.Double's comment becomes: // recognized; only an exact non-negative integer value is kept (DoubleAsNanoAiu)
+// OtlpAnyValue gains:
+public long? DoubleAsNanoAiu { get; init; }   // set when Kind is Double and the value is an integer from 0 to 2^53 (NanoAiu)
 
-namespace CopilotLedger.Tests.Docs;
-
-// Step 1 of docs/releasing.md lists every place that writes the version. The places that no other test reads must show the
-// project's <Version> too, so a release that misses one fails here.
-public sealed class VersionPlacesTests
-{
-    [Fact]
-    public void VR1_TheListedPlacesShowTheProjectVersion()
-    {
-        string version = GhLedgerCli.Version;
-        string cli = Text("src", "CopilotLedger.Cli", "GhLedgerCli.cs");
-
-        Assert.Matches(@"^\d+\.\d+\.\d+$", version);
-        Assert.Contains($"    // AssemblyInformationalVersionAttribute: \"{version}\"\n", cli);
-        Assert.Contains($"        ?? \"{version}\";\n", cli);
-        Assert.Contains($"--version | tr -d '\\r')\" = \"{version}\"\n", Text(".github", "workflows", "ci.yml"));
-        Assert.Contains($"  \"toolVersion\": \"{version}\",\n", Text("docs", "cli.md"));
-        Assert.Contains($"   git tag v{version}\n   git push origin v{version}\n", Text("docs", "releasing.md"));
-    }
+// GenAiAttributeNames gains:
+public const string NanoAiu = "github.copilot.nano_aiu";
 ```
 
-with:
+**Algorithm**
+
+1. JSON (`doubleValue`): when `value.ValueKind == JsonValueKind.Number` and `NanoAiu.TryFromJsonNumber(Encoding.UTF8.GetBytes(value.GetRawText()), out long n)`, return `{ Kind = Double, DoubleAsNanoAiu = n }`; otherwise `{ Kind = Double }` (a string, `null`, or an invalid number keeps `DoubleAsNanoAiu` null).
+2. Protobuf (field 4, wire type 1): `ulong bits = reader.ReadFixed64()` (adapt to its existing return type without a `double`); when `NanoAiu.TryFromIeee754Bits(bits, out long n)`, `{ Kind = Double, DoubleAsNanoAiu = n }`; otherwise `{ Kind = Double }`.
+3. Normalizer: only where it builds an **inference** span, set `ReportedCharge` from the attribute `github.copilot.nano_aiu` (`FindAttribute`):
+   1. Absent attribute → `ReportedCharge.Absent`.
+   2. `Kind == Int` and `0 <= IntValue <= NanoAiu.MaxExact` → `ReportedCharge.Valid(IntValue)`.
+   3. `Kind == Double` and `DoubleAsNanoAiu is long n` → `ReportedCharge.Valid(n)`.
+   4. Anything else present (a negative or too-large `Int`, an invalid `Double`, `String`, `Bool`, `Bytes`, `Array`, `KeyValueList`, or `Empty`) → `ReportedCharge.Malformed`.
+   Non-inference spans (such as `invoke_agent` and `execute_tool`) never read the attribute.
+
+**Tests** (`NanoAiuAttributeTests`; build OTLP JSON and protobuf payloads with the existing decoding tests' helpers):
+
+| Test | Input | Expected |
+|---|---|---|
+| NO1 | JSON chat span, `nano_aiu` as `{"doubleValue": 47388600}` | normalized `ReportedCharge == Valid(47388600)` |
+| NO2 | JSON chat span, `{"intValue": "47388600"}` and `{"intValue": 47388600}` | `Valid(47388600)` both |
+| NO3 | JSON chat span, `doubleValue` of `0.5`, `-1`, `9007199254740993`, `"47388600"`, `"NaN"`, `"Infinity"` | `Malformed` each |
+| NO4 | JSON chat span, `{"stringValue": "47388600"}`, `{"boolValue": true}` | `Malformed` |
+| NO5 | protobuf chat span, field 4 bits `0x418698BDC0000000` | `Valid(47388600)` |
+| NO6 | protobuf chat span, bits NaN `0x7FF8000000000000`, 0.5 `0x3FE0000000000000`, −1 `0xBFF0000000000000`, 2^53+2 `0x4340000000000001` | `Malformed` each |
+| NO7 | protobuf chat span, `int_value` −5 | `Malformed` |
+| NO8 | `invoke_agent` span with `doubleValue` 47388600 | its normalized span (if the normalizer returns one) has `ReportedCharge.Absent`, and the ingest test in Task 5 shows it's never priced |
+| NO9 | chat span without the attribute | `Absent` |
+| NO10 | `OtlpAnyValue` of a JSON `doubleValue` 1.5 | `Kind == Double`, `DoubleAsNanoAiu == null` |
+
+**Acceptance:** NO1–NO10 pass; every existing OTLP decoding and normalizer test passes unchanged.
+
+---
+
+## Task 4 specification: Ledger Format 7
+
+**Files**
+
+- `src/CopilotLedger.Storage/LedgerMigrations.cs`
+- `src/CopilotLedger.Storage/SqliteLedgerStore.cs` (`InsertSql`, `AddInsertParameters`, `ValidateEntry`, and a new `ChargeSourceName` mapping beside the existing channel and status mappings)
+- `src/CopilotLedger.Storage/ImportSessionCheckpoint.cs`, `src/CopilotLedger.Storage/UsageAuthority.cs` (checkpoint columns only)
+- `src/CopilotLedger.Storage/LedgerSnapshot.cs` (checkpoint read on format < 7)
+- New `tests/CopilotLedger.Tests/Storage/SchemaVersion7Tests.cs`
+- Tests that pin `user_version` 6 or "the supported version 6": `SchemaVersion6Tests`, `ApiEquivalentStoreTests`, `SpanLinkStoreTests`, `LedgerSnapshotTests`, `SqliteLedgerStoreTests` (change 6 to 7 where they assert the latest version; a test that **sets** `user_version = 6` to simulate a format-6 ledger keeps 6)
+
+**DDL (migration 7, exactly):**
+
+```sql
+ALTER TABLE spans ADD COLUMN list_cost_usd_pico INTEGER
+    CHECK (list_cost_usd_pico IS NULL OR list_cost_usd_pico >= 0);
+ALTER TABLE spans ADD COLUMN charge_source TEXT NOT NULL DEFAULT 'rate_card'
+    CHECK (charge_source IN ('rate_card', 'reported', 'rejected')
+           AND (charge_source <> 'reported' OR (billing_channel = 'github_ai_credits' AND pricing_status = 'priced')));
+ALTER TABLE import_sessions ADD COLUMN import_revision INTEGER NOT NULL DEFAULT 0 CHECK (import_revision >= 0);
+CREATE INDEX ix_span_links_import_span ON span_links (span_id) WHERE owner_span_row_id IS NOT NULL;
+```
+
+with the comment above it: `// Charged amounts (Sprint 12). cost_usd_pico stays the charged amount that every report sums; list_cost_usd_pico is the rate card's price, and NULL means "the same as cost_usd_pico" (every row recorded before format 7, and any row a running format-6 daemon writes after the upgrade, was charged at the rate card). import_revision 0 marks logs imported before Sprint 12's import fixes, which the next import reads again.`
+
+- The migration writes no row and never changes `import_sessions.complete`. `list_cost_usd_pico` is nullable on purpose: a gh-ledger 0.5.0 daemon still running after the binary is upgraded inserts without the new columns, and NULL then reads correctly as "list = charged".
+- **Readers that need the list price** use `COALESCE(list_cost_usd_pico, cost_usd_pico)`. No report reads it in this sprint.
+
+**Store**
+
+- `InsertSql` adds `list_cost_usd_pico` and `charge_source` after `imported_tool_call_count` (columns and `@list_cost_usd_pico`, `@charge_source` values). `AddInsertParameters` writes `PicoUsd.FromUsd(calculation.ListUsdCost)` and `ChargeSourceName(calculation.ChargeSource)`.
+- `ChargeSourceName`: `RateCard → "rate_card"`, `Reported → "reported"`, `Rejected → "rejected"`; any other value throws `ArgumentOutOfRangeException`.
+- `ValidateEntry` also checks `ListUsdCost` as it checks `UsdCost` (non-negative and convertible by `PicoUsd.FromUsd`), and rejects `ChargeSource == Reported` unless `Channel == GitHubAiCredits && Status == Priced`, with `ArgumentException("A reported charge applies only to priced GitHub AI-credit requests.")`.
+- `ImportSessionCheckpoint` gains `public int ImportRevision { get; init; }` with the comment `// LedgerImporter.CurrentImportRevision when written; 0 for checkpoints written before format 7`. `UpsertCheckpointAsync` writes it (`import_revision`, in the insert and the `DO UPDATE SET`); `ReadCheckpointAsync` gains a `bool hasImportRevision` parameter and selects `import_revision` when it's true and `0` otherwise. The store passes `true`; `LedgerSnapshot` passes `SchemaVersion >= 7`. `ValidateCheckpoint` rejects a negative `ImportRevision`.
+
+**Tests** (`SchemaVersion7Tests`):
+
+| Test | Steps | Expected |
+|---|---|---|
+| SV7-1 | create a format-6 ledger as `SchemaVersion6Tests` does (format-6 DDL by migrations 1–6, `user_version = 6`) with one live span (`cost_usd_pico` 473886000) and one checkpoint with `complete = 1`; open it with `SqliteLedgerStore.InitializeAsync` | `user_version` 7; the span's `list_cost_usd_pico` IS NULL, `charge_source` `rate_card`, `cost_usd_pico` 473886000; the checkpoint's `complete` 1 and `import_revision` 0; `ix_span_links_import_span` exists in `sqlite_master` |
+| SV7-2 | record an entry whose calculation is `UsdCost 0.000473886m`, `ListUsdCost 0.000527m`, `ChargeSource Reported`, GitHub/priced | `cost_usd_pico` 473886000, `list_cost_usd_pico` 527000000, `charge_source` `reported` |
+| SV7-3 | insert by SQL a span with `charge_source = 'reported'` and `billing_channel = 'local'` | `SqliteException` (CHECK) |
+| SV7-4 | `ValidateEntry` with `ChargeSource Reported` and `Channel Local` | `ArgumentException` with the message above |
+| SV7-5 | upsert then read a checkpoint with `ImportRevision = 1` | read back 1 |
+| SV7-6 | `LedgerSnapshot` on a format-6 ledger with a checkpoint | `GetImportSessionAsync` returns it with `ImportRevision == 0`; the ledger's `user_version` stays 6 |
+| SV7-7 | insert by SQL, as a format-6 daemon would, a span without the two new columns | the row has `list_cost_usd_pico` NULL and `charge_source` `rate_card` |
+
+**Acceptance:** SV7-1–SV7-7 pass; tests that assert the latest version now say 7 (`Database user_version 99 is newer than the supported version 7.`); no Sprint 13 file is edited.
+
+---
+
+## Task 5 specification: Live Spans Record the Charged Amount
+
+**Files**
+
+- `src/CopilotLedger.Otlp/Ingestion/IngestResult.cs`, `src/CopilotLedger.Otlp/Ingestion/LedgerIngestor.cs`
+- New `tests/CopilotLedger.Tests/Otlp/ReportedChargeIngestTests.cs`
+- `tests/CopilotLedger.Tests/Otlp/LedgerIngestorTests.cs` (only if a helper calculator, such as `OverflowingCalculator`, needs `ListUsdCost`)
+- `docs/configuration.md` (one sentence in "Charged amount and list price")
+
+**Contracts**
 
 ```csharp
-using System.Text.RegularExpressions;
-using CopilotLedger.Cli;
-
-namespace CopilotLedger.Tests.Docs;
-
-// Step 1 of docs/releasing.md lists every place that writes the version. The places that no other test reads must show the
-// project's <Version> too, so a release that misses one fails here, and every other line that names the version must be a
-// mention that step 1 says to leave.
-public sealed class VersionPlacesTests
-{
-    // The lines that may name the version: each one's file, and text that the line holds. First the places to change, with
-    // {version} for the version, which VR1 and the tests that step 1 names check. Then the mentions to leave, with the
-    // version they name written out, so that changing one fails VR3, and the words that step 1's list of them uses.
-    private static readonly (string File, string Text, string? Step1)[] Places =
-    [
-        (".github/workflows/ci.yml", "--version | tr -d '\\r')\" = \"{version}\"", null),
-        ("docs/cli.md", "  \"toolVersion\": \"{version}\",", null),
-        ("docs/guide.md", "gh-ledger {version} (GitHub CLI extension)", null),
-        ("docs/guide.md", " UTC by gh-ledger {version}", null),
-        ("docs/guide.md", "  \"generator\": \"gh-ledger {version}\",", null),
-        ("docs/releasing.md", "   git tag v{version}", null),
-        ("docs/releasing.md", "   git push origin v{version}", null),
-        ("src/CopilotLedger.Cli/CopilotLedger.Cli.csproj", "<Version>{version}</Version>", null),
-        ("src/CopilotLedger.Cli/GhLedgerCli.cs", "// AssemblyInformationalVersionAttribute: \"{version}\"", null),
-        ("src/CopilotLedger.Cli/GhLedgerCli.cs", "?? \"{version}\";", null),
-        ("tests/CopilotLedger.Tests/Cli/DaemonCommandTests.cs", "Assert.Equal(\"{version}\", root.GetProperty(\"version\").GetString());", null),
-        ("tests/CopilotLedger.Tests/Cli/ExportBundleTests.cs", "(1, \"gh-ledger\", \"{version}\")", null),
-        ("tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs", "\"2026-11-20 22:00 by gh-ledger {version}\"", null),
-        ("tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs", "gh-ledger {version}", null),
-        ("docs/cli.md", "which gh-ledger 0.5.0 builds in", "`docs/cli.md`"),
-        ("docs/guide.md", "and gh-ledger 0.5.0 builds it in", "`docs/guide.md`"),
-        ("docs/releasing.md", "such as `v0.5.0-rc.1`", "the prerelease tag"),
-        ("tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs", "gh-ledger 0.5.0 builds the name in", "`GuideSamplesTests.HaikuOverlay`"),
-    ];
-
-    [Fact]
-    public void VR1_TheListedPlacesShowTheProjectVersion() => AssertTheListedPlacesShow(GhLedgerCli.Version, Text);
-
-    // docs/releasing.md allows a prerelease, whose <Version> and tag end in a suffix such as -rc.1. When every place shows a
-    // prerelease of this version, VR1's checks pass too.
-    [Fact]
-    public void VR2_APrereleaseVersionPassesTheSameChecks()
-    {
-        string prerelease = GhLedgerCli.Version + "-rc.1";
-
-        AssertTheListedPlacesShow(prerelease, parts => Text(parts).Replace(GhLedgerCli.Version, prerelease, StringComparison.Ordinal));
-    }
-
-    // Every line of the README, the docs, the workflows, src, and tests that names the version is one of Places, so a new
-    // mention fails here until step 1 of docs/releasing.md and Places list it, and step 1's list of the versions to leave
-    // names each mention to leave. This file writes those mentions out, so VR3 skips it.
-    [Fact]
-    public void VR3_EveryLineThatNamesTheVersionIsListed()
-    {
-        string version = GhLedgerCli.Version;
-        Regex names = new($@"(?<![0-9.]){Regex.Escape(version)}(?![0-9]|\.[0-9])");
-        string root = RepositoryFile();
-        string[] files =
-        [
-            RepositoryFile("README.md"),
-            .. Directory.GetFiles(RepositoryFile("docs"), "*.md"),
-            .. Directory.GetFiles(RepositoryFile(".github", "workflows"), "*.yml"),
-            .. FilesUnder(RepositoryFile("src")),
-            .. FilesUnder(RepositoryFile("tests")),
-        ];
-        string[] unlisted =
-        [
-            .. files.Select(file => Path.GetRelativePath(root, file).Replace('\\', '/'))
-                .Where(file => file != "tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs")
-                .Order(StringComparer.Ordinal)
-                .SelectMany(file => File.ReadAllLines(Path.Combine(root, file))
-                    .Select((line, index) => (Text: line, Number: index + 1))
-                    .Where(line => names.IsMatch(line.Text) && !Places.Any(place => place.File == file
-                        && line.Text.Contains(place.Text.Replace("{version}", version, StringComparison.Ordinal), StringComparison.Ordinal)))
-                    .Select(line => $"{file}:{line.Number}")),
-        ];
-        string releasing = Text("docs", "releasing.md");
-        int leave = releasing.IndexOf("that the docs and tests name on purpose:", StringComparison.Ordinal);
-
-        Assert.Empty(unlisted);
-        Assert.True(leave >= 0, "docs/releasing.md doesn't list the versions to leave.");
-        Assert.All(
-            Places.Where(place => place.Step1 is not null),
-            place => Assert.Contains(place.Step1!, releasing[leave..releasing.IndexOf('\n', leave)], StringComparison.Ordinal));
-    }
-
-    // VR1's checks of version: it's a version, with or without a prerelease suffix, and the places that no other test reads
-    // show it. text reads a repository file, given its path's parts.
-    private static void AssertTheListedPlacesShow(string version, Func<string[], string> text)
-    {
-        string cli = text(["src", "CopilotLedger.Cli", "GhLedgerCli.cs"]);
-
-        Assert.Matches(@"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", version);
-        Assert.Contains($"    // AssemblyInformationalVersionAttribute: \"{version}\"\n", cli);
-        Assert.Contains($"        ?? \"{version}\";\n", cli);
-        Assert.Contains($"--version | tr -d '\\r')\" = \"{version}\"\n", text([".github", "workflows", "ci.yml"]));
-        Assert.Contains($"  \"toolVersion\": \"{version}\",\n", text(["docs", "cli.md"]));
-        Assert.Contains($"   git tag v{version}\n   git push origin v{version}\n", text(["docs", "releasing.md"]));
-    }
+// IngestResult gains:
+public int RejectedReportedCharges { get; init; }   // inference spans recorded at the rate card because their reported charge was rejected
 ```
 
-Edit 2 of 2 in `tests/CopilotLedger.Tests/Docs/VersionPlacesTests.cs`, replace:
+**Algorithm (`LedgerIngestor.IngestAsync`)**
+
+1. After `calculation = _calculator.Calculate(attributed)`, also check `PicoUsd.FromUsd(calculation.ListUsdCost)` inside the existing cost-out-of-range `try` (same `catch`, same `costRejected++`).
+2. Count `calculation.ChargeSource == ChargeSource.Rejected` for every entry passed to `RecordAsync` into `RejectedReportedCharges`. A rejected charge isn't a rejected span: `RejectedSpans`, `FirstRejectionReason`, and the OTLP partial-success response are unchanged.
+
+**Tests** (`ReportedChargeIngestTests`, using `LedgerIngestorTests`' in-memory OTLP JSON helpers and a temporary ledger):
+
+| Test | Steps | Expected |
+|---|---|---|
+| RI1 (#76 AC1) | ingest one `chat` span (model `claude-haiku-4.5`, 1000 input, 100 output, no endpoint) with `github.copilot.nano_aiu` `{"doubleValue": 47388600}` | the row's `cost_usd_pico` 473886000 (0.0473886 AI credits), `charge_source` `reported`, `list_cost_usd_pico` = the rate card's price of the same span in pico-USD (from `PicoUsd.FromUsd(calculator.Calculate(spanWithoutCharge).UsdCost)`); `RejectedReportedCharges` 0 |
+| RI2 (#76 AC1) | the same span without the attribute | `cost_usd_pico` = that rate-card price, `charge_source` `rate_card`, `list_cost_usd_pico` = `cost_usd_pico` |
+| RI3 (#76 AC2) | an `invoke_agent` span with `nano_aiu` 11855545000 and one chat span with 47388600 in the same trace | the ledger sums 473886000 pico-USD for the trace; the `invoke_agent` span has no `spans` row |
+| RI4 (#76 AC3) | chat spans with `doubleValue` `0.5`, `-1`, `"NaN"`, and `9007199254740993` | four rows at the rate card with `charge_source` `rejected`; `RejectedReportedCharges` 4; `RejectedSpans` 0 |
+| RI5 (#76 AC5) | after RI1's span, query branch spend as `branch --since all --json` does and build the receipt as `ReceiptCommandTests` does | the receipt's total AI credits and USD equal the branch row's: `0.0473886` and `0.000473886` |
+| RI6 (#76 AC5) | a branch budget of $0.0005 with RI1's span (`0.000473886`), then a second identical span | budget status before the second: under budget; after: over (the budget sums the charged amount, not the list price) |
+| RI7 (#76 AC5) | the circuit breaker's credit-velocity evaluation over RI1's span with a threshold between the charged and the list price | evaluates against the charged amount (use `CircuitBreakerMonitorTests`' setup; pick a threshold strictly between the two amounts computed in the test) |
+
+RI5–RI7 assert behavior through existing public APIs only; **no** budget, breaker, or receipt code changes (they already sum `cost_usd_pico`). If one of them fails, stop and report it: it means a reader uses something other than `cost_usd_pico`.
+
+**Docs:** append to the "Charged amount and list price" paragraph: "The daemon counts rejected charges per request and records each as charged at the rate card."
+
+**Acceptance:** RI1–RI7 pass; no file under `src/CopilotLedger.Core/Breaker`, `src/CopilotLedger.Core/Audit`, or alert text changes.
+
+---
+
+## Task 6 specification: Import Reads `totalNanoAiu`, and the Report Gains Its Sprint 12 Counts
+
+**Files**
+
+- `src/CopilotLedger.Core/Import/JsonFields.cs`
+- `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (`UsagePaths`, `CompactionPaths`, `Usage`, `Compaction`)
+- `src/CopilotLedger.Core/Import/ImportedUsageRecord.cs`, `src/CopilotLedger.Core/Import/SessionImportMapper.cs`
+- `src/CopilotLedger.Core/Import/ImportDiagnosticCode.cs`
+- `src/CopilotLedger.Storage/ImportRecordResult.cs`
+- `src/CopilotLedger.Storage/Import/ImportReport.cs`, `src/CopilotLedger.Storage/Import/LedgerImporter.cs` (`Tally`, pricing loop, per-log diagnostics)
+- `src/CopilotLedger.Cli/Import/ImportCommands.cs` (`Rows`, `WriteJson`, `Message`)
+- `tests/CopilotLedger.Tests/TestSupport/CopilotSessionLogs.cs`
+- New `tests/CopilotLedger.Tests/Import/CopilotReportedChargeTests.cs`
+- Exact-output tests that change: `ImportCommandTests` (table rows and JSON), `GuideSamplesTests` samples via `docs/guide.md`, and any compaction amount assertions (see "Fixture default" below)
+- `docs/cli.md` (import report table, JSON fields, allowlist), `docs/guide.md` (import samples)
+
+**Contracts**
 
 ```csharp
-    // A repository file's text with \n line breaks, whatever the checkout's.
-    private static string Text(params string[] parts)
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CopilotLedger.slnx")))
-        {
-            directory = directory.Parent;
-        }
+// JsonFields gains:
+// The value at path as a reported charge: Absent when the path is missing or JSON null; Valid for a JSON number that
+// NanoAiu.TryFromJsonNumber accepts; Malformed for any other value (another number, a string, a bool, an object, an array).
+internal ReportedCharge NanoAiu(string path);
+// Value gains a field set only for JSON numbers: the NanoAiu.TryFromJsonNumber result over reader.ValueSpan (null if false).
 
-        Assert.NotNull(directory);
-        return File.ReadAllText(Path.Combine([directory.FullName, .. parts])).ReplaceLineEndings("\n");
-    }
+// ImportedUsageRecord gains:
+public ReportedCharge ReportedCharge { get; init; }   // totalNanoAiu; Absent when the log has none
+
+// SessionImportMapper.ToSpan copies it: ReportedCharge = record.ReportedCharge.
+
+// ImportDiagnosticCode gains, appended after SupersededUnmatched:
+ReportedChargeRejected,       // set by the importer: requests of the log charged at the rate card because their reported charge was rejected
+
+// ImportRecordResult gains (all default 0; Tasks 10 and 11 set them):
+public int Repriced { get; init; }
+public int LiveRepriced { get; init; }
+public int ToolLinksRelinked { get; init; }
+public int ToolLinksRemoved { get; init; }
+
+// SessionLogReadResult gains (Task 8 sets it):
+public long ToolCallsFallback { get; init; }          // tool calls linked by file order because their apiCallId chain didn't resolve
+
+// ImportSourceReport gains (required, after ToolLinksRecorded):
+public required long ToolLinksRelinked { get; init; }        // imported tool links moved to the request that asked for them
+public required long ToolLinksRemoved { get; init; }         // imported tool links removed: their request has no imported row
+public required long ToolLinksFallback { get; init; }        // tool calls linked by file order (no resolvable apiCallId)
+public required long Repriced { get; init; }                 // imported rows whose pricing was rewritten
+public required long LiveRepriced { get; init; }             // live rows given their log's reported charge
+public required long ReportedChargesRejected { get; init; }  // requests priced at the rate card because their reported charge was rejected
 ```
 
-with:
+`ImportSourceReport.Complete` is unchanged: none of the six makes coverage incomplete.
+
+**Session-log paths (allowlist additions):** `UsagePaths` gains `("data.usage.copilotUsage.totalNanoAiu", 0)`; `CompactionPaths` gains `("data.compactionTokensUsed.copilotUsage.totalNanoAiu", 0)`. `Usage` sets `ReportedCharge = fields.NanoAiu("data.usage.copilotUsage.totalNanoAiu")` for every record; `Compaction` sets `ReportedCharge = fields.NanoAiu("data.compactionTokensUsed.copilotUsage.totalNanoAiu")`. A malformed charge never makes a record unsupported: it's priced at the rate card and counted.
+
+**Importer:** for every in-scope record priced in this run (whatever its resolution), count `calculation.ChargeSource == Rejected` per log; add it to `tally.ReportedChargesRejected`, and when it's above 0, add a diagnostic `{ Source, LogId, Code = ReportedChargeRejected, Count }` after the `CostOutOfRange` one. Also check `PicoUsd.FromUsd(calculation.ListUsdCost)` inside the existing cost-out-of-range `try`. `tally.ToolLinksFallback += result.ToolCallsFallback` for each log read; `Repriced`, `LiveRepriced`, `ToolLinksRelinked`, and `ToolLinksRemoved` sum the batch results' fields.
+
+**CLI (exact):**
+
+- `Rows` gains, after `("Unpriced", …)` and in this order: `("Charges rejected", r => r.ReportedChargesRejected)`, `("Repriced", r => r.Repriced)`, `("Live repriced", r => r.LiveRepriced)`, `("Tool links relinked", r => r.ToolLinksRelinked)`.
+- `WriteJson`'s per-source fields gain, right after `toolLinksRecorded` and in this order: `toolLinksRelinked`, `toolLinksRemoved`, `toolLinksFallback`, `repriced`, `liveRepriced`, `reportedChargesRejected`.
+- `Message`: `ImportDiagnosticCode.ReportedChargeRejected => $"{Plural(count, "reported charge")} couldn't be used; charged at the rate card"`.
+
+**Fixture support (`CopilotSessionLogs`):**
+
+- `Usage(...)` gains `long? totalNanoAiu = null`; when not null it writes `usage["copilotUsage"] = { "totalNanoAiu": totalNanoAiu, "tokenDetails": [ { "tokenType": "input", "tokenCount": input } ] }` before `accounting`.
+- `Compaction(...)` gains `long? totalNanoAiu = 11_855_545_000` (today's value); null omits `copilotUsage`.
+- **Fixture default:** compactions in existing tests now carry a valid charge of 11,855,545,000 nano AIU, so they're charged **11.855545 AI credits = $0.11855545** instead of the rate card. Update each existing assertion that pins a compaction's billed amount to those exact values, or pass `totalNanoAiu: null` where the test is about rate-card pricing. Report the list of tests changed in the commit body.
+
+**Tests** (`CopilotReportedChargeTests`, through `LedgerImporter` on a temporary ledger):
+
+| Test | Log | Expected |
+|---|---|---|
+| IRC1 (#76 AC4) | one usage record `totalNanoAiu: 47388600` | its row: `cost_usd_pico` 473886000, `charge_source` `reported`, `list_cost_usd_pico` = the rate-card price; report `AiCredits == 0.0473886m`, `ReportedChargesRejected == 0` |
+| IRC2 | the same without `copilotUsage` | rate card, `charge_source` `rate_card` |
+| IRC3 | `totalNanoAiu` written as `0.5`, `-1`, `"47388600"`, `9007199254740993`, and `{}` (five records) | five rows at the rate card, `charge_source` `rejected`; `ReportedChargesRejected == 5`; one diagnostic `reportedChargeRejected` with `Count == 5`; coverage complete (exit 0 through the CLI) |
+| IRC4 (#76 AC4) | a compaction with the fixture default | 11.855545 AI credits ($0.11855545), `reported` |
+| IRC5 | a BYOK usage record (`providerType` `anthropic`) with `totalNanoAiu: 5` | `other_provider`, `charge_source` `rejected` (D3: a positive charge for a request GitHub didn't bill) |
+| IRC6 | `ImportCommandTests`' table and JSON fixtures, updated | the four new rows appear after `Unpriced` with 0s; the six JSON fields appear after `toolLinksRecorded` with 0s |
+| IRC7 | the `--dry-run` of IRC3 | the same counts and diagnostic; nothing written |
+
+**Docs:**
+
+- `docs/cli.md` report table: after `Unpriced`, rows `Charges rejected` ("Requests charged at the rate card because the charge their log reported isn't valid or can't apply"), `Repriced` ("Requests imported before whose pricing changed, which this import rewrote; see [Repairs](#repairs)"), `Live repriced` ("Live requests that this import gave the charge their log reported; see [Repairs](#repairs)"), `Tool links relinked` ("Imported tool calls moved to the request that asked for them; see [Repairs](#repairs)"). (Task 12 adds the "Repairs" heading; until then the anchor is a forward reference, which is fine.)
+- JSON field list: after `toolLinksRecorded`, add `toolLinksRelinked`, `toolLinksRemoved`, `toolLinksFallback` (tool calls linked to the latest request of their agent because their `apiCallId` couldn't be followed), `repriced`, `liveRepriced`, `reportedChargesRejected`; the diagnostic codes gain `reportedChargeRejected`.
+- Allowlist table: add rows `spans.list_cost_usd_pico` ("The rate card's price, from the fields above"), `spans.charge_source` (`reported` when `data.usage.copilotUsage.totalNanoAiu`, or a compaction's `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, is a valid charge for a priced GitHub request; `rejected` when it's present but not; else `rate_card`), and add `spans.cost_usd_pico`'s note: "the reported charge when `charge_source` is `reported`". Add `import_sessions.import_revision` to the "The import's own results" row. Codex column: `rate_card` / "Priced from the fields above".
+- `docs/guide.md`: update the import samples' tables (the four new rows) so `GuideSamplesTests` passes.
+
+**Acceptance:** IRC1–IRC7 and every updated exact-output test pass; `ImportPrivacyTests` passes with the new allowlist rows.
+
+---
+
+## Task 7 specification: Import BYOK and Failed Compactions
+
+**Files**
+
+- `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (`CompactionPaths`, `Compaction`, and the latest BYOK provider by model)
+- `src/CopilotLedger.Core/Import/ImportedUsageRecord.cs` (comment on `RecordKey` only)
+- `tests/CopilotLedger.Tests/Import/CopilotCompactionTests.cs` (tests that asserted "failed" or "no service request ID" is unsupported change to the rules below)
+- New `tests/CopilotLedger.Tests/Import/CopilotCompactionShapeTests.cs`
+- `docs/cli.md` (allowlist rows for `span_id` and `import_record_aliases.record_key_sha256`; "Read, never stored")
+
+**Paths:** `CompactionPaths` gains `("data.compactionAttemptId", 2048)` and `("data.compactionTokensUsed.provider.id", 64)` (only so that `provider` is recorded as an object; `provider.id` is never used). `IsObject("data.compactionTokensUsed.provider")` and `IsObject("data.compactionTokensUsed.copilotUsage")` decide presence. `summaryContent`, `clientRequestId`, `requestId`, `checkpointPath`, and `attemptMetrics` stay unread.
+
+**Session state:** `Session` keeps `_latestByokProviderByModel` (`Dictionary<string, string>`, `StringComparer.OrdinalIgnoreCase`): each valid BYOK usage record sets `[model] = providerType.ToLowerInvariant()` when `providerType` is a string.
+
+**Algorithm (`Compaction`), the first rule that matches decides** (`srid` = normalized `data.serviceRequestId`; `success` = `fields.Boolean("data.success")`; `charge` = `fields.NanoAiu("data.compactionTokensUsed.copilotUsage.totalNanoAiu")`):
+
+0. Unchanged: no `compactionTokensUsed` (and no duplicate) → skipped event. A duplicate property → parsed, unsupported, field = the duplicate.
+1. `success` isn't a boolean → parsed, unsupported, field `data.success`.
+2. `success == false && srid is null && !IsObject(copilotUsage)` → **skipped event** (`_skipped++`, not parsed): a failed attempt nobody billed.
+3. `success == false && srid is not null && charge.State == Valid` → a charged GitHub compaction: the success path's checks and record (rule 5), with its `ReportedCharge`.
+4. `success == false` (anything else) → parsed, unsupported, field `data.success`.
+5. `success == true && srid is not null` → today's path, unchanged except `ReportedCharge = charge` (Task 6).
+6. `success == true && srid is null && !IsObject(provider) && !IsObject(copilotUsage) && compactionAttemptId is not null` → a **BYOK compaction**: today's checks for `timestamp`, `compactionTokensUsed` object, `requestCount == 1`, `model`, tokens, and duration (not `provider.kind`), then a record with `RecordKey = compactionAttemptId`, `ServiceRequestId = null`, `ProviderName = _latestByokProviderByModel.GetValueOrDefault(model)` (null when none), `BillingSource = BillingSource.Provider`, `ReportedCharge = Absent`, cache states `Reported`, `ToolCallCount = 0`, and the agent and turn as today.
+7. Otherwise (`success == true` with no `srid` and a provider, a `copilotUsage`, or no `compactionAttemptId`) → parsed, unsupported, field `data.serviceRequestId`.
+
+A BYOK compaction has no canonical ID, so it's recorded only from sessions without live spans (`Ambiguous-overlap` otherwise), as other BYOK requests are. Its record key is `compactionAttemptId`, stored only as `ImportIds.RecordKeySha256(Copilot, Compaction, attemptId)` and in `span_id`'s hash.
+
+**Tests** (`CopilotCompactionShapeTests`; fixtures change `Compaction(...)` with `change:`):
+
+| Test | Log | Expected |
+|---|---|---|
+| CC1 (#82 AC1) | `session.start` 1.0.114; one BYOK usage record (`providerType` `anthropic`, model `claude-haiku-4.5`); a successful BYOK compaction (no `serviceRequestId`, no `provider`, no `copilotUsage`, `compactionAttemptId` `c0000000-0000-4000-8000-0000000000b1`); a failed charged compaction (`success` false, `serviceRequestId` `srv-failed-1`, the default charge); a failed uncharged compaction (`success` false, no `serviceRequestId`, no `copilotUsage`) | through the CLI, `import --all` exits 0 with coverage complete; recorded: the BYOK usage record, the BYOK compaction (provider `anthropic`, `other_provider`), and the failed charged compaction (11.855545 AI credits, `reported`); `SkippedEvents` includes the uncharged one; the second run reports `Skipped, unchanged` 1 |
+| CC2 (#82 AC2) | a successful GitHub compaction missing `inputTokens` | unsupported, coverage incomplete (exit 2), the log isn't skipped next run |
+| CC3 | `success` is `"true"` (a string) | unsupported, field `data.success` |
+| CC4 | failed with `serviceRequestId` and no `copilotUsage` | unsupported, field `data.success` |
+| CC5 | failed with `serviceRequestId` and `totalNanoAiu` `0.5` | unsupported, field `data.success` (a failed compaction is recorded only on a valid charge) |
+| CC6 | successful, no `serviceRequestId`, but a `copilotUsage` | unsupported, field `data.serviceRequestId` |
+| CC7 | successful BYOK compaction with no earlier BYOK record of its model | recorded with `provider_name` NULL, `other_provider` |
+| CC8 | CC1's log in a session that has a live span | the BYOK compaction is `Ambiguous-overlap`; the failed charged one is recorded (or overlap-skipped when the live span carries its service request ID) |
+| CC9 (privacy) | CC1's log with `summaryContent`, `clientRequestId`, `requestId`, `checkpointPath` set to the fixture `Canary` | no canary in any ledger table, the report's text or JSON, or diagnostics; the raw `compactionAttemptId` appears nowhere in the ledger |
+
+**Docs (`docs/cli.md`):** `spans.span_id` and `import_record_aliases.record_key_sha256` rows: "…or a compaction's `data.serviceRequestId`, or a BYOK compaction's `data.compactionAttemptId`". "Read, never stored": add "`data.compactionAttemptId`, stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `copilotUsage` are present". "Imported requests" in `docs/configuration.md` gains: "A compaction that Copilot billed is recorded even when it failed; a failed compaction that nobody billed is skipped. A compaction through your own provider (BYOK) is priced as that provider's requests are, by the provider of the latest BYOK request with the same model."
+
+**Acceptance:** CC1–CC9 pass; `summaryContent` is never read.
+
+---
+
+## Task 8 specification: Link Imported Tool Calls by `apiCallId`
+
+**Files**
+
+- `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (`Types`, `Kinds`, new `AssistantMessagePaths`, `ToolStartPaths`, `ToolCompletePaths`, `UsagePaths`, `OnLine`, `Usage`, `ToolStart`, `ToolComplete`, `Finish`, `PendingTool`)
+- `src/CopilotLedger.Core/Import/ImportEventKind.cs` (append `AssistantMessage`)
+- `src/CopilotLedger.Core/Import/SessionLogReadResult.cs` (`ToolCallsFallback`, added in Task 6, now set)
+- `tests/CopilotLedger.Tests/TestSupport/CopilotSessionLogs.cs`
+- New `tests/CopilotLedger.Tests/Import/CopilotToolLinkTests.cs`
+- `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs` (one new test)
+- `docs/cli.md` (allowlist rows for `span_links`, "Read, never stored", "Never read")
+
+**Paths (exact):**
+
+- `Types` gains `"assistant.message"` (and `Kinds` gains `ImportEventKind.AssistantMessage`, appended to the enum).
+- `AssistantMessagePaths = new(("id", 2048), ("parentId", 2048), ("data.apiCallId", 2048))`.
+- `ToolStartPaths` and `ToolCompletePaths` each gain `("id", 2048)` and `("parentId", 2048)`.
+- `UsagePaths` gains `("data.usage.apiCallId", 2048)`.
+
+Nothing else is read from `assistant.message`. An `assistant.message` still counts as a skipped event (`_skipped++`), so `SkippedEvents` doesn't change for existing logs.
+
+**Session state:**
+
+- `_chain`: `Dictionary<string, (ImportEventKind Kind, string? ParentId, string? ApiCallId)>` (ordinal), keyed by envelope `id`, for `assistant.message`, `tool.execution_start`, and `tool.execution_complete` events with no duplicate property and a string `id`. A repeated `id` keeps the first entry.
+- `_usageKeyByApiCallId`: `Dictionary<string, string>` (ordinal): each **valid** usage record sets `[apiCallId ?? usageId] = usageId`, where `apiCallId = fields.String("data.usage.apiCallId")`. A repeated key keeps the first.
+- `PendingTool` gains `string? ParentId` (the start event's `parentId`). Completed calls are kept as pending results (fallback owner, parent ID, and the fields `ImportedToolCall` needs) and turned into `ImportedToolCall`s in `Finish`.
+
+**Algorithm (`Finish`, for each completed tool call, in completion order):**
+
+1. `id = call.ParentId`; `hops = 0`.
+2. While `id is not null && hops < 100`: `hops++`; if `!_chain.TryGetValue(id, out entry)` → stop (unresolved). If `entry.Kind == AssistantMessage` → if `entry.ApiCallId is not null && _usageKeyByApiCallId.TryGetValue(entry.ApiCallId, out owner)` → resolved with `owner`; otherwise unresolved; stop. Else (`ToolExecutionStart` or `ToolExecutionComplete`) → `id = entry.ParentId`.
+3. Resolved → `OwnerRecordKey = owner`. Unresolved → `OwnerRecordKey = call.FallbackOwner` (today's rule: the latest usage record of the tool's agent at its start); when that's null, the call is dropped as today. Count `ToolCallsFallback` for every call whose owner came from the fallback and wasn't null.
+
+**Fixture support (`CopilotSessionLogs`):**
+
+- `Event(...)` gains `string? parentId = null`; when given, it replaces the automatic `parentId`. Add `public string LastId` (the last event's `id`).
+- `AssistantMessage(string apiCallId, string? parentId = null)` writes `assistant.message` with `data`: `messageId`, `apiCallId`, `content = Canary`, `reasoningText = Canary`, `reasoningOpaque = Canary`, `encryptedContent = Canary`, `toolRequests = [ { "toolCallId": "<id>", "name": Canary, "arguments": { "command": Canary } } ]`, `reasoningBlocks = [ Canary ]`.
+- `ToolStart(...)` and `ToolComplete(...)` gain `string? parentId = null`.
+
+**Tests** (`CopilotToolLinkTests`):
+
+| Test | Log (same agent throughout) | Expected |
+|---|---|---|
+| TL1 (#85 AC1) | `AssistantMessage("api-A")` → id `mA`; `Usage("api-A", "srv-A", numToolCalls: 2)`; `AssistantMessage("api-B")`; `Usage("api-B", "srv-B")`; `ToolStart("t1", "bash", parentId: mA)` → `s1`; `ToolStart("t2", "bash", parentId: s1)`; `ToolComplete("t1", true, parentId: s1)`; `ToolComplete("t2", true)` | both links' `owner_span_row_id` is A's row and their `trace_id` A's trace; none is B's; `ToolLinksFallback == 0` |
+| TL2 (#85 AC2) | TL1, but the tool start's `parentId` names an unknown ID | the call falls back to B (today's rule) and `ToolLinksFallback == 1` |
+| TL3 | the chain passes through a `hook.start` event | fallback, counted |
+| TL4 | the message's `apiCallId` matches no usage record | fallback, counted |
+| TL5 | a usage record without `data.usage.apiCallId`, its message's `apiCallId` equals its `usageId` | resolved (1.0.115's shape, L3) |
+| TL6 | a `parentId` cycle of two tool events | fallback after at most 100 hops, counted; no exception |
+| TL7 | a usage record that arrives **after** its tool starts and completes | resolved to it (resolution is at the end of the log) |
+| TL8 | 1.0.114 fixtures used by existing tool tests | every existing tool-link test passes unchanged |
+| TL9 | `--dry-run` of TL1 | `toolLinksRecorded` 2, `toolLinksFallback` 0 |
+
+`ImportPrivacyTests` gains **IP-AM1 (#85 AC3):** a log with `AssistantMessage` canaries (all six fields above) and tool arguments and results holding `Canary`; after import, no table of the ledger, the text report, the JSON report, or any diagnostic contains `Canary`. Use the existing privacy tests' whole-database scan.
+
+**Docs (`docs/cli.md`):**
+
+- Allowlist row `span_links.trace_id`, `span_links.conversation_id`, `span_links.owner_span_row_id`: "The usage record whose response asked for the tool: the one whose `data.usage.apiCallId` (or usage ID) equals `data.apiCallId` of the `assistant.message` that the tool's `parentId` chain reaches through tool events; when the chain doesn't reach one, the latest usage record of the tool's agent".
+- "Read, never stored": add "the envelope `id` and `parentId` of `assistant.message`, `tool.execution_start`, and `tool.execution_complete`, `data.apiCallId` of `assistant.message`, and `data.usage.apiCallId` of usage records, which tie a tool call to the request that asked for it".
+- "Never read": replace "user and assistant messages" with "user and assistant message content (`content`, `transformedContent`), reasoning (`reasoningText`, `reasoningOpaque`, `reasoningBlocks`, `encryptedContent`), the tool requests a message makes (`toolRequests`)", keeping the rest of the list.
+
+**Acceptance:** TL1–TL9 and IP-AM1 pass; the only new paths are those listed.
+
+---
+
+## Task 9 specification: Import Copilot CLI 1.0.115 Sessions
+
+**Files**
+
+- `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (`MaximumVersion`, `Usage`, the gate's comment)
+- `src/CopilotLedger.Cli/Import/ImportCommands.cs` (only if the supported-range text is a literal rather than built from `MaximumVersion`)
+- `tests/CopilotLedger.Tests/TestSupport/CopilotSessionLogs.cs` (`Usage115`)
+- New `tests/CopilotLedger.Tests/Import/Copilot115Tests.cs`
+- `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`, `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs` (the "1.0.103 to 1.0.114 are supported" text)
+- `docs/cli.md` (versions table), `docs/guide.md` (any version range it states)
+
+**Contract:** `MaximumVersion = new(1, 0, 115)`. The gate's comment says "Copilot 1.0.103 to 1.0.115".
+
+**Algorithm (`Usage`), only when the session's `copilotVersion` ≥ 1.0.115** (keep the parsed `ProducerVersion` from `Start`; earlier versions keep today's rules exactly):
+
+1. `cacheDetailsReported` **absent** (`!IsPresent`) → treated as `false`. Present but not a boolean → unsupported as today.
+2. `isByok` **absent** → treated as `false` only when `provider.kind == "copilot"`, `serviceRequestId` is not null, and `IsPresent("data.usage.copilotUsage.totalNanoAiu")`; otherwise unsupported, field `data.usage.isByok`. Present but not a boolean → unsupported as today.
+3. `numToolCalls` absent → `ToolCallCount = null` (today's behavior).
+4. `apiCallId` absent → the usage key is `usageId` (Task 8 already does this).
+5. `data.apiCallIdFromUsageId` and `isAuto` aren't read.
+
+**Fixture (`Usage115`)**: writes `session.usage_record` with `data.usage` = `model`, `responseModel` (optional), `provider { id: "copilot", kind: "copilot", label: "GitHub Copilot" }`, `modelDisplayName`, the four token counts, `reasoningTokens` 0, `duration`, `initiator`, `serviceRequestId`, `copilotUsage { totalNanoAiu, tokenDetails: [] }` (when `totalNanoAiu` isn't null), and `accounting { sourceSessionId, sequence, usageId }`; and `data.apiCallIdFromUsageId = true`. No `isByok`, `cacheDetailsReported`, `numToolCalls`, `isAuto`, or `apiCallId`.
+
+**Tests** (`Copilot115Tests`):
+
+| Test | Log | Expected |
+|---|---|---|
+| V115-1 (#75 AC1) | `session.start` 1.0.115; two `Usage115` records (`totalNanoAiu` 47388600 and 11855545); an `AssistantMessage` per record and one tool call per record linked by chain | both recorded (0.0473886 and 0.011855545 AI credits, `reported`); `imported_tool_call_count` NULL; both tool links resolved; coverage complete, exit 0 |
+| V115-2 (#75 AC1) | the same, `--dry-run` then real run on a fresh ledger | dry-run and real-run reports have identical counts (every `ImportSourceReport` field) |
+| V115-3 (#75 AC1) | a live span carrying `srv-115-a` recorded first, then the log | that record is `Overlap-skipped`; the other is recorded |
+| V115-4 | a `Usage115` without `copilotUsage` | unsupported, field `data.usage.isByok` (fail closed) |
+| V115-5 | a `Usage115` whose `provider.kind` is `byok-custom` | unsupported, field `data.usage.isByok` |
+| V115-6 | a 1.0.114 log with a usage record missing `cacheDetailsReported` | unsupported, field `data.usage.cacheDetailsReported` (old rules unchanged) |
+| V115-7 (#75 AC2) | `session.start` with `copilotVersion` `1.0.116` and `1.0.116-0` | `UnsupportedProducerVersion`, not read; the CLI warning is exactly the existing content-free text with "1.0.103 to 1.0.115 are supported" |
+| V115-8 (#75 AC3) | V115-1's log with canaries in `Usage115`'s unread places (`modelDisplayName`, a `toolCounts` key) and the messages | no canary in the ledger, report, or diagnostics |
+
+`CopilotSessionGateTests`: the `1.0.115` row becomes `Read`, `1.0.116` stays unsupported.
+
+**Docs:** `docs/cli.md` versions table: "1.0.103 to 1.0.115". Add after the table: "A new Copilot version is read only after gh-ledger has been checked against its logs; until then its sessions are reported as unsupported, and nothing is guessed."
+
+**Acceptance:** V115-1–V115-8 pass; no 1.0.114 behavior changes.
+
+---
+
+## Task 10 specification: Re-Import Repairs Billing in Place
+
+**Files**
+
+- `src/CopilotLedger.Storage/Import/LedgerImporter.cs` (`CurrentImportRevision`, the skip check, the checkpoint)
+- `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs`, `src/CopilotLedger.Storage/UsageAuthority.cs`, `src/CopilotLedger.Storage/SqliteLedgerStore.cs` (a shared pricing-columns helper)
+- `src/CopilotLedger.Storage/LedgerSnapshot.cs`
+- New `tests/CopilotLedger.Tests/Import/ImportRepairTests.cs`
+
+**Contracts**
 
 ```csharp
-    // A repository file's text with \n line breaks, whatever the checkout's.
-    private static string Text(params string[] parts) =>
-        File.ReadAllText(RepositoryFile(parts)).ReplaceLineEndings("\n");
+// LedgerImporter gains:
+public const int CurrentImportRevision = 1;   // raise it when a fix changes what import records from an unchanged log
 
-    private static string RepositoryFile(params string[] parts)
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CopilotLedger.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        Assert.NotNull(directory);
-        return Path.Combine([directory.FullName, .. parts]);
-    }
-
-    // The files under folder, recursively, skipping bin, obj, and TestResults folders.
-    private static IEnumerable<string> FilesUnder(string folder) =>
-        Directory.GetFiles(folder).Concat(Directory.GetDirectories(folder)
-            .Where(directory => Path.GetFileName(directory) is not ("bin" or "obj" or "TestResults"))
-            .SelectMany(FilesUnder));
+// UsageAuthority gains:
+// A row's pricing columns, as AddInsertParameters writes them. ListCostPico and ChargeSource read as COALESCE(list, cost)
+// and 'rate_card' on format < 7.
+internal readonly record struct StoredPricing(
+    string BillingChannel, string PricingStatus, string RatesVersion, string? ModelId, string? RateCardModelId,
+    string? TierName, long CostPico, long SavedPico, long ListCostPico, string ChargeSource,
+    long? ApiEquivalentPico, string? ApiEquivalentStatus, string? ApiRateCardModelId, string? ApiRatesVersion,
+    string? ApiRateCardSha256);
+internal static StoredPricing PricingOf(CreditCalculationResult calculation);   // the values AddInsertParameters would write
+internal static Task<StoredPricing> ReadPricingAsync(SqliteConnection, SqliteTransaction?, long rowId, int schemaVersion, CancellationToken);
+internal static Task<int> RewritePricingAsync(SqliteTransaction, long rowId, StoredPricing pricing, CancellationToken); // imported rows only
+internal static Task<int> ApplyReportedToLiveAsync(SqliteTransaction, long rowId, long costPico, CancellationToken);
 ```
 
-Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ReceiptCommandTests.cs`, replace:
+Refactor `AddInsertParameters` so it takes the 15 pricing values from `PricingOf(calculation)`; insert, compare, and rewrite then use identical values.
+
+**Algorithm**
+
+1. **Skip check.** A log is skipped as unchanged only when its checkpoint is complete, `checkpoint.ImportRevision >= CurrentImportRevision`, and size, last-write time, and SHA-256 match. The checkpoint the importer writes sets `ImportRevision = CurrentImportRevision`. So after the upgrade every log is read once more.
+2. **Own imported row (`RecordImportedAsync`).** For an entry resolved `Duplicate` whose own row exists (`UsageAuthority.RecordedRowAsync` returns a row; today's call is no longer limited to entries with tool links): `stored = ReadPricingAsync(row)`; `wanted = PricingOf(entry.Calculation)`; if `stored != wanted`, `RewritePricingAsync` (`UPDATE spans SET` the 15 columns `WHERE id = @id AND ingest_source <> 'otlp'`) and `Repriced++`.
+3. **Live row (D2).** After deciding, when `canonical is not null`, `facts.Owner == CanonicalOwner.Live`, and `entry.Calculation.ChargeSource == ChargeSource.Reported`: `ApplyReportedToLiveAsync(facts.OwnerRowId, PicoUsd.FromUsd(entry.Calculation.UsdCost))` runs
+   ```sql
+   UPDATE spans
+      SET list_cost_usd_pico = COALESCE(list_cost_usd_pico, cost_usd_pico),
+          cost_usd_pico = @cost,
+          charge_source = 'reported'
+    WHERE id = @id AND ingest_source = 'otlp'
+      AND billing_channel = 'github_ai_credits' AND pricing_status = 'priced'
+      AND charge_source <> 'reported';
+   ```
+   and `LiveRepriced` adds the rows it changed (0 or 1). This applies whether the resolution is `OverlapSkipped` or `Duplicate` (an alias written by an earlier import). A live row already `reported` is never changed.
+4. **Rows another record owns** (a `Duplicate` without its own row, such as a fork's copy) aren't repriced; their own log's import reprices them.
+5. **Dry run (`LedgerSnapshot.EvaluateAsync`).** Decide the same: for an own-row `Duplicate`, compare `ReadPricingAsync(row, SchemaVersion)` with `PricingOf(calculation)` and count `Repriced` when different; for a live owner, count `LiveRepriced` when the row is `github_ai_credits`/`priced` and its charge source (read as `rate_card` on format < 7) isn't `reported`. Remember each row ID counted (`HashSet<long>`) so the same row counts once per run, as the real run's second update would change nothing. Write nothing.
+6. `RecordImportedAsync` returns `Repriced` and `LiveRepriced` in `ImportRecordResult`; the importer sums them (Task 6).
+
+**Tests** (`ImportRepairTests`; "earlier import" = build the state by recording entries through the store with the old pricing, then run the importer):
+
+| Test | Setup | Expected |
+|---|---|---|
+| RR1 (D1) | an imported row recorded at the rate card (`charge_source` `rate_card`) and a complete checkpoint with `import_revision` 0 for the unchanged log; the log's record has `totalNanoAiu` 47388600 | the log isn't skipped; `Repriced == 1`; the row's `cost_usd_pico` 473886000, `charge_source` `reported`, `list_cost_usd_pico` the rate-card price; the checkpoint's `import_revision` 1 |
+| RR2 | run RR1's import again | `Skipped, unchanged` 1; `Repriced == 0` |
+| RR3 (D2) | a live row (`otlp`, canonical ID of `srv-L`, rate card, `charge_source` `rate_card`, `list_cost_usd_pico` NULL); the log has `srv-L` with `totalNanoAiu` 47388600 | `Overlap-skipped` 1, `LiveRepriced == 1`; the live row's `cost_usd_pico` 473886000, `list_cost_usd_pico` = its old cost, `charge_source` `reported` |
+| RR4 (D2) | RR3 with the alias already written by an earlier import (`live`) | `Duplicate` 1, `LiveRepriced == 1`, same row values |
+| RR5 (D2) | a live row already `reported` at 400000000 pico; the log says 47388600 | unchanged; `LiveRepriced == 0` |
+| RR6 (D2) | a live row without a canonical ID in the same conversation | unchanged; the record is `Ambiguous-overlap` |
+| RR7 (#79 repair) | an imported BYOK row recorded `other_provider` before the overlay listed its model; the overlay now lists it | `Repriced == 1`; the row is `local`/`local_offload` with savings |
+| RR8 (#82 repair) | a checkpoint `complete = 0` left by a BYOK compaction that was unsupported | the compaction is recorded; the checkpoint becomes complete |
+| RR9 (dry run) | RR1, RR3, and RR7's states, `--dry-run` | the same `Repriced` and `LiveRepriced` as the real run, and the ledger file's bytes are unchanged |
+| RR10 (dry run on format 6) | RR1's state in a format-6 ledger (built by SQL) | dry run reports `Repriced == 1`; the ledger stays format 6 |
+| RR11 (budgets) | after RR3, the branch total from the store | equals the reported charge, not the old rate-card cost |
+
+**Docs:** none here (Task 12 writes "Repairs").
+
+**Acceptance:** RR1–RR11 pass; every existing import, snapshot, and authority test passes.
+
+---
+
+## Task 11 specification: Re-Import Repairs Tool Links in Place
+
+**Files**
+
+- `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs` (`InsertOwnedLinkAsync` becomes `UpsertOwnedLinkAsync`; removal)
+- `src/CopilotLedger.Storage/LedgerSnapshot.cs`
+- `tests/CopilotLedger.Tests/Import/ImportRepairTests.cs` (new tests)
+
+**Contracts**
 
 ```csharp
-        const string Error =
-            "The receipt for feature/ledger is 68090 bytes; a receipt can be at most 65536 bytes.\n";
-
-        CliRun file = await harness.RunInAsync(repo, "export-pr");
-        CliRun stdout = await harness.RunInAsync(repo, "export-pr", "--stdout");
-        CliRun json = await harness.RunInAsync(repo, "export-pr", "--json");
-
-        Assert.Equal(1, file.ExitCode);
-        Assert.Equal(string.Empty, file.Out);
-        Assert.Equal(Error, file.Error);
-        Assert.Equal(1, stdout.ExitCode);
-        Assert.Equal(string.Empty, stdout.Out);
-        Assert.Equal(Error, stdout.Error);
+private enum LinkWrite { Unchanged, Inserted, Relinked }
+// The imported link for link.SpanId in link.ConversationId (owner_span_row_id IS NOT NULL), made to belong to ownerRowId and
+// link.TraceId: inserted when there's none, updated in place when its owner or trace differs.
+private static Task<LinkWrite> UpsertOwnedLinkAsync(SqliteTransaction, GenAiSpanLink link, long ownerRowId, long recordedAtUnixMs, CancellationToken);
+// Removes this conversation's imported links with these span IDs; returns how many.
+private static Task<int> RemoveOwnedLinksAsync(SqliteTransaction, IReadOnlyList<GenAiSpanLink> links, CancellationToken);
 ```
 
-with:
+**Algorithm**
 
-```csharp
-        // The receipt shows the version twice, so its size depends on the version's length: 68,090 bytes for a version of
-        // five characters.
-        string error =
-            $"The receipt for feature/ledger is {68_080 + (2 * GhLedgerCli.Version.Length)} bytes; a receipt can be at most 65536 bytes.\n";
+1. `UpsertOwnedLinkAsync`: `SELECT trace_id, owner_span_row_id FROM span_links WHERE span_id = @span AND conversation_id = @conversation AND owner_span_row_id IS NOT NULL ORDER BY trace_id` (uses `ix_span_links_import_span`).
+   1. No row → today's `INSERT … ON CONFLICT (trace_id, span_id) DO NOTHING`; `Inserted` when it inserted, else `Unchanged`.
+   2. The first row has `trace_id = link.TraceId` and `owner_span_row_id = ownerRowId` → `Unchanged`.
+   3. Otherwise → `UPDATE span_links SET trace_id = @trace, owner_span_row_id = @owner WHERE trace_id = @old_trace AND span_id = @span` → `Relinked`.
+   4. Any further rows (more than one imported link with that span ID in the conversation) are deleted and counted as removed.
+2. `RecordImportedAsync`:
+   - `Recorded` → `UpsertOwnedLinkAsync` for each link with the new row: `Inserted` adds to `ToolLinksRecorded`, `Relinked` to `ToolLinksRelinked`.
+   - `Duplicate` with its own row → the same with the own row (today only inserted new links).
+   - `OverlapSkipped`, `AmbiguousOverlap`, and `Duplicate` without its own row → `RemoveOwnedLinksAsync(entry.ToolLinks)` (`DELETE FROM span_links WHERE span_id = @span AND conversation_id = @conversation AND owner_span_row_id IS NOT NULL`), added to `ToolLinksRemoved`. These requests have no imported row, so an imported link left there by an earlier import belongs to the wrong request.
+   - Live links (`owner_span_row_id IS NULL`) are never changed or removed.
+3. `LedgerSnapshot.EvaluateAsync` decides the same with an in-memory overlay `Dictionary<(string Conversation, string SpanId), (string TraceId, long? Owner)?>` (null value = removed in this run) over the ledger's rows; for a `Recorded` entry, any existing imported link with the span ID counts as `Relinked` (the new row is necessarily a different owner). It writes nothing.
 
-        CliRun file = await harness.RunInAsync(repo, "export-pr");
-        CliRun stdout = await harness.RunInAsync(repo, "export-pr", "--stdout");
-        CliRun json = await harness.RunInAsync(repo, "export-pr", "--json");
+**Tests**
 
-        Assert.Equal(1, file.ExitCode);
-        Assert.Equal(string.Empty, file.Out);
-        Assert.Equal(error, file.Error);
-        Assert.Equal(1, stdout.ExitCode);
-        Assert.Equal(string.Empty, stdout.Out);
-        Assert.Equal(error, stdout.Error);
-```
+| Test | Setup | Expected |
+|---|---|---|
+| RL1 (D1, #85 repair) | TL1's log; the ledger holds the state an earlier import left: both rows recorded, both tool links owned by B's row with B's trace, checkpoint revision 0 | `ToolLinksRelinked == 2`; both links now have A's row and A's trace; `span_links` has exactly 2 imported rows for the conversation |
+| RL2 | RL1 again | `Skipped, unchanged` 1 |
+| RL3 | an imported link owned by an imported row, whose correct owner (by chain) is a record that's `Overlap-skipped` | `ToolLinksRemoved == 1`; no imported link with that span ID remains |
+| RL4 | a live link (`owner_span_row_id` NULL) with the same `span_id` text | untouched |
+| RL5 (dry run) | RL1 and RL3, `--dry-run` | the same `ToolLinksRelinked` and `ToolLinksRemoved`; ledger bytes unchanged |
+| RL6 | a new tool call completed since the last import (today's behavior) | `ToolLinksRecorded == 1`, `ToolLinksRelinked == 0` |
 
-New file `tests/CopilotLedger.Tests/Docs/UpgradeDocsTests.cs`:
+**Acceptance:** RL1–RL6 pass; every existing tool-link and snapshot test passes; nothing outside `span_links` changes.
 
-```csharp
-namespace CopilotLedger.Tests.Docs;
+---
 
-// The upgrade steps in docs/guide.md and docs/cli.md copy the data directory after the daemon stops and before gh upgrades
-// the extension: a new release can upgrade the ledger's format the first time it opens the ledger, and an earlier release
-// can't open it after that.
-public sealed class UpgradeDocsTests
-{
-    // The copy, in PowerShell and in a macOS or Linux shell: the whole data directory, so that a ledger.db-wal file comes
-    // with the ledger, to a new folder in the home directory, outside the data directory.
-    private static readonly string PowerShellCopy = """
-        $data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
-        Copy-Item -LiteralPath $data -Destination "$HOME\copilot-ledger-backup-$(Get-Date -Format yyyyMMdd-HHmmss)" -Recurse
-        """.ReplaceLineEndings("\n");
+## Task 12 specification: Upgrade Guidance and Reference Consistency
 
-    private const string ShellCopy = """
-        cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
-        """;
+**Files**
 
-    // Each document's upgrade steps: the line they start with, and the line after them.
-    public static TheoryData<string, string, string> UpgradeSteps => new()
-    {
-        { "guide.md", "## Upgrade or uninstall", "To remove gh-ledger, undo `install`:" },
-        { "cli.md", "**Upgrading or removing the extension.**", "## The daemon" },
-    };
+- `docs/cli.md` (the **Ledger format** paragraph's format number and one sentence; the import section's "Repairs" subsection)
+- `docs/guide.md` (the upgrade section)
+- `docs/configuration.md` (cross-reference only)
+- `tests/CopilotLedger.Tests/Docs/UpgradeDocsTests.cs` (new test)
 
-    [Theory]
-    [MemberData(nameof(UpgradeSteps))]
-    public void UD1_TheUpgradeStepsCopyTheDataDirectoryBeforeTheUpgrade(string file, string start, string end)
-    {
-        string[] lines = Steps(file, start, end);
-        (int Line, string Language, string Text)[] blocks = Blocks(lines);
-        int[] order =
-        [
-            Array.FindIndex(blocks, block => block.Language == "shell" && block.Text.StartsWith("gh ledger daemon stop", StringComparison.Ordinal)),
-            Array.FindIndex(blocks, block => block.Language == "powershell" && block.Text == PowerShellCopy),
-            Array.FindIndex(blocks, block => block.Language == "shell" && block.Text == ShellCopy),
-            Array.FindIndex(blocks, block => block.Language == "shell" && block.Text.StartsWith("gh extension upgrade ledger", StringComparison.Ordinal)),
-        ];
+**Docs (exact wording to add):**
 
-        Assert.DoesNotContain(-1, order);
-        Assert.Equal(order.Order(), order);
-        Assert.Contains("can't be undone", string.Join('\n', lines[..blocks[order[1]].Line]), StringComparison.Ordinal);
-    }
+1. `docs/cli.md`, "**Ledger format.**": "This version upgrades the ledger to format 6" → "This version upgrades the ledger to format 7", and append after that sentence: "Format 7 keeps each request's list price beside the amount it was charged. After upgrading, run `gh ledger import --all` once so that requests imported before, and live requests whose session logs report their charge, are repaired (see [Repairs](#repairs))." Change nothing else in that paragraph or section.
+2. `docs/cli.md`, new subsection `### Repairs` after "Overlap with live spans":
+   - "An import after upgrading reads every session log again once, even one it imported completely before, and repairs what it recorded from it in place:"
+   - "- **Charges.** A request imported before is priced again with the rates in use now; when anything about its price changed, such as the charge its log reports, its row is rewritten (`Repriced`). Its list price is kept beside the charge."
+   - "- **Live requests.** A live request that the daemon recorded at the rate card, with a service request ID, gets the charge its session log reports, when the log reports a valid one (`Live repriced`). Its list price is kept. Live requests without a service request ID, such as those an earlier gh-ledger recorded, and those whose logs are gone or unsupported, keep the rate card's price."
+   - "- **Tool calls.** An imported tool call that an earlier import attached to the wrong request moves to the request that asked for it (`Tool links relinked`); one whose request has no imported row, such as a request that a live span recorded, is removed (`toolLinksRemoved` in `--json`). Tool calls older than 7 days aren't kept, so they aren't repaired."
+   - "- **Compactions.** Logs whose BYOK or failed compactions earlier versions couldn't read are read completely now."
+   - "A dry run reports the same counts and changes nothing. Repairs never change which request counts: the rules of [Overlap with live spans](#overlap-with-live-spans) still decide that. Budgets, the circuit breaker, receipts, reports, export, and audit use the repaired charges from then on; circuit-breaker trips recorded before aren't re-evaluated."
+3. `docs/guide.md` upgrade section: after the `gh extension upgrade ledger` step and the daemon restart, add a step "Repair what earlier versions imported:" with a `shell` block `gh ledger import --all` and the sentence "It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs)." Don't add a `<!-- sample -->` marker.
+4. `docs/configuration.md`, "Charged amount and list price": append "Upgrading from 0.5.0 or earlier keeps the rows you have; [Repairs](cli.md#repairs) says how an import corrects them."
 
-    [Fact]
-    public void UD2_TheReferenceExplainsTheLedgerFormatBeforeItsUpgradeSteps()
-    {
-        string[] lines = Steps("cli.md", "**Upgrading or removing the extension.**", "## The daemon");
-        int format = Array.FindIndex(lines, line => line.StartsWith("**Ledger format.**", StringComparison.Ordinal));
-        int firstBlock = Array.FindIndex(lines, line => line.StartsWith("```", StringComparison.Ordinal));
+**Tests**
 
-        Assert.InRange(format, 0, firstBlock);
-    }
+- **UD3** (`UpgradeDocsTests`): `docs/cli.md`'s "**Ledger format.**" line contains `format 7` and not `format 6`; `docs/guide.md`'s upgrade section contains `gh ledger import --all` after `gh extension upgrade ledger`; `docs/cli.md` contains `### Repairs`.
+- **UD4**: the latest migration's version (`LedgerMigrations.Migrations[^1].Version`) is 7 and `docs/cli.md` names `format {that version}` (ties the docs to the DDL).
 
-    // The lines of docs/<file> from the first line that starts with start up to, not including, the next line that starts
-    // with end.
-    private static string[] Steps(string file, string start, string end)
-    {
-        string[] lines = File.ReadAllLines(RepositoryFile("docs", file));
-        int first = Array.FindIndex(lines, line => line.StartsWith(start, StringComparison.Ordinal));
-        int last = first < 0 ? -1 : Array.FindIndex(lines, first + 1, line => line.StartsWith(end, StringComparison.Ordinal));
+**Acceptance:** UD1–UD4 pass; `GuideSamplesTests` passes; no other section of the install, daemon, export, or audit docs changes.
 
-        Assert.True(first >= 0 && last > first, $"docs/{file} has no {start} followed by {end}.");
-        return lines[first..last];
-    }
+---
 
-    // The fenced blocks in lines, in order: each one's opening line, its language, and its lines joined with \n.
-    private static (int Line, string Language, string Text)[] Blocks(string[] lines)
-    {
-        List<(int Line, string Language, string Text)> blocks = [];
-        for (int index = 0; index < lines.Length; index++)
-        {
-            if (lines[index].StartsWith("```", StringComparison.Ordinal))
-            {
-                int close = Array.IndexOf(lines, "```", index + 1);
-                Assert.True(close > index, $"The block at line {index} has no end.");
-                blocks.Add((index, lines[index][3..], string.Join('\n', lines[(index + 1)..close])));
-                index = close;
-            }
-        }
+## Task 13 specification: Final Verification
 
-        return [.. blocks];
-    }
+No product change. Run and record each result in the task commit's body (the commit changes only this plan's checkbox).
 
-    private static string RepositoryFile(params string[] parts)
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CopilotLedger.slnx")))
-        {
-            directory = directory.Parent;
-        }
+1. `dotnet build CopilotLedger.slnx` → 0 warnings, 0 errors.
+2. `dotnet test CopilotLedger.slnx` → 0 failed, 0 skipped; record the total and the increase over the baseline.
+3. `git --no-pager diff --stat 69ae671 -- src/CopilotLedger.Cli/CopilotLedger.Cli.csproj src/CopilotLedger.Core/Pricing/rates.json Directory.Build.props global.json` → empty (no version, rates, or SDK change).
+4. `git --no-pager diff --stat 69ae671 -- src/CopilotLedger.Core/Audit src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs src/CopilotLedger.Storage/SqliteLedgerStore.Audit.cs` and any `WindowsDetachedProcess.cs` → empty (Sprint 13's files).
+5. `git --no-pager diff 69ae671 -- src | Select-String -Pattern '^\+.*\b(double|float|Double|Single|REAL)\b'` → no money code; any hit must be a comment or the OTLP `Kind = Double` enum name, and is listed in the commit body with its reason.
+6. `git --no-pager diff 69ae671 -- tests | Select-String -Pattern 'Environment\.GetFolderPath|UserProfile|\.copilot-ledger|Process\.Start|HttpClient|docker'` → no new hits outside existing harness helpers.
+7. `docs/cli.md`'s allowlist lists `spans.list_cost_usd_pico`, `spans.charge_source`, and `import_sessions.import_revision`, and its "Read, never stored" list names every new path: `data.usage.copilotUsage.totalNanoAiu`, `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, `data.compactionAttemptId`, `data.usage.apiCallId`, `assistant.message`'s `id`, `parentId`, `data.apiCallId`, and the tool events' `id` and `parentId` (`ImportPrivacyTests` enforces the stored columns; check the read list by eye).
+8. `docs/configuration.md` describes the charged amount, the list price, rejected charges, and #79's rule as Tasks 2, 5, and 12 implemented them.
 
-        Assert.NotNull(directory);
-        return Path.Combine([directory.FullName, .. parts]);
-    }
-}
-```
+**Acceptance:** all eight checks hold. Then stop; the orchestrator opens the pull request.
 
-### Tests
+---
 
-New: UD1 (two cases, `guide.md` and `cli.md`), UD2, VR2, and VR3. Changed: VR1, which calls `AssertTheListedPlacesShow`, and EP10. Measured in the scratch tree, each new test fails without its fix: with the docs of `9fecd4f`, both UD1 cases fail (no copy) and UD2 fails ("Ledger format" after the steps), and VR3 fails because step 1 doesn't name the four mentions to leave; with VR1's old pattern, VR2 fails; and without the `docs/cli.md` mention in `Places`, VR3 fails on that line. Two bumps were simulated on Task 6's tree, changing only the places that step 1 lists: to 0.5.1, all 1740 tests pass with no change to `VersionPlacesTests`, and changing the `docs/cli.md` mention to leave as well fails VR3 on that line; to the prerelease 0.5.1-rc.1, all 1740 tests pass, and with EP10's old constant, EP10 fails.
+## Test specifications (summary)
 
-### Acceptance criteria
-
-- In the guide's "Upgrade or uninstall" and in `docs/cli.md`'s "Upgrading or removing the extension", the data directory is copied after `gh ledger daemon stop` and before `gh extension upgrade ledger`, with the same PowerShell and macOS and Linux commands, and the text before the copy says the format upgrade can't be undone. `docs/cli.md`'s "Ledger format" comes before its first command.
-- A prerelease `<Version>`, such as `0.5.0-rc.1`, passes VR1's checks when every place shows it, and EP10 passes with a version of any length.
-- Every line outside `.github/plans/` that names 0.5.0 is a place that step 1 of `docs/releasing.md` says to change or one that it says to leave.
-- `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors, and `dotnet test CopilotLedger.slnx` passes 1740 tests, 0 failed, 0 skipped.
-
-### Verify
-
-```shell
-dotnet build CopilotLedger.slnx
-dotnet test CopilotLedger.slnx
-```
-
-## Test specifications
-
-Every test is hermetic: temporary directories, `ManualTimeProvider`, `FakeCliPlatform`, `CliHarness`, `McpTestHarness`, and `GuideWorld` only. No test opens a socket, starts a process, runs `git`, or reads `~/.copilot`, `~/.codex`, or `~/.copilot-ledger`. PN1, PN2, VR1–VR3, UD1, and UD2 read the repository's own files, as `ExportPrivacyTests.EP6` and `AuditDocsTests` do, and money is untouched.
-
-| Task | New tests | Changed tests | Total after |
-|---|---|---|---:|
-| 0 | — (the starting point) | — | 1,731 |
-| 1 | GS8 | GS1 (the list of samples) | 1,732 |
-| 2 | — | EC9, IN1, IN2, IN10, IN11, IN16, IN17, IN18, RT1, RP3, RP13, GS2 (`install`, `uninstall`) | 1,732 |
-| 3 | PN1 | BR4, AD1–AD3, BM1, BM4, BM11, EP1–EP3, EP5, EP10, AM3, MC1, MC3, MC14, GS2 (`export-pr`), GS5, GS6, GS7 | 1,733 |
-| 4 | PN2 | — | 1,734 |
-| 5 | VR1 | DM1, RP1, RP10, RP12, RP13, EC5, EB2, GS2 (`status-first`, `status`), GS6 | 1,735 |
-| 6 | UD1 (`guide.md`, `cli.md`), UD2, VR2, VR3 | VR1, EP10 | 1,740 |
+| Task | New tests | Changed tests |
+|---|---|---|
+| 1 | NA1–NA9 | — |
+| 2 | RCP1–RCP10 | BI8 (`openai` row) |
+| 3 | NO1–NO10 | — |
+| 4 | SV7-1–SV7-7 | tests asserting the latest `user_version` (6 → 7) and "supported version 6" |
+| 5 | RI1–RI7 | `LedgerIngestorTests` helper calculators, if needed |
+| 6 | IRC1–IRC7 | `ImportCommandTests` table and JSON; guide samples; compaction amount assertions (fixture default charge) |
+| 7 | CC1–CC9 | `CopilotCompactionTests` cases that expected failed or ID-less compactions to be unsupported |
+| 8 | TL1–TL9, IP-AM1 | — |
+| 9 | V115-1–V115-8 | gate row 1.0.115; "1.0.103 to 1.0.114" texts |
+| 10 | RR1–RR11 | — |
+| 11 | RL1–RL6 | tool-link store tests whose assertions name `InsertOwnedLinkAsync` behavior, if any |
+| 12 | UD3, UD4 | — |
 
 Exact values used across tasks:
 
-| Value | What | Where |
-|---|---|---|
-| `claude-haiku-4-5-20251001` | The name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5, an alias of the built-in `claude-haiku-4.5` since Sprint 7 Task 12 | Task 1: GS8, the guide, `docs/cli.md` |
-| `68090` | EP10's oversized receipt in bytes, 4 fewer with `gh-ledger` in its heading; Task 6 computes it, as 68,080 plus twice the version's length | Tasks 3 and 6 |
-| `0.5.0` | The version | Task 5 |
+| Value | What |
+|---|---|
+| 47,388,600 nano AIU | 0.0473886 AI credits = $0.000473886 = 473,886,000 pico-USD |
+| 11,855,545,000 nano AIU | the fixture compaction's charge: 11.855545 AI credits = $0.11855545 = 118,555,450,000 pico-USD |
+| 9,007,199,254,740,992 | 2^53, `NanoAiu.MaxExact`: $90,071.99254740992 |
+| `0x418698BDC0000000` | 47388600.0 as IEEE-754 bits (wire bytes `00 00 00 C0 BD 98 86 41`) |
+| 1 | `LedgerImporter.CurrentImportRevision` |
+| 7 | the ledger format |
+| 1.0.115 | `CopilotSessionLogSource.MaximumVersion` |
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 5, the orchestrator:
-
-1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1735 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-10.md`, `.github/copilot-instructions.md`, the two `.github/agents` files, and the files the tasks list.
-2. Publishes the `win-x64` binary and, with a temporary `COPILOT_LEDGER_HOME`, checks that `--version` prints `0.5.0`, that `--help` starts with the new description, and that `rates validate` with GS8's overlay prints the guide's message and exits 1. It never uses a real home directory.
-3. Pushes `swigerb-sprint-11-release-0-5-0` and opens one pull request titled exactly "Sprint 11: Release readiness, gh-ledger naming & version 0.5.0", whose body says `Refs #72` and uses no closing keyword (the coordinator closes #72 after the release), with these sections:
-   - `## Changes`: the plan commit (this plan, Sprint 10's archive, and the product-name wording of `.github/copilot-instructions.md` and the two agent files) and the five task commits, each with what it changes; the naming decision, its rationale, and its rules; and "What still says CopilotLedger", with each line and the reason it stays.
-   - `## Release triage`: 105 items classified, and the one blocker, U1, with its evidence and Task 1; the close calls (a)–(g), one line each; and the non-blockers by group, each with its reason, as "Release triage" and "Deferred to later sprints" give them. Say explicitly that U1 is the only release blocker.
-   - `## Verification`: the build (0 warnings), the test totals (1731 before; 1732, 1732, 1733, 1734, and 1735 after the tasks), CI, the byte check of each task, and the rates comparison (GitHub's page unchanged since 2026-11-20, so `rates.json` is unchanged).
-   - `## Risks`: Copilot CLI 1.0.115, the latest release since 2026-11-24, whose sessions import as unsupported (exit code 2) and whose live spans aren't verified (A1); U1's users, whom the release notes should tell to remove the overlay entry, and who, if they stay on 0.4.1, see `gh ledger rates update` refuse 0.5.0's derived `rates.json` ("The downloaded rates (2026-11-23) don't work with your rates overlay: …", exit code 1) and keep the rates they have until they remove it, because 0.4.1 checks the same rule before it saves a download (read in `15003fb`'s `RatesUpdate.cs` and `JsonRateCardCalculator.cs`, and `release.yml` keeps the aliases in the derived file; not run); fork copies beside unidentified live rows (A2); a 0.4.1 daemon left running after the upgrade on macOS or Linux, which records rows without cache states or agent links until it restarts, while import refuses (a); no downgrade, because 0.4.1 can't open format 6, so keep a copy of `ledger.db` first; text that scripts may match changes (alert titles, the receipt heading, MCP warnings, `--help`, and the report's title), while identifiers don't; the receipt action still calls itself CopilotLedger PR Receipt until it's renamed; and the suite's pool-clearing race (S10-9).
-4. Waits for CI on `ubuntu-latest` and `windows-latest`, whose smoke test now expects `--version` to print `0.5.0`. If a job fails only with the dry-run race that "How to use this plan" describes, it reruns the job.
-5. Asks `ledger-architect` to review the branch.
-
-The orchestrator did steps 1–5 and opened PR #73, and the architect's review, recorded in `9fecd4f`, was clean. The coordinator's review of the pull request then added Task 6 ("Review fixes (Task 6)"). After Task 6, the orchestrator:
-
-6. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1740 passed, 0 failed, 0 skipped), and checks that Task 6 changes only the files it lists.
-7. Pushes Task 6 to the same pull request and updates its body. `## Changes` adds `9fecd4f`, the plan commit that added Task 6, and Task 6, with C1–C3 and how it fixes each. `## Verification` adds 1740 tests after Task 6, CI, and Task 6's byte check. `## Risks` says, under no downgrade, that the upgrade steps now copy the data directory first, and that going back to 0.4.1 means putting that copy back. Then it waits for CI and asks `ledger-architect` to review Task 6.
-
-Nobody in this sprint creates a tag or a release or runs the Release workflow. After the pull request merges, the coordinator runs issue #72's remaining checks: the receipt end to end, through a draft smoke pull request and swigerb/copilot-ledger-action; a manual Release workflow run on `main` (the dry run); the tag `v0.5.0`; and the assets, the checksums, `rates.v2.json`, the derived `rates.json`, and `rates update` on 0.4.1 and 0.5.0. When the sprint closes, `ledger-architect` archives this plan with its amendments.
+After Task 13, the orchestrator pushes `swigerb-sprint-12-billing-import-fidelity` and opens one pull request titled "Sprint 12: Billing & import fidelity" with `Closes #76`, `Closes #82`, `Closes #85`, `Closes #79`, and `Closes #75`, and sections `## Changes` (the plan commit and each task commit), `## Verification` (build, test totals per task, Task 13's checks), `## Upgrade` (format 7, run `gh ledger import --all` once), and `## Risks` (A1–A3; a 0.5.0 daemon left running after the upgrade writes `list_cost_usd_pico` NULL, which reads as the rate card; circuit-breaker trips aren't re-evaluated after repricing). It then asks `ledger-architect` to review. Nobody bumps the version, tags, or releases in this sprint.
 
 ## Deferred to later sprints
 
-None of these is a release blocker; "Release triage" gives each one's reason.
-
-- **Upgrades:** a `gh ledger upgrade` that stops and restarts what holds the binary (from Sprint 5), and could make the copy of the data directory that the upgrade steps make by hand since Task 6; and a later migration that repeats migration 4's state updates and migration 6's reconciliation for rows that an old daemon wrote after the upgrade (S6-10.2, S8-10).
-- **Rates and pricing:** re-pricing unpriced rows (S7-4); MAI list prices and GPT-5.6 Sol's price after 2026-11-30 (S7-5); re-billing rows recorded as `unknown_model` (S7-6); more dated ids (S7-7); longer cache lifetimes (S7-8); a `--pricing` sample in the guide (S7-9); the backfill's discoverability and wording (S7-10); what the API rate card hash covers (S7-11); and what-if fidelity (S7-12).
-- **Import:** a Claude Code adapter (S8-1); local BYOK classification (S8-2); wider version windows, now including Copilot CLI 1.0.115 (S8-3); compactions of more than one request, and Codex's compressed rollouts and tool calls (S8-4); VS Code and JetBrains stores (S8-5); re-scanning, incremental parsing, and the unchanged check's cost (S8-6, S8-18); agent grouping for imported spans (S8-7); unmatched supersession, and matching superseded rows later (S8-11, S8-14); a census of fork copies (S8-13, A2); a dedicated exception type (S8-15); `MAJOR.MINOR.PATCH` in warnings (S8-16); a test of a dry run beside a running daemon (S8-17); and session facts that make large sessions linear (S8-19).
-- **Export:** a hash-based CSP (S9-1); IANA IDs on Windows 10 1703–1809 (S9-4); every prompt chain, night hours, and PDF or PNG output (S9-5); the ZIP container's bytes across operating systems (S9-6); a distinct color for failed tool calls (S9-7); telling same-named repositories apart (S9-8); a record of the daemon's deletions (S9-9); a migration that clears non-strict slugs (S9-10); axis lines at every zoom and padding at the axis's ends (S9-11, S9-13); and copying, rather than moving, the replaced ZIP (S9-12).
-- **Audit:** threshold options and an economy-model argument for MCP (S10-1); an API-equivalent view of impacts (S10-2); streaming answers (S10-4); tool sequences older than 7 days (S10-5); import diagnostics per trace (S10-6); a compaction column (S10-7); and a sortable findings table (S10-8).
-- **Reports and cache:** sanitizing ledger strings in every console table (S10-3); user turns, agent definitions, and MCP tools for turns and bloat (S6-6–S6-8); a fresh capture of cache attributes (S6-9); Sprint 6's other review follow-ups (S6-10.1 and S6-10.3–S6-10.6); and coverage notes in reports, receipts, and MCP (S8-8, S9-3).
-- **Tests and CI:** fixing the suite's pool-clearing race at its source (S10-9), and query-plan tests (P70-5).
-- **Carried from Sprint 5** (S6-11): `gh ledger` in every message, workflow lockfiles, the guide on macOS and Linux, reconciliation with `nano_aiu`, breaker state in `status`, MCP registration in `install`, `COPILOT_LEDGER_HOME` in sign-in items, headless Linux, a tool gate, webhooks, smarter retry churn, signed receipts and a pre-push hook, `export-pr --since`, build provenance, Arm64 smoke tests, checking for newer rates automatically, receipts for fork pull requests, and Sprint 2's carry-overs, as `.github/plans/archive/sprint-5.md` describes them.
-- **The name:** renaming swigerb/copilot-ledger-action and its Marketplace listing, now "CopilotLedger PR Receipt", which takes a release of that repository and a new pin in `receipt.yml`; and the one code comment in `GuideWorld.cs` that still says CopilotLedger.
+- **Billing:** using a reported charge for `unknown_model` and `no_rate_for_date` GitHub requests (S12-1); showing list price and discount (Auto, Fusion) in reports, receipts, and MCP (S12-2); a `status` line for rejected charges, and logging them in the daemon's log (S12-3); re-evaluating breaker trips after repricing (S12-4); repricing live rows from `invoke_agent` totals (never; F1).
+- **Import:** 1.0.115 BYOK usage, compaction, and `tool.execution_complete` shapes once observed (S12-5, A2); a parent chain that passes through `hook.*` or `assistant.turn_*` events (S12-6, L2); a stale imported link whose correct owner is out of scope or out of range in this run (S12-7); automatic acceptance of new Copilot versions (S12-8: a documented gate-update procedure stays manual); profiling the duplicate path on large stores (S12-9); live custom-provider spans of the GitHub Copilot app (S12-10).
+- Everything Sprint 11 deferred, unchanged (see `.github/plans/archive/sprint-11.md`, "Deferred to later sprints").
