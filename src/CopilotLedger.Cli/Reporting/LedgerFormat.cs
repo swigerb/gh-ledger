@@ -197,6 +197,54 @@ internal static class LedgerFormat
         WriteMoney(writer, "localSavedUsd", row.LocalSavedUsd);
     }
 
+    // A top-prompts --json row, which gh ledger export's prompt-chains.json shares.
+    public static void WritePromptChain(Utf8JsonWriter writer, PromptChainRow row, int rank)
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber("rank", rank);
+        writer.WriteString("traceId", row.TraceId);
+        WriteNullable(writer, "conversationId", row.ConversationId);
+        WriteTime(writer, "startTime", row.StartTime);
+        WriteTime(writer, "endTime", row.EndTime);
+        writer.WriteString("repository", row.Repository);
+        writer.WriteString("branch", row.Branch);
+        writer.WriteStartArray("agents");
+        foreach (string agent in row.Agents)
+        {
+            writer.WriteStringValue(agent);
+        }
+
+        writer.WriteEndArray();
+        writer.WriteStartArray("models");
+        foreach (string model in row.Models)
+        {
+            writer.WriteStringValue(model);
+        }
+
+        writer.WriteEndArray();
+        WriteTotals(writer, row);
+        WriteApiEquivalent(writer, row);
+        writer.WriteEndObject();
+    }
+
+    // The fields of a status --cache --json row after its key, which gh ledger export's summary.json shares.
+    public static void WriteCacheFields(Utf8JsonWriter writer, CacheEfficiencyRow row)
+    {
+        writer.WriteNumber("spans", row.SpanCount);
+        writer.WriteNumber("cacheReportedSpans", row.CacheReportedSpanCount);
+        writer.WriteNumber("cacheUnreportedSpans", row.CacheUnreportedSpanCount);
+        writer.WriteNumber("inputTokens", row.InputTokens);
+        writer.WriteNumber("outputTokens", row.OutputTokens);
+        writer.WriteNumber("maxInputTokens", row.MaxInputTokens);
+        WriteDecimal(writer, "averageInputTokensPerTurn", row.AverageInputTokensPerTurn);
+        writer.WriteNumber("reportedInputTokens", row.ReportedInputTokens);
+        writer.WriteNumber("reportedCacheReadInputTokens", row.ReportedCacheReadInputTokens);
+        writer.WriteNumber("reportedCacheWriteInputTokens", row.ReportedCacheWriteInputTokens);
+        WriteNullable(writer, "uncachedInputTokens", row.UncachedInputTokens);
+        writer.WriteNumber("estimatedUncachedInputTokens", row.EstimatedUncachedInputTokens);
+        WriteDecimal(writer, "cacheHitRatio", row.CacheHitRatio);
+    }
+
     public static string FinishJson(Utf8JsonWriter writer, MemoryStream stream)
     {
         writer.Flush();

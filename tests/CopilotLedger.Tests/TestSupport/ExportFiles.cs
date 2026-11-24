@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -48,6 +50,50 @@ public static partial class ExportFiles
         Assert.Equal(start, html.LastIndexOf(Start, StringComparison.Ordinal));
         start += Start.Length;
         return JsonDocument.Parse(html[start..html.IndexOf("</script>", start, StringComparison.Ordinal)]);
+    }
+
+    // The bundle's entries in archive order, decompressed.
+    public static IReadOnlyList<(string Name, byte[] Bytes)> ReadZip(string path)
+    {
+        using ZipArchive zip = ZipFile.OpenRead(path);
+        return
+        [
+            .. zip.Entries.Select(entry =>
+            {
+                using Stream stream = entry.Open();
+                using MemoryStream bytes = new();
+                stream.CopyTo(bytes);
+                return (entry.FullName, bytes.ToArray());
+            }),
+        ];
+    }
+
+    // Each entry's local file header, in central-directory order: its name, DOS time, DOS date, and compression method.
+    public static IReadOnlyList<(string Name, int Time, int Date, int Method)> LocalHeaders(string path)
+    {
+        byte[] zip = File.ReadAllBytes(path);
+        int end = zip.Length - 22;
+        Assert.Equal(0x06054b50u, BinaryPrimitives.ReadUInt32LittleEndian(zip.AsSpan(end)));
+        int count = BinaryPrimitives.ReadUInt16LittleEndian(zip.AsSpan(end + 10));
+        int offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(zip.AsSpan(end + 16));
+        List<(string, int, int, int)> headers = [];
+        for (int index = 0; index < count; index++)
+        {
+            Assert.Equal(0x02014b50u, BinaryPrimitives.ReadUInt32LittleEndian(zip.AsSpan(offset)));
+            int local = (int)BinaryPrimitives.ReadUInt32LittleEndian(zip.AsSpan(offset + 42));
+            Assert.Equal(0x04034b50u, BinaryPrimitives.ReadUInt32LittleEndian(zip.AsSpan(local)));
+            headers.Add((
+                Encoding.UTF8.GetString(zip, local + 30, BinaryPrimitives.ReadUInt16LittleEndian(zip.AsSpan(local + 26))),
+                BinaryPrimitives.ReadUInt16LittleEndian(zip.AsSpan(local + 10)),
+                BinaryPrimitives.ReadUInt16LittleEndian(zip.AsSpan(local + 12)),
+                BinaryPrimitives.ReadUInt16LittleEndian(zip.AsSpan(local + 8))));
+            offset += 46
+                + BinaryPrimitives.ReadUInt16LittleEndian(zip.AsSpan(offset + 28))
+                + BinaryPrimitives.ReadUInt16LittleEndian(zip.AsSpan(offset + 30))
+                + BinaryPrimitives.ReadUInt16LittleEndian(zip.AsSpan(offset + 32));
+        }
+
+        return headers;
     }
 
     [GeneratedRegex(@"(<(?:style|script)\b[^>]*>).*?(</(?:style|script)>)", RegexOptions.Singleline)]

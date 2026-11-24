@@ -42,6 +42,10 @@ internal static class ExportCommands
                 result.AddError("--out must end with .html or .htm.");
             }
         });
+        Option<bool> bundle = new("--bundle")
+        {
+            Description = "Also write a ZIP with the report, a manifest, and its data as JSON, beside the report.",
+        };
         Option<string?> repository = new("--repo") { Description = "Limit the report to this repository key." };
         Option<bool> allRepositories = new("--all-repos") { Description = "Report every repository." };
         Option<string?> branch = new("--branch") { Description = "Limit the report to this branch, or (none)." };
@@ -117,6 +121,7 @@ internal static class ExportCommands
         Option<bool> force = new("--force") { Description = "Replace existing files." };
         command.Add(format);
         command.Add(output);
+        command.Add(bundle);
         command.Add(repository);
         command.Add(allRepositories);
         command.Add(branch);
@@ -155,6 +160,7 @@ internal static class ExportCommands
                         result.GetValue(maxTimelineSpans),
                         result.GetValue(includeLocalPaths)),
                     result.GetValue(output)!,
+                    result.GetValue(bundle),
                     result.GetValue(force),
                     cancellationToken));
         return command;
@@ -208,49 +214,98 @@ internal static class ExportCommands
         CliContext context,
         ExportInputs inputs,
         string output,
+        bool bundle,
         bool force,
         CancellationToken cancellationToken)
     {
         string htmlPath = Path.GetFullPath(output, context.WorkingDirectory);
-        if (!CanWrite(context, htmlPath, output, force))
+        string? zipPath = bundle ? Path.ChangeExtension(htmlPath, ".zip") : null;
+        string zipShown = Path.ChangeExtension(output, ".zip");
+        if (!CanWrite(context, htmlPath, output, force) || (zipPath is not null && !CanWrite(context, zipPath, zipShown, force)))
         {
             return 1;
         }
 
         SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
         await store.InitializeAsync(cancellationToken);
-        ExportReportModel model;
-        byte[] html;
-        await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
-        {
-            model = await ExportModelBuilder.BuildAsync(snapshot, inputs, cancellationToken);
-            html = HtmlReportWriter.Write(model);
-        }
-
         string htmlTemp = TemporaryPath(htmlPath);
+        string? zipTemp = zipPath is null ? null : TemporaryPath(zipPath);
+        string writing = output;
+        ExportReportModel model;
         try
         {
-            await File.WriteAllBytesAsync(htmlTemp, html, cancellationToken);
+            // Both files are written from one snapshot, then moved into place: the ZIP first, then the report.
+            await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
+            {
+                model = await ExportModelBuilder.BuildAsync(snapshot, inputs, cancellationToken);
+                byte[] html = HtmlReportWriter.Write(model);
+                await File.WriteAllBytesAsync(htmlTemp, html, cancellationToken);
+                if (zipTemp is not null)
+                {
+                    writing = zipShown;
+                    await ExportBundleWriter.WriteAsync(
+                        zipTemp,
+                        BundleEntries(snapshot, inputs, model, html),
+                        hashes => ExportJson.Manifest(model, hashes),
+                        cancellationToken);
+                }
+            }
+
+            if (zipTemp is not null)
+            {
+                writing = zipShown;
+                File.Move(zipTemp, zipPath!, overwrite: force);
+            }
+
+            writing = output;
             File.Move(htmlTemp, htmlPath, overwrite: force);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            context.Error.WriteLine($"Could not write {output}: {ex.Message}");
+            context.Error.WriteLine($"Could not write {writing}: {ex.Message}");
             return 1;
         }
         finally
         {
             DeleteIfPresent(htmlTemp);
+            if (zipTemp is not null)
+            {
+                DeleteIfPresent(zipTemp);
+            }
         }
 
         context.Out.WriteLine(
             $"Wrote {Path.GetFileName(htmlPath)}: {ExportRecords.Plural(model.Summary.Totals.SpanCount, "request", "requests")} in {model.Header.Scope} ({model.Header.Filter.Period}).");
+        if (zipPath is not null)
+        {
+            context.Out.WriteLine($"Wrote {Path.GetFileName(zipPath)}: report.html, manifest.json, and 4 telemetry files.");
+        }
+
         if (model.Coverage.TimelineTruncated)
         {
             context.Out.WriteLine(ExportRecords.TimelineTruncation(model.Coverage));
         }
 
         return 0;
+    }
+
+    // The bundle's files besides manifest.json. The report is the same bytes as the .html file.
+    private static IReadOnlyList<ExportBundleEntry> BundleEntries(
+        LedgerExportSnapshot snapshot,
+        ExportInputs inputs,
+        ExportReportModel model,
+        byte[] html)
+    {
+        byte[] chains = ExportJson.PromptChains(model);
+        byte[] summary = ExportJson.Summary(model);
+        return
+        [
+            new("report.html", (stream, token) => stream.WriteAsync(html, token).AsTask()),
+            new("telemetry/prompt-chains.json", (stream, token) => stream.WriteAsync(chains, token).AsTask()),
+            new("telemetry/spans.json", (stream, token) => ExportJson.WriteSpansAsync(stream, snapshot, inputs, token)),
+            new("telemetry/summary.json", (stream, token) => stream.WriteAsync(summary, token).AsTask()),
+            new("telemetry/tool-calls.json", (stream, token) => ExportJson.WriteToolCallsAsync(stream, snapshot, inputs, token)),
+        ];
     }
 
     // False, after writing why, when path is a directory, or a file that --force doesn't allow replacing.
