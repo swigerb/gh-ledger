@@ -32,7 +32,7 @@ public static class GhLedgerCli
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(context);
         RootCommand root = new(
-            "CopilotLedger: local AI spend ledger for GitHub Copilot");
+            "gh-ledger: a local AI-spend ledger for GitHub Copilot");
         root.Add(DaemonCommands.Create(context));
         root.Add(RatesCommands.Create(context));
         foreach (Command command in ReportCommands.Create(context))

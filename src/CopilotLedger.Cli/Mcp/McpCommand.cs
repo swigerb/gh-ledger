@@ -12,7 +12,7 @@ internal static class McpCommand
     {
         Command command = new(
             "mcp",
-            "Run the CopilotLedger MCP server on standard input and output.");
+            "Run the gh-ledger MCP server on standard input and output.");
         command.SetAction(
             (ParseResult _, CancellationToken cancellationToken) =>
                 RunAsync(context, cancellationToken));

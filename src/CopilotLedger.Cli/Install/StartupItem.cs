@@ -67,8 +67,8 @@ internal static class StartupItem
         string desktopTemplate = """
             [Desktop Entry]
             Type=Application
-            Name=CopilotLedger
-            Comment=Starts the CopilotLedger daemon
+            Name=gh-ledger
+            Comment=Starts the gh-ledger daemon
             Exec="{0}" daemon start
             Terminal=false
             """.ReplaceLineEndings("\n") + "\n";

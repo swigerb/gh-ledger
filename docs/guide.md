@@ -38,7 +38,7 @@ Set COPILOT_OTEL_ENABLED=true for your user account.
 gh ledger runs this GitHub CLI extension, so no alias is needed.
 gh-ledger will start when you sign in.
 gh-ledger daemon started (pid 4242) on http://localhost:4318.
-CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
+gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
 ```
 <!-- /sample -->
 
@@ -851,7 +851,7 @@ gh ledger uninstall
 gh-ledger daemon stopped.
 gh-ledger will no longer start when you sign in.
 Removed COPILOT_OTEL_ENABLED from your user account.
-CopilotLedger is uninstalled. Your ledger data is still in C:\Users\you\.copilot-ledger.
+gh-ledger is uninstalled. Your ledger data is still in C:\Users\you\.copilot-ledger.
 ```
 <!-- /sample -->
 

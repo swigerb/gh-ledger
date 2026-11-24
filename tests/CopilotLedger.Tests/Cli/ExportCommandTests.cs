@@ -208,7 +208,7 @@ public sealed class ExportCommandTests
         Assert.Contains(
             "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:\" />",
             html);
-        Assert.Equal("CopilotLedger report: all repositories (last 30 days)", page.Root!.Element("head")!.Element("title")!.Value);
+        Assert.Equal("gh-ledger report: all repositories (last 30 days)", page.Root!.Element("head")!.Element("title")!.Value);
         Assert.Equal("section", ExportFiles.ById(page, "summary").Name.LocalName);
         Assert.Equal("section", ExportFiles.ById(page, "coverage").Name.LocalName);
         Assert.DoesNotContain(page.Descendants(), element => (string?)element.Attribute("id") == "audit-findings");

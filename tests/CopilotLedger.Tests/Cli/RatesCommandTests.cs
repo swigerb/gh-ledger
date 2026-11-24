@@ -9,7 +9,7 @@ public sealed class RatesCommandTests
         {
           "schemaVersion": 1,
           "notes": [
-            "CopilotLedger rates overlay. See docs/configuration.md in the CopilotLedger repository.",
+            "gh-ledger rates overlay. See docs/configuration.md in the gh-ledger repository.",
             "Prices are USD per 1,000,000 tokens, from 0 to 1,000,000, with at most 6 decimal places."
           ],
           "foundryByok": {

@@ -19,13 +19,13 @@ internal static class CopilotOtelEnvironment
         if (endpoint is not null && !IsLocalEndpoint(endpoint))
         {
             warnings.Add(
-                $"OTEL_EXPORTER_OTLP_ENDPOINT is {endpoint}; Copilot exports there instead of to CopilotLedger at http://localhost:4318.");
+                $"OTEL_EXPORTER_OTLP_ENDPOINT is {endpoint}; Copilot exports there instead of to gh-ledger at http://localhost:4318.");
         }
 
         if (Value(lookup, "COPILOT_OTEL_FILE_EXPORTER_PATH") is not null)
         {
             warnings.Add(
-                "COPILOT_OTEL_FILE_EXPORTER_PATH is set; Copilot writes telemetry to that file instead of exporting it to CopilotLedger.");
+                "COPILOT_OTEL_FILE_EXPORTER_PATH is set; Copilot writes telemetry to that file instead of exporting it to gh-ledger.");
         }
 
         string? exporter = Value(lookup, "COPILOT_OTEL_EXPORTER_TYPE");
@@ -70,7 +70,7 @@ internal static class CopilotOtelEnvironment
         if (value?.Equals("grpc", StringComparison.OrdinalIgnoreCase) == true)
         {
             warnings.Add(
-                $"{name} is grpc; CopilotLedger accepts only http/protobuf and http/json.");
+                $"{name} is grpc; gh-ledger accepts only http/protobuf and http/json.");
         }
     }
 
