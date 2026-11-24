@@ -171,6 +171,7 @@ public sealed class LedgerImporter
         tally.UnsupportedUsageShapes += result.UnsupportedUsageShapes;
         tally.SkippedEvents += result.SkippedEvents;
         tally.JournalPredecessors += journal;
+        tally.ToolLinksFallback += result.ToolCallsFallback;
 
         ILookup<string, ImportedToolCall> toolCalls = result.ToolCalls
             .Where(call => call.StartTime >= linkCutoff)
@@ -178,6 +179,7 @@ public sealed class LedgerImporter
         List<ImportedLedgerEntry> entries = [];
         long outOfScope = 0;
         long costOutOfRange = 0;
+        long reportedChargesRejected = 0;
         foreach (ImportedUsageRecord record in result.Records)
         {
             if (IsOutOfScope(record, request, roots))
@@ -192,6 +194,7 @@ public sealed class LedgerImporter
             {
                 calculation = _calculator.Calculate(span);
                 _ = PicoUsd.FromUsd(calculation.UsdCost);
+                _ = PicoUsd.FromUsd(calculation.ListUsdCost);
                 _ = PicoUsd.FromUsd(calculation.EstimatedCloudSavedUsd);
                 _ = PicoUsd.FromUsd(calculation.ApiEquivalent.UsdCost ?? 0m);
             }
@@ -199,6 +202,12 @@ public sealed class LedgerImporter
             {
                 costOutOfRange++;
                 continue;
+            }
+
+            if (calculation.ChargeSource == ChargeSource.Rejected)
+            {
+                reportedChargesRejected++;
+                tally.ReportedChargesRejected++;
             }
 
             entries.Add(new ImportedLedgerEntry
@@ -234,6 +243,10 @@ public sealed class LedgerImporter
             }
 
             tally.ToolLinksRecorded += resolved.ToolLinksRecorded;
+            tally.Repriced += resolved.Repriced;
+            tally.LiveRepriced += resolved.LiveRepriced;
+            tally.ToolLinksRelinked += resolved.ToolLinksRelinked;
+            tally.ToolLinksRemoved += resolved.ToolLinksRemoved;
             for (int index = 0; index < batch.Count; index++)
             {
                 switch (resolved.Resolutions[index])
@@ -263,6 +276,7 @@ public sealed class LedgerImporter
                  {
                      (ImportDiagnosticCode.AmbiguousOverlap, ambiguous),
                      (ImportDiagnosticCode.CostOutOfRange, costOutOfRange),
+                     (ImportDiagnosticCode.ReportedChargeRejected, reportedChargesRejected),
                  })
         {
             if (count > 0)
@@ -407,6 +421,12 @@ public sealed class LedgerImporter
         public long SkippedEvents { get; set; }
         public long JournalPredecessors { get; set; }
         public long ToolLinksRecorded { get; set; }
+        public long ToolLinksRelinked { get; set; }
+        public long ToolLinksRemoved { get; set; }
+        public long ToolLinksFallback { get; set; }
+        public long Repriced { get; set; }
+        public long LiveRepriced { get; set; }
+        public long ReportedChargesRejected { get; set; }
         private long Unpriced { get; set; }
         private decimal AiCredits { get; set; }
         private decimal AiCreditsUsd { get; set; }
@@ -466,6 +486,12 @@ public sealed class LedgerImporter
             JournalPredecessors = JournalPredecessors,
             Unpriced = Unpriced,
             ToolLinksRecorded = ToolLinksRecorded,
+            ToolLinksRelinked = ToolLinksRelinked,
+            ToolLinksRemoved = ToolLinksRemoved,
+            ToolLinksFallback = ToolLinksFallback,
+            Repriced = Repriced,
+            LiveRepriced = LiveRepriced,
+            ReportedChargesRejected = ReportedChargesRejected,
             AiCredits = AiCredits,
             AiCreditsUsd = AiCreditsUsd,
             FoundryByokUsd = FoundryByokUsd,

@@ -1,4 +1,5 @@
 using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Core.Pricing;
 
 namespace CopilotLedger.Core.Import;
 
@@ -25,6 +26,7 @@ public sealed record ImportedUsageRecord
     public required long CacheWriteInputTokens { get; init; }
     public required CacheCounterState CacheReadState { get; init; }    // Reported or Absent; an Absent counter is 0
     public required CacheCounterState CacheWriteState { get; init; }
+    public ReportedCharge ReportedCharge { get; init; }
     public long? ToolCallCount { get; init; }                // the log's own count; never expanded into calls
     public ImportedGitContext? Git { get; init; }
     public required long LineNumber { get; init; }           // 1-based; for diagnostics only

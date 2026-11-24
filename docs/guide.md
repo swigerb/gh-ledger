@@ -106,9 +106,13 @@ Malformed lines                  0
 Unsupported usage shapes         0
 Cost out of range                0
 Unpriced                         0
+Charges rejected                 0
+Repriced                         0
+Live repriced                    0
+Tool links relinked              0
 Coverage                  complete
 
-Importing would record 5 requests: 38.70 AI credits ($0.39), API equivalent $0.39.
+Importing would record 5 requests: 42.86 AI credits ($0.43), API equivalent $0.39.
 Dry run: nothing was written.
 ```
 <!-- /sample -->
@@ -140,9 +144,13 @@ Malformed lines                  0
 Unsupported usage shapes         0
 Cost out of range                0
 Unpriced                         0
+Charges rejected                 0
+Repriced                         0
+Live repriced                    0
+Tool links relinked              0
 Coverage                  complete
 
-Recorded 5 requests: 38.70 AI credits ($0.39), API equivalent $0.39.
+Recorded 5 requests: 42.86 AI credits ($0.43), API equivalent $0.39.
 ```
 <!-- /sample -->
 

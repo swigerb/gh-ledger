@@ -12,5 +12,6 @@ public sealed record SessionLogReadResult
     public required long UnsupportedUsageShapes { get; init; }
     public required long MalformedLines { get; init; }            // invalid JSON, oversized, or an unterminated last line
     public required long SkippedEvents { get; init; }             // well-formed lines of any other type, known or not
+    public long ToolCallsFallback { get; init; }
     public string? ContentSha256 { get; init; }                   // a Read log's bytes that were parsed (SessionLogHash)
 }

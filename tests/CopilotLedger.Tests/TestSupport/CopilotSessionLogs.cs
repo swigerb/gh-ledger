@@ -126,6 +126,7 @@ public sealed class CopilotSessionLogs
         string? agentId = null,
         string? parentToolCallId = null,
         string? providerType = null,
+        long? totalNanoAiu = null,
         Action<JsonObject>? change = null)
     {
         JsonObject usage = new() { ["model"] = model };
@@ -164,6 +165,16 @@ public sealed class CopilotSessionLogs
             usage["providerType"] = providerType;
         }
 
+        if (totalNanoAiu is not null)
+        {
+            usage["copilotUsage"] = new JsonObject
+            {
+                ["totalNanoAiu"] = totalNanoAiu.Value,
+                ["tokenDetails"] =
+                    new JsonArray(new JsonObject { ["tokenType"] = "input", ["tokenCount"] = input }),
+            };
+        }
+
         usage["accounting"] = new JsonObject
         {
             ["sourceSessionId"] = SessionId,
@@ -195,6 +206,7 @@ public sealed class CopilotSessionLogs
         long duration = 891,
         string? agentId = null,
         bool tokensUsed = true,
+        long? totalNanoAiu = 11_855_545_000,
         Action<JsonObject>? change = null)
     {
         JsonObject data = new()
@@ -223,10 +235,16 @@ public sealed class CopilotSessionLogs
                 ["outputTokens"] = output,
                 ["cacheReadTokens"] = cacheRead,
                 ["cacheWriteTokens"] = cacheWrite,
-                ["copilotUsage"] = new JsonObject { ["totalNanoAiu"] = 11_855_545_000 },
                 ["duration"] = duration,
                 ["model"] = model,
             };
+            if (totalNanoAiu is not null)
+            {
+                data["compactionTokensUsed"]!["copilotUsage"] = new JsonObject
+                {
+                    ["totalNanoAiu"] = totalNanoAiu.Value,
+                };
+            }
         }
 
         data["requestId"] = Canary;

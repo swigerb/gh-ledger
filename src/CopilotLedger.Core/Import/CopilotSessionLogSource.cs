@@ -68,6 +68,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ("data.usage.provider.kind", 64),
         ("data.usage.providerType", 64),
         ("data.usage.serviceRequestId", 64),
+        ("data.usage.copilotUsage.totalNanoAiu", 0),
         ("data.usage.accounting.usageId", 2048),
         ("data.usage.parentToolCallId", 2048),
         ("data.usage.duration", 0),
@@ -86,7 +87,8 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ("data.compactionTokensUsed.cacheWriteTokens", 0),
         ("data.compactionTokensUsed.model", 256),
         ("data.compactionTokensUsed.duration", 0),
-        ("data.compactionTokensUsed.provider.kind", 64));
+        ("data.compactionTokensUsed.provider.kind", 64),
+        ("data.compactionTokensUsed.copilotUsage.totalNanoAiu", 0));
 
     private static readonly PathTree SubagentPaths = new(
         ("agentId", 2048),
@@ -465,6 +467,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 CacheWriteInputTokens = cacheWrite,
                 CacheReadState = cacheReported == true || cacheRead > 0 ? CacheCounterState.Reported : CacheCounterState.Absent,
                 CacheWriteState = cacheReported == true || cacheWrite > 0 ? CacheCounterState.Reported : CacheCounterState.Absent,
+                ReportedCharge = fields.NanoAiu("data.usage.copilotUsage.totalNanoAiu"),
                 ToolCallCount = Count(fields.Integer("data.usage.numToolCalls")),
                 Git = _context,
                 LineNumber = number,
@@ -533,6 +536,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 CacheWriteInputTokens = cacheWrite,
                 CacheReadState = CacheCounterState.Reported,
                 CacheWriteState = CacheCounterState.Reported,
+                ReportedCharge = fields.NanoAiu("data.compactionTokensUsed.copilotUsage.totalNanoAiu"),
                 ToolCallCount = 0, // a compaction makes no tool calls, so a missing count always means an unknown one
                 Git = _context,
                 LineNumber = number,

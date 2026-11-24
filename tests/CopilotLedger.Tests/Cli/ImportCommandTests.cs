@@ -114,6 +114,10 @@ public sealed class ImportCommandTests
             Unsupported usage shapes         0
             Cost out of range                0
             Unpriced                         0
+            Charges rejected                 0
+            Repriced                         0
+            Live repriced                    0
+            Tool links relinked              0
             Coverage                  complete
 
             Recorded 3 requests: 12.26 AI credits ($0.12), API equivalent $0.12.
@@ -187,6 +191,12 @@ public sealed class ImportCommandTests
                   "skippedEvents": 0,
                   "unpriced": 0,
                   "toolLinksRecorded": 0,
+                  "toolLinksRelinked": 0,
+                  "toolLinksRemoved": 0,
+                  "toolLinksFallback": 0,
+                  "repriced": 0,
+                  "liveRepriced": 0,
+                  "reportedChargesRejected": 0,
                   "aiCredits": 0.15,
                   "aiCreditsUsd": 0.0015,
                   "foundryByokUsd": 0,
@@ -219,6 +229,12 @@ public sealed class ImportCommandTests
                   "skippedEvents": 0,
                   "unpriced": 1,
                   "toolLinksRecorded": 0,
+                  "toolLinksRelinked": 0,
+                  "toolLinksRemoved": 0,
+                  "toolLinksFallback": 0,
+                  "repriced": 0,
+                  "liveRepriced": 0,
+                  "reportedChargesRejected": 0,
                   "aiCredits": 0,
                   "aiCreditsUsd": 0,
                   "foundryByokUsd": 0,
@@ -338,6 +354,10 @@ public sealed class ImportCommandTests
             Unsupported usage shapes         0
             Cost out of range                0
             Unpriced                         0
+            Charges rejected                 0
+            Repriced                         0
+            Live repriced                    0
+            Tool links relinked              0
             Coverage                  complete
 
 
@@ -649,6 +669,10 @@ public sealed class ImportCommandTests
             Unsupported usage shapes         0         0
             Cost out of range                0         0
             Unpriced                         0         1
+            Charges rejected                 0         0
+            Repriced                         0         0
+            Live repriced                    0         0
+            Tool links relinked              0         0
             Coverage                  complete  complete
 
             Importing would record 2 requests: 0.15 AI credits ($0.00), API equivalent $0.00.
@@ -677,6 +701,10 @@ public sealed class ImportCommandTests
             Unsupported usage shapes         0         0
             Cost out of range                0         0
             Unpriced                         0         1
+            Charges rejected                 0         0
+            Repriced                         0         0
+            Live repriced                    0         0
+            Tool links relinked              0         0
             Coverage                  complete  complete
 
             Recorded 2 requests: 0.15 AI credits ($0.00), API equivalent $0.00.
@@ -738,6 +766,10 @@ public sealed class ImportCommandTests
             Unsupported usage shapes           0
             Cost out of range                  0
             Unpriced                           0
+            Charges rejected                   0
+            Repriced                           0
+            Live repriced                      0
+            Tool links relinked                0
             Coverage                  incomplete
 
             Recorded 1 request: 0.15 AI credits ($0.00), API equivalent $0.00.

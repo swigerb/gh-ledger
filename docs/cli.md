@@ -143,15 +143,19 @@ The table has a column for each source:
 | Unsupported usage shapes | Usage records with a missing or invalid field |
 | Cost out of range | Requests whose cost is beyond the ledger's range of about $9.2 million |
 | Unpriced | Recorded requests without a price; see [Pricing statuses](configuration.md#pricing-statuses) |
+| Charges rejected | Requests charged at the rate card because the charge their log reported isn't valid or can't apply |
+| Repriced | Requests imported before whose pricing changed, which this import rewrote; see [Repairs](#repairs) |
+| Live repriced | Live requests that this import gave the charge their log reported; see [Repairs](#repairs) |
+| Tool links relinked | Imported tool calls moved to the request that asked for them; see [Repairs](#repairs) |
 | Coverage | `complete`, or `incomplete` when a log or record that may hold requests wasn't imported |
 
 The next line totals the recorded requests' AI credits, GitHub USD, and API-equivalent USD, with the marks of [API-equivalent USD](#api-equivalent-usd); a line with Foundry BYOK USD and local savings follows when either isn't zero. A dry run says what the import would record. Warnings on standard error name the source, the session or rollout, and the line and byte where each problem first occurred, and nothing else from the log; after 20, the rest are counted.
 
 `--json` writes no warnings; it lists them as `diagnostics`. Its fields are `dryRun`, `period`, `from`, `repository` (the `owner/repo` slug, or the root when the repository has none) and `repositoryRoot` (both `null` with `--all`), `coverage`, and:
 
-- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `unreadableStoreEntries` (folders and files of the source's store that couldn't be listed), `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `supersededUnmatched`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
+- `sources`: one object per source, with `source`, `coverage`, `sessionsScanned`, `unreadableStoreEntries` (folders and files of the source's store that couldn't be listed), `sessionsSkippedUnchanged`, `sessionsSkippedActive`, `sessionsSkippedOutOfScope`, `sessionsUnsupported`, `sessionsAggregateOnly` (the unsupported sessions from before Copilot 1.0.103), `recordsParsed`, `recordsOutOfScope`, `recorded`, `duplicate`, `overlapSkipped`, `ambiguousOverlap`, `supersededUnmatched`, `malformedLines`, `unsupportedUsageShapes`, `costOutOfRange`, `journalPredecessors`, `skippedEvents` (events of other types), `unpriced`, `toolLinksRecorded`, `toolLinksRelinked`, `toolLinksRemoved`, `toolLinksFallback` (tool calls linked to the latest request of their agent because their `apiCallId` couldn't be followed), `repriced`, `liveRepriced`, `reportedChargesRejected`, and the recorded requests' `aiCredits`, `aiCreditsUsd`, `foundryByokUsd`, `localSavedUsd`, `apiEquivalentUsd`, `apiEquivalentUnpricedSpans`, and `apiEquivalentEstimatedSpans`.
 - `totals`: `recorded` and the same amounts over every source.
-- `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`. `log` is empty for `unreadableStore`, which is about the source's store rather than one log, and is the session ID for `supersededUnmatched`.
+- `diagnostics`: each with `source`, `log`, `code`, `event`, `field`, `version`, `count`, `line`, and `byteOffset`. `log` is empty for `unreadableStore`, which is about the source's store rather than one log, and is the session ID for `supersededUnmatched`. Codes include `reportedChargeRejected`.
 
 | Exit code | Meaning |
 |---|---|
@@ -194,9 +198,9 @@ These are the only fields import keeps, and where each comes from. Fields in no 
 | `spans.branch_name`, `spans.head_commit_sha` | `data.context.branch` and `data.context.headCommit` | `payload.git.branch` and `payload.git.commit_hash` |
 | `spans.canonical_usage_id` | SHA-256 of `data.usage.serviceRequestId`, or of a compaction's `data.serviceRequestId`; none for BYOK | — |
 | `spans.imported_tool_call_count` | `data.usage.numToolCalls`, or none when it's missing or invalid; 0 for a compaction, which makes no tool calls | — |
-| `spans.model_id`, `spans.rate_card_model_id`, `spans.tier_name`, `spans.billing_channel`, `spans.pricing_status`, `spans.rates_version`, `spans.cost_usd_pico`, `spans.saved_usd_pico`, `spans.api_equivalent_usd_pico`, `spans.api_equivalent_status`, `spans.api_rate_card_model_id`, `spans.api_rates_version`, `spans.api_rate_card_sha256` | Priced from the fields above, as for live spans | Priced from the fields above, as for live spans |
+| `spans.model_id`, `spans.rate_card_model_id`, `spans.tier_name`, `spans.billing_channel`, `spans.pricing_status`, `spans.rates_version`, `spans.cost_usd_pico` (the reported charge when `charge_source` is `reported`), `spans.saved_usd_pico`, `spans.api_equivalent_usd_pico`, `spans.api_equivalent_status`, `spans.api_rate_card_model_id`, `spans.api_rates_version`, `spans.api_rate_card_sha256` | Priced from the fields above, as for live spans | Priced from the fields above, as for live spans |
 | `spans.list_cost_usd_pico` | The rate card's price, from the fields above | Priced from the fields above |
-| `spans.charge_source` | `rate_card` | `rate_card` |
+| `spans.charge_source` | `reported` when `data.usage.copilotUsage.totalNanoAiu`, or a compaction's `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, is a valid charge for a priced GitHub request; `rejected` when it's present but not; else `rate_card` | `rate_card` |
 | `spans.id`, `spans.recorded_at_unix_ms`, `spans.accounting_state`, `spans.superseded_by` | Kept by the ledger | Kept by the ledger |
 | `span_links.trace_id`, `span_links.conversation_id`, `span_links.owner_span_row_id` | The usage record whose response asked for the tool: the latest one of the tool's agent | — |
 | `span_links.span_id` | SHA-256 of the session ID and `data.toolCallId` | — |
