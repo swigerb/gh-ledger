@@ -50,7 +50,7 @@ Global rules for every task:
 - [x] Task 11: Re-Import Repairs Tool Links in Place (CopilotLedger.Storage, docs & tests). Imported links move to the request that asked for them, or are removed when that request has no imported row, in the real run and the dry run alike.
 - [x] Task 12: Upgrade Guidance and Reference Consistency (docs & tests). Format 7 in the upgrade steps, "run `gh ledger import` once after upgrading", and the reference's billing and repair notes.
 - [x] Task 14: Review Fix: Import and Upgrade Docs Match the Code (docs & tests). `docs/cli.md`'s "Read, never stored" names both `totalNanoAiu` paths and becomes whole sentences; `docs/configuration.md`'s compaction bullet says "that GitHub billed"; `docs/guide.md`'s repair step follows the daemon-start troubleshooting; `ImportPrivacyTests.IP5` enforces the read list. Listed before Task 13 on purpose: Task 13's check 7 depends on it.
-- [ ] Task 13: Final Verification (no product change). Full build and test gates, money and privacy sweeps, boundary and version checks.
+- [x] Task 13: Final Verification (no product change). Full build and test gates, money and privacy sweeps, boundary and version checks.
 
 ## Starting point
 
