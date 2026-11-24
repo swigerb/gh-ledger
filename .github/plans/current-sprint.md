@@ -9,7 +9,7 @@
 | Branch | `swigerb-sprint-14-import-speed-routed-audits` |
 | Requirements | Issue [#82](https://github.com/swigerb/gh-ledger/issues/82) remainder (quadratic import lookup; oversized events import never reads), issue [#80](https://github.com/swigerb/gh-ledger/issues/80) remainder (`premium_model_trivial_turn` and routed requests), issue [#77](https://github.com/swigerb/gh-ledger/issues/77) (release provenance attestations), the 0.6.0 version bump and its 0.5.0 → 0.6.0 upgrade docs |
 | Status | Current sprint. Sprint 12's plan is archived verbatim at `.github/plans/archive/sprint-12.md`. Sprint 13's is at `.github/plans/archive/sprint-13.md`. |
-| Amended | 2026-11-24, after Task 1 (`30dd55e`): Task 3's oversized rule follows import's normal-size rule instead of a two-type allowlist. 2026-11-24, after Task 2 (`36f8c27`): Task 3's test vectors repaired (PA2). See "Plan amendments". |
+| Amended | 2026-11-24, after Task 1 (`30dd55e`): Task 3's oversized rule follows import's normal-size rule instead of a two-type allowlist. 2026-11-24, after Task 2 (`36f8c27`): Task 3's test vectors repaired (PA2). See "Plan amendments". 2026-11-24, after Task 9 (`81d6bf9`): review fixes R1 and R2 added as Tasks 10 and 11. See "Review after Task 9". |
 
 ## How to use this plan
 
@@ -70,6 +70,8 @@ Global rules for every task:
 - [x] Task 7: 0.5.0 → 0.6.0 Upgrade Docs (docs & tests). Format 6 → 7 is one-way. Copy the data directory first, stop the daemon and close the MCP sessions, upgrade, run `gh ledger import --all` once, and roll back with `--pin v0.5.0` and the copy. `UpgradeDocsTests.UD5`.
 - [x] Task 8: Import Benchmark Report (docs/test-reports). Run the Task 1 script against a Release publish of this branch and record before and after in `docs/test-reports/<date>-import-benchmark.md`.
 - [x] Task 9: Final Verification (no product change). Build and test gates, a `publish` whose `--version` is `0.6.0`, money, privacy, and boundary sweeps, and confirmation that the rates are unchanged.
+- [ ] Task 10: LX6 Reaches the Live-Span Lookups (tests only). Review fix R1: LX6 uses service request IDs that import accepts, so its two dry runs reach `UsageAuthority.GatherAsync`, and it asserts what they decided.
+- [ ] Task 11: The Oversized Rule Is Copilot's (docs only). Review fix R2: `docs/cli.md` says that only a Copilot line longer than 8 MiB can count as a skipped event. A longer Codex line is always malformed.
 
 ## Starting point
 
@@ -680,6 +682,85 @@ Run, in a clean tree:
    - no release notes file was added.
 8. Check off this task, and commit with the results in the body.
 
+## Review after Task 9 (2026-11-24, `ledger-architect`)
+
+Reviewed `0f96a83..81d6bf9` (13 commits, 38 files) against this plan, issues #82, #80, and #77, and `.github/copilot-instructions.md`.
+
+- `dotnet build CopilotLedger.slnx`: 0 warnings, 0 errors.
+- `dotnet test CopilotLedger.slnx`: 1,960 passed, 0 failed, 0 skipped. That's 1,921 plus the 39 this sprint adds: LX 6, CS 17 (theory rows included), CX18, OV1, AR7 8, AC10, RW 4, UD5.
+- A `win-x64` Release publish prints `0.6.0`, and `rates validate` exits 0 against an empty `COPILOT_LEDGER_HOME`.
+- Re-checked:
+  - F1: `v4.2.2` is still the latest release and still points to `4d10147…`. Its `create-storage-record` input applies only with `push-to-registry`, so the job needs no `artifact-metadata` permission.
+  - F6 and F7: the Auto 10% and Fusion 30% (through November 30, 2026) text is unchanged on docs.github.com.
+- No money `double`, `float`, `REAL`, or `Math.Round` was added. There's no new column, table, package, or `global.json` or `rates.json` change, and `UsageAuthority.cs` and `docs/configuration.md` are unchanged.
+- The version places match VR3, and the benchmark report's numbers and percentages match the Task 1 and Task 8 commit bodies.
+- Not a defect: `AuditQueryTests` gained `ListCostUsd = 0.0272m` in its expected record. Live rows store their list price, so the record's new property has to be in the expected value. That's not a weakened assertion.
+- Not a defect: `JsonlLineReader`'s copy branch (`lineLength < PrefixBytes`) only runs when `maxLineBytes` is under 64 KiB, so no product path reaches it. With 8 MiB, the prefix is always already in `line`.
+
+Findings that need a fix:
+
+- **R1 (minor, test gap).** LX6 writes `Usage("u-1", "r-1")` and `Usage("u-2", "r-2")`. `UsageIdentity.NormalizeServiceRequestId` rejects those IDs (PA2), so both dry runs report `unsupportedUsageShapes` 2 and never call `UsageAuthority.GatherAsync`. "Decides the same" is therefore never tested, and that's the claim behind D3 and the `--dry-run` docs sentence ("its results are the same"). The planning probe (a scratch copy outside the repository, deleted afterward) found that with `R1` and `R2`, both runs exit 2 with `recordsParsed` 2, `unsupportedUsageShapes` 0, `ambiguousOverlap` 2, `recorded` 0, and one `ambiguousOverlap` diagnostic with count 2, and their stdout is identical. `ambiguousOverlap` comes from the indexed `canonical_usage_id IS NULL` live-span subquery. Fixed by Task 10.
+- **R2 (minor, docs mismatch).** In `docs/cli.md`, the report table's Malformed lines row and the `skippedEvents` JSON note give the 64 KiB rule for every source. Codex's `OnOversized` ignores the prefix (CX18), so a Codex line longer than 8 MiB is always malformed. The plan's own Task 3 text caused this. Fixed by Task 11.
+
+## Task 10: LX6 Reaches the Live-Span Lookups
+
+**Files:** `tests/CopilotLedger.Tests/Storage/ConversationLiveIndexTests.cs` only. No product, docs, or other test change.
+
+**Changes:**
+
+1. Add `using System.Text.Json;`.
+2. Add these private constants to `ConversationLiveIndexTests`, the same values as Task 3's:
+
+   ```csharp
+   private const string R1 = "11111111-1111-4111-8111-111111111111";
+   private const string R2 = "22222222-2222-4222-8222-222222222222";
+   ```
+
+3. In `LX6_ADryRun_NeverCreatesTheIndex_AndDecidesTheSame`, change `.Usage("u-1", "r-1")` to `.Usage("u-1", R1)` and `.Usage("u-2", "r-2")` to `.Usage("u-2", R2)`. Keep the name, the setup, and every existing assertion: the index count is 0 after A and 1 after B, and exit codes and stdout are equal.
+4. After the existing assertions, assert for **each** of `first` and `second`. A private static local function or helper, such as `AssertDeferred(CliRun run)`, is fine:
+   - `run.ExitCode` is 2;
+   - parse `run.Out` with `JsonDocument`, and take `sources[0]`:
+     - `source` is `"copilot"`;
+     - `recordsParsed` is 2;
+     - `unsupportedUsageShapes` is 0;
+     - `ambiguousOverlap` is 2;
+     - `recorded` is 0;
+   - root `diagnostics` has exactly one element, with `code` `"ambiguousOverlap"` and `count` 2.
+
+If any of these values differs, stop and report it. Don't change the setup to make it pass.
+
+**Acceptance:**
+
+- LX6 passes with the new assertions. The test count stays 1,960.
+- `git grep -n '"r-1"\|"r-2"' -- tests/CopilotLedger.Tests/Storage/ConversationLiveIndexTests.cs` finds nothing.
+- `git diff HEAD~1 --stat` lists only `ConversationLiveIndexTests.cs` and this plan file. The plan file changes only to check off this task.
+
+**Verification:** `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors), then `dotnet test CopilotLedger.slnx` (0 failed, 0 skipped). Record `Tests: <n> passed` in the commit body.
+
+## Task 11: The Oversized Rule Is Copilot's
+
+**Files:** `docs/cli.md` only.
+
+**Changes:**
+
+1. Replace the report table's Malformed lines row with exactly:
+
+   `| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete. A longer Copilot line counts as a skipped event instead when its first 64 KiB show a top-level \`type\` that isn't one of the events import reads, the same rule as for shorter lines. A longer Codex line is always malformed |`
+
+2. In the JSON field list, replace `` `skippedEvents` (events of other types, including those longer than 8 MiB whose type shows in their first 64 KiB) `` with `` `skippedEvents` (events of other types, including Copilot events longer than 8 MiB whose type shows in their first 64 KiB) ``.
+
+No other text changes. The new text names no version, and the product is written "gh-ledger" wherever it's named.
+
+**Acceptance:**
+
+- `Select-String -Path docs/cli.md -SimpleMatch 'A longer Copilot line counts as a skipped event'` and `… -SimpleMatch 'including Copilot events longer than 8 MiB'` each find one line.
+- `Select-String -Path docs/cli.md -SimpleMatch 'A longer line counts as a skipped event'` finds nothing.
+- `git diff HEAD~1 --stat` lists only `docs/cli.md` and this plan file.
+- Every docs test passes unchanged: `VersionPlacesTests`, `ProductNameTests`, `UpgradeDocsTests`, `GuideSamplesTests`, and `ReleaseWorkflowTests`.
+- The test count stays 1,960.
+
+**Verification:** `dotnet build CopilotLedger.slnx`, then `dotnet test CopilotLedger.slnx`. Record `Tests: <n> passed` in the commit body. After this task, hand back to `ledger-architect` for review mode.
+
 ## Tests added this sprint
 
 | Task | File | Tests |
@@ -698,9 +779,12 @@ Changed, with assertions unchanged:
 - the format-downgrade fixtures (Task 2);
 - the four version tests (Task 5).
 
-Changed assertions: `CS5_ALineLongerThan8MiBIsDiscardedUnread` (Task 3, PA2): an oversized `user.message` is now a skipped event.
+Changed assertions:
 
-## After Task 9 (orchestrator)
+- `CS5_ALineLongerThan8MiBIsDiscardedUnread` (Task 3, PA2): an oversized `user.message` is now a skipped event.
+- `LX6_ADryRun_NeverCreatesTheIndex_AndDecidesTheSame` (Task 10, R1): valid service request IDs, and assertions on what both dry runs decided. Nothing is loosened.
+
+## After Task 11 (orchestrator)
 
 Hand back to `ledger-architect` for review mode. Release notes for 0.6.0 aren't committed to the repository: the coordinator's final report drafts them from this plan and the Task 8 report. Don't push, tag, open a PR, or create a release from a builder run.
 
