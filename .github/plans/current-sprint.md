@@ -11,7 +11,7 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–15 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–16 are sequential, and each builds on the ones before it.
 
 This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-9.md`, then each task as its own commit, `Sprint 10 Task N: <Title>`, on branch `swigerb-sprint-10-ledger-audit`, and opens one pull request titled exactly "Sprint 10: `gh ledger audit`: telemetry anomaly & loop audit with optional local-LLM recommendations", with `Closes #65`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
@@ -51,6 +51,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 13: The Reference (docs & tests). `docs/cli.md` documents the command, the rules, the output, the recommendations, and the local model's payload, whose tables tests compare with the code; `docs/configuration.md` and the README gain their audit notes.
 - [x] Task 14: The Weekly Waste Review, and CI (docs, CI & tests). `docs/guide.md` gains "Weekly waste review" with a checked sample in its own guide state, and CI smoke-tests `audit --json`, `--show-llm-payload`, and `get_audit_findings`.
 - [x] Task 15: `velocity_near_breaker` Defers Only to a Recorded Trip (CopilotLedger.Core, CopilotLedger.Storage, docs & tests). Review findings S1 and M1–M3: the rule leaves out only the prompt chains that have a recorded `credit_velocity` trip, so a chain that the daemon never tripped, such as an imported one, is reported even above the breaker's threshold; `docs/cli.md` states `failed_tool_retry`'s trigger exactly; and tests reach the two clamps that keep repriced impacts from going negative.
+- [ ] Task 16: `velocity_near_breaker`'s Recommendation Fits a Chain Above the Threshold (CopilotLedger.Core & docs). Review suggestions W1 and W2: the fixed recommendation asks the user to make sure the circuit breaker's credit velocity is low enough to trip on such a burst, instead of saying to lower it so it trips next time, which a chain already above today's threshold doesn't need; and the rules table says that only a recorded credit velocity trip exempts a chain.
 
 ## Starting point
 
@@ -221,7 +222,7 @@ Each `githubAiCredits` model with a window covering the instant contributes its 
 | Timeout or HTTP 500: a warning; findings and exit code unchanged | 9 | LA7, LA8, LA9, LA14 |
 | MCP: validates, read-only, matches `audit --json`, `McpTestHarness`, `WARNING:` | 10 | MC1, MC8, MC11, AM1–AM5 |
 | No `double`, `float`, or `REAL`; invariant output under `de-DE` | 12 | AV3, AV2 |
-| `docs/cli.md`, `docs/configuration.md`, `docs/guide.md` updated; `GuideSamplesTests` passes | 11, 13, 14 | AD1–AD3, GS1, GS2 |
+| `docs/cli.md`, `docs/configuration.md`, `docs/guide.md` updated; `GuideSamplesTests` passes | 11, 13, 14, 16 | AD1–AD3, GS1, GS2 |
 | Build and tests exit 0 with warnings as errors; hermetic | all | Every task; "Test specifications" |
 | #62: cache usage counts as reported when either counter is; streaks use only reported requests; an unknown request ends a streak | 2 | AR3; `CacheMetrics.IsReported` |
 | #61: one labeled lens; unpriced means unknown, never 0 | 2–4, 6 | `impactLens` in AO1; AR3, AR7, AR9, AR10; D9 |
@@ -238,6 +239,15 @@ An independent review of Tasks 1–14, as committed on `swigerb-sprint-10-ledger
 | M1 | `docs/cli.md` said `failed_tool_retry` triggers "always below the breaker's `--churn-failures`", but with `--churn-failures 2` the trigger is 2, because `AuditThresholds.FailedToolRetryTrigger` never goes below 2 | "3 failures in a row, or one less than `--churn-failures` when that's lower, but at least 2", in the docs and in the rule's comment | 15 |
 | M2 | No test reached the clamps that keep `cache_miss_streak`'s and `premium_model_trivial_turn`'s impacts from going negative, though a card may price cached input above input, and an economy model may cost more than the model it would replace | AR3 "cached above input" and AR7 "economy model pricier": an impact of 0, not −0.2 or −0.588 | 15 |
 | M3 | The issue asks for a typed `AuditLlmSummary` DTO serialized with System.Text.Json; `AuditLlmPayload` writes a fixed property list with `Utf8JsonWriter`, and AD2 pins its allowlist, but no deviation said so | D27 | 15 |
+
+### Review fixes (Task 16)
+
+The reviewer's re-review of Task 15, as committed at `3e1cda5`, was clean and suggested two wording fixes, which Task 16 makes on top of Task 15. It changes no test: AD1 and GS2 already compare the recommendation in the code with `docs/cli.md`'s table and with the guide's `audit` sample. Task 16 was built like Task 15, and a script applied its blocks (`reapply.ps1 -FromTask 16`) to a fresh `git archive 3e1cda5` with every text file converted to CRLF; it built with 0 warnings, passed 1731 tests, and gave, line endings aside, the same files.
+
+| Finding | Problem | Fix | Task |
+|---|---|---|---|
+| W1 | `velocity_near_breaker`'s recommendation said to "lower the circuit breaker's credit velocity with gh ledger breaker config so it trips next time", but since D26 a finding can be above the current threshold, and today's settings would already trip on such a burst | "Check whether this burst of spend was expected; if it wasn't, make sure the circuit breaker's credit velocity, set with gh ledger breaker config, is low enough to trip on such a burst.", in `AuditRecommendations`, `docs/cli.md`'s recommendations table, and the guide's `audit` sample | 16 |
+| W2 | The rules table said a chain is reported "unless the breaker recorded a trip for it", but a `retry_churn` trip doesn't exempt it (AQ13) | "unless the breaker recorded a credit velocity trip for it" | 16 |
 
 ## Task 1 specification: Audit Contracts, the Analyzer Frame, and the Pricing Interface
 
@@ -11668,6 +11678,128 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 16 specification: `velocity_near_breaker`'s Recommendation Fits a Chain Above the Threshold
+
+Review suggestions W1 and W2, from the clean re-review of Task 15. Since D26, a `velocity_near_breaker` finding can be above the breaker's current threshold, for an imported chain or one that the daemon never tripped, so its recommendation can't simply say to lower the credit velocity so the breaker trips next time. And the rules table must say that only a credit velocity trip exempts a chain, since a `retry_churn` trip doesn't (AQ13).
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Audit/AuditRecommendations.cs` | `velocity_near_breaker`'s sentence (W1) |
+| `docs/cli.md` | The rules table's `velocity_near_breaker` row (W2) and the recommendations table's (W1) |
+| `docs/guide.md` | The `velocity_near_breaker` line of the `audit` sample's recommendations (W1) |
+
+### Contracts
+
+- `AuditRecommendations.Text("velocity_near_breaker")` is "Check whether this burst of spend was expected; if it wasn't, make sure the circuit breaker's credit velocity, set with gh ledger breaker config, is low enough to trip on such a burst." It fits a chain below the threshold, for which the user lowers the credit velocity, and a chain above it, which today's settings would already trip on. As in the other sentences, the command has no backticks.
+- The text output's `Recommendations:` and the export's report rows show the sentence; the JSON (`audit --json`, MCP, and the bundle) and the local model's payload carry only `recommendationKey`, so they don't change. `docs/cli.md`'s recommendations table repeats the sentence exactly (AD1), and the guide's `audit` sample prints it (GS2). No other doc or test has the old sentence or "so it trips next time".
+- The rules table: "A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity, unless the breaker recorded a credit velocity trip for it."
+
+### Code (copy exactly)
+
+Edit 1 of 2 in `docs/cli.md`, replace:
+
+```markdown
+| `cache_miss_streak` | Requests in a row, of one agent invocation and model, each with at least 20,000 input tokens and less than 10% of them read from the prompt cache | 5 requests | 10 requests | What the uncached input cost above the cached input price |
+| `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
+| `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity, unless the breaker recorded a trip for it. Only the daemon trips the breaker, and only on live spans, so an imported chain, or one recorded before the breaker or under other settings, can be reported above 100% | Info only | | None |
+<!-- /audit-rules -->
+
+- **One lens.** Estimated impacts are billed USD: GitHub AI credits at $0.01 each, and Foundry BYOK. Repriced impacts use the rates in use, your overlay included. A local request's impact is $0. An impact that would include a request without a billed price is unknown (`-` in the table, `null` in JSON), never $0. Findings can overlap, so their impacts aren't added together, and there's no total.
+```
+
+with:
+
+```markdown
+| `cache_miss_streak` | Requests in a row, of one agent invocation and model, each with at least 20,000 input tokens and less than 10% of them read from the prompt cache | 5 requests | 10 requests | What the uncached input cost above the cached input price |
+| `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
+| `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity, unless the breaker recorded a credit velocity trip for it. Only the daemon trips the breaker, and only on live spans, so an imported chain, or one recorded before the breaker or under other settings, can be reported above 100% | Info only | | None |
+<!-- /audit-rules -->
+
+- **One lens.** Estimated impacts are billed USD: GitHub AI credits at $0.01 each, and Foundry BYOK. Repriced impacts use the rates in use, your overlay included. A local request's impact is $0. An impact that would include a request without a billed price is unknown (`-` in the table, `null` in JSON), never $0. Findings can overlap, so their impacts aren't added together, and there's no total.
+```
+
+Edit 2 of 2 in `docs/cli.md`, replace:
+
+```markdown
+| `cache_miss_streak` | Keep the start of each prompt stable, such as instructions, tool definitions, and earlier messages, so the prompt cache can serve it, and avoid switching models in the middle of a task. |
+| `premium_model_trivial_turn` | Consider a cheaper model or a local model for these short requests without tool calls; they're only candidates, because a short answer can still need a strong model. |
+| `velocity_near_breaker` | Check whether this burst of spend was expected; if it wasn't, lower the circuit breaker's credit velocity with gh ledger breaker config so it trips next time. |
+<!-- /audit-recommendations -->
+
+### Local model suggestions
+```
+
+with:
+
+```markdown
+| `cache_miss_streak` | Keep the start of each prompt stable, such as instructions, tool definitions, and earlier messages, so the prompt cache can serve it, and avoid switching models in the middle of a task. |
+| `premium_model_trivial_turn` | Consider a cheaper model or a local model for these short requests without tool calls; they're only candidates, because a short answer can still need a strong model. |
+| `velocity_near_breaker` | Check whether this burst of spend was expected; if it wasn't, make sure the circuit breaker's credit velocity, set with gh ledger breaker config, is low enough to trip on such a burst. |
+<!-- /audit-recommendations -->
+
+### Local model suggestions
+```
+
+Edit 1 of 1 in `docs/guide.md`, replace:
+
+````markdown
+  context_bloat: Send less context with each request: attach smaller files and tool results, trim long instructions, or start a new session for a new task.
+  context_growth: Start a new session or compact the conversation when the context keeps growing, and keep tool results short.
+  velocity_near_breaker: Check whether this burst of spend was expected; if it wasn't, lower the circuit breaker's credit velocity with gh ledger breaker config so it trips next time.
+```
+<!-- /sample -->
+````
+
+with:
+
+````markdown
+  context_bloat: Send less context with each request: attach smaller files and tool results, trim long instructions, or start a new session for a new task.
+  context_growth: Start a new session or compact the conversation when the context keeps growing, and keep tool results short.
+  velocity_near_breaker: Check whether this burst of spend was expected; if it wasn't, make sure the circuit breaker's credit velocity, set with gh ledger breaker config, is low enough to trip on such a burst.
+```
+<!-- /sample -->
+````
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Audit/AuditRecommendations.cs`, replace:
+
+```csharp
+            "Consider a cheaper model or a local model for these short requests without tool calls; they're only candidates, because a short answer can still need a strong model."),
+        (AuditRuleIds.VelocityNearBreaker,
+            "Check whether this burst of spend was expected; if it wasn't, lower the circuit breaker's credit velocity with gh ledger breaker config so it trips next time."),
+    ];
+
+    // Every key: the rule IDs in AuditRuleIds.All order, with context_bloat_zero_output after context_bloat.
+```
+
+with:
+
+```csharp
+            "Consider a cheaper model or a local model for these short requests without tool calls; they're only candidates, because a short answer can still need a strong model."),
+        (AuditRuleIds.VelocityNearBreaker,
+            "Check whether this burst of spend was expected; if it wasn't, make sure the circuit breaker's credit velocity, set with gh ledger breaker config, is low enough to trip on such a burst."),
+    ];
+
+    // Every key: the rule IDs in AuditRuleIds.All order, with context_bloat_zero_output after context_bloat.
+```
+
+### Tests
+
+No test changes. AD1 compares the recommendations table with `AuditRecommendations`, and GS2 runs the guide's `audit` sample exactly, so either fails if the code, the table, or the sample keeps the old sentence.
+
+### Acceptance criteria
+
+- The code, `docs/cli.md`, and the guide's sample have the same new sentence, and the rules table names the credit velocity trip.
+- `dotnet test CopilotLedger.slnx` passes **1731** tests, as after Task 15.
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
 Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` with fixed times, `FakeCliPlatform`, `CliHarness` for the CLI, `McpTestHarness` for MCP, and `FakeLlmHandler` for every local model. Ledgers are synthetic, written by `AuditSeeds`, `ExportSeeds`, `GuideWorld`, or the test itself. No test opens a socket, starts a process, runs `git`, uses the network, Node, Python, or Docker, or reads `~/.copilot`, `~/.codex`, `~/.claude`, or `~/.copilot-ledger`; `LocalLlmAdvisor.CreateDefaultHandler()` is only constructed. LA8 is the only test that waits on real time (one second). Money is `decimal` or integer pico-USD, never `double`, and expected text is compared exactly.
@@ -11690,6 +11822,7 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 13 | AD1–AD3 | — | 1,722 |
 | 14 | GS2 (1 more case) | GS1 (the new sample ID) | 1,723 |
 | 15 | AR3 (1 more case), AR6 (4 more cases), AR7 (1 more case), AQ13 (2) | AR6 ("trips" records the chain's trip) | 1,731 |
+| 16 | — | — (AD1 and GS2 compare the new sentence in `docs/cli.md` and `docs/guide.md` with the code's) | 1,731 |
 
 Exact values used across tasks:
 
@@ -11708,11 +11841,11 @@ Exact values used across tasks:
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 15, the orchestrator:
+After Task 16, the orchestrator:
 
 1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1731 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-9.md`, and the files the tasks list.
 2. Runs the published binary's `gh ledger audit`, `--json`, and `--show-llm-payload` against a temporary `COPILOT_LEDGER_HOME` with a few recorded spans, and reads the payload. It never points `--local-llm` at a real model, local or remote, and never uses a real home directory.
-3. Pushes `swigerb-sprint-10-ledger-audit` and opens one pull request titled exactly "Sprint 10: `gh ledger audit`: telemetry anomaly & loop audit with optional local-LLM recommendations", whose body says `Closes #65` and has `## Changes` (the fifteen task commits and what each adds), `## Deviations` (D1–D27 and P1–P29 from "Design decisions", each with a one-line rationale), `## Review fixes` (the findings of "Review fixes (Task 15)", each with its task), `## Verification` (the build, the test count, CI, and the hermetic tests), and `## Risks`: imported subagents without a name join the main agent (A2); a tool span exported after its agent could make a tool count 0 for one run (A1); a short compaction on a premium model counts as a short request without tool calls (P29); findings are heuristics that can overlap; and the payload's labels reach a local model, whose system prompt treats them as data.
+3. Pushes `swigerb-sprint-10-ledger-audit` and opens one pull request titled exactly "Sprint 10: `gh ledger audit`: telemetry anomaly & loop audit with optional local-LLM recommendations", whose body says `Closes #65` and has `## Changes` (the sixteen task commits and what each adds), `## Deviations` (D1–D27 and P1–P29 from "Design decisions", each with a one-line rationale), `## Review fixes` (the findings of "Review fixes (Task 15)" and "Review fixes (Task 16)", each with its task), `## Verification` (the build, the test count, CI, and the hermetic tests), and `## Risks`: imported subagents without a name join the main agent (A2); a tool span exported after its agent could make a tool count 0 for one run (A1); a short compaction on a premium model counts as a short request without tool calls (P29); findings are heuristics that can overlap; and the payload's labels reach a local model, whose system prompt treats them as data.
 4. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary's audit and `get_audit_findings`. If a job fails only with the dry-run race that "How to use this plan" describes, it reruns the job. If AV5's byte comparison fails on Linux, it applies A6's fallback and records a P-row.
 5. Asks `ledger-architect` to review the branch.
 
