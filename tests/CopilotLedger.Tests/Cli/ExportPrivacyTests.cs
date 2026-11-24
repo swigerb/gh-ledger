@@ -208,8 +208,8 @@ public sealed class ExportPrivacyTests
             row => row.GetProperty("repository").GetString() == ExportSeeds.LocalRoot(temp.Path));
     }
 
-    // A --repo that's a path shows as its last folder's name, however it ends, or as (root folder); nothing else of it
-    // reaches a file or the console.
+    // A --repo that's a path shows as its last folder's name, however it ends or is encoded, or as (root folder); nothing else
+    // of it reaches a file or the console.
     [Theory]
     [InlineData("C:/Users/Alice/private-9f3e/project/", "project")]
     [InlineData(@"C:\Users\Alice\private-9f3e\project\\", "project")]
@@ -217,6 +217,11 @@ public sealed class ExportPrivacyTests
     [InlineData(@"\\fileserver-9f3e\share\project\", "project")]
     [InlineData("//fileserver-9f3e/share/project/", "project")]
     [InlineData("file:///C:/Users/Alice/private-9f3e/project/", "project")]
+    [InlineData("file:///C:%5CUsers%5CAlice%5Cprivate-9f3e%5Cproject", "project")]
+    [InlineData("FILE:///home/alice%2Fprivate-9f3e%2Fproject%2f", "project")]
+    [InlineData("file:///C:/Users/Alice/private-9f3e%5cproject%5C", "project")]
+    [InlineData("C:%255CUsers%255CAlice%255Cprivate-9f3e%255Cproject", "project")]
+    [InlineData("%2Fhome%2Falice%2Fprivate-9f3e%2Fproject", "project")]
     [InlineData(@"\\fileserver-9f3e\private-9f3e\", "(root folder)")]
     [InlineData(@"C:\", "(root folder)")]
     [InlineData("C:", "(root folder)")]

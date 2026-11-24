@@ -14,19 +14,36 @@ internal static class ExportRecords
     public static string Repository(string key, IReadOnlySet<string> roots, bool includeLocalPaths) =>
         !includeLocalPaths && (roots.Contains(key) || LooksLikeLocalPath(key)) ? FolderName(key) : key;
 
-    // A local path's last segment, once trailing / and \ are removed, so it's never a path; (root folder) for a root, such as
-    // C:\, /, or \\server\share.
+    // A local path's last segment, once its percent-encoded bytes are decoded and trailing / and \ removed, so it's never a
+    // path; (root folder) for a root, such as C:\, /, or \\server\share.
     public static string FolderName(string path)
     {
-        string trimmed = path.TrimEnd('/', '\\');
+        string trimmed = Unescape(path).TrimEnd('/', '\\');
         string name = trimmed[(trimmed.LastIndexOfAny(['/', '\\']) + 1)..];
         return name.Length == 0 || name.EndsWith(':') || IsShareRoot(trimmed) ? "(root folder)" : name;
     }
 
-    // Starts with / or \, with a drive letter and a colon, or with file:.
-    public static bool LooksLikeLocalPath(string key) =>
-        key.StartsWith('/') || key.StartsWith('\\') || (key.Length >= 2 && char.IsAsciiLetter(key[0]) && key[1] == ':')
-        || key.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
+    // Starts with / or \, with a drive letter and a colon, or with file:, once its percent-encoded bytes are decoded.
+    public static bool LooksLikeLocalPath(string key)
+    {
+        string path = Unescape(key);
+        return path.StartsWith('/') || path.StartsWith('\\') || (path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':')
+            || path.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // text with its percent-encoded bytes decoded until none is left, however deep the encoding, as a file: URI can hold
+    // separators: file:///C:%5CUsers%5C…
+    private static string Unescape(string text)
+    {
+        string decoded = Uri.UnescapeDataString(text);
+        while (decoded != text)
+        {
+            text = decoded;
+            decoded = Uri.UnescapeDataString(text);
+        }
+
+        return text;
+    }
 
     // \\server\share or //server/share, without trailing separators.
     private static bool IsShareRoot(string trimmed) =>
