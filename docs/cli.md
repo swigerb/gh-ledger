@@ -19,6 +19,14 @@ gh downloads the release binary for your platform to:
 
 When `XDG_DATA_HOME` is set, gh uses `$XDG_DATA_HOME/gh/extensions/gh-ledger/` instead. The path stays the same when you upgrade, so the sign-in item and an MCP registration keep working.
 
+**Verify the binary.** Releases have a build provenance attestation for each binary, which shows that this repository's Release workflow built it. To check the one gh installed, run, with the path above for your platform:
+
+```shell
+gh attestation verify "<path to gh-ledger>" --repo swigerb/gh-ledger --signer-workflow swigerb/gh-ledger/.github/workflows/release.yml
+```
+
+It exits with 0 when an attestation matches the file's SHA-256 digest, and fails otherwise. gh-ledger 0.5.0 and earlier have no attestations, and the Windows binaries aren't signed with Authenticode. See [Verify a release](releasing.md#verify-a-release).
+
 To build from source instead, publish one single-file, self-contained binary for your runtime identifier:
 
 ```shell

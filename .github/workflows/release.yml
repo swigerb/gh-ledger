@@ -123,6 +123,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -138,6 +140,18 @@ jobs:
           cd dist
           sha256sum gh-ledger-* rates.json rates.v2.json > gh-ledger-checksums.txt
           cat gh-ledger-checksums.txt
+      - name: Attest the binaries and rates
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/gh-ledger-windows-amd64.exe
+            dist/gh-ledger-windows-arm64.exe
+            dist/gh-ledger-linux-amd64
+            dist/gh-ledger-linux-arm64
+            dist/gh-ledger-darwin-amd64
+            dist/gh-ledger-darwin-arm64
+            dist/rates.json
+            dist/rates.v2.json
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
