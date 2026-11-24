@@ -14,16 +14,23 @@ internal static class ExportRecords
     public static string Repository(string key, IReadOnlySet<string> roots, bool includeLocalPaths) =>
         !includeLocalPaths && (roots.Contains(key) || LooksLikeLocalPath(key)) ? FolderName(key) : key;
 
-    // The last segment after / or \; the path itself when it has none.
+    // A local path's last segment, once trailing / and \ are removed, so it's never a path; (root folder) for a root, such as
+    // C:\, /, or \\server\share.
     public static string FolderName(string path)
     {
-        int separator = path.LastIndexOfAny(['/', '\\']);
-        return separator < 0 || separator == path.Length - 1 ? path : path[(separator + 1)..];
+        string trimmed = path.TrimEnd('/', '\\');
+        string name = trimmed[(trimmed.LastIndexOfAny(['/', '\\']) + 1)..];
+        return name.Length == 0 || name.EndsWith(':') || IsShareRoot(trimmed) ? "(root folder)" : name;
     }
 
-    // Starts with / or \, or with a drive letter and a colon.
+    // Starts with / or \, with a drive letter and a colon, or with file:.
     public static bool LooksLikeLocalPath(string key) =>
-        key.StartsWith('/') || key.StartsWith('\\') || (key.Length >= 2 && char.IsAsciiLetter(key[0]) && key[1] == ':');
+        key.StartsWith('/') || key.StartsWith('\\') || (key.Length >= 2 && char.IsAsciiLetter(key[0]) && key[1] == ':')
+        || key.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
+
+    // \\server\share or //server/share, without trailing separators.
+    private static bool IsShareRoot(string trimmed) =>
+        trimmed.Length > 2 && trimmed[0] is '/' or '\\' && trimmed[1] is '/' or '\\' && trimmed[2..].Split(['/', '\\']).Length == 2;
 
     // "<repository, or all repositories>[, branch <b>][, pull request #<n>][, conversation <id>]". A local root shows as
     // its folder name even when the export includes local paths, so standard output never shows a path.

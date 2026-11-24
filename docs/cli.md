@@ -311,7 +311,7 @@ gh ledger export [--format html] [--out <path>] [--bundle] [--repo <key> | --all
 | `--conversation` | | One Copilot session ID. |
 | `--since` | `30d` | `today`, `all`, `1d` through `3650d`, or a `yyyy-MM-dd` date, counted at the generation time in the export's time zone. |
 | `--time-zone` | This computer's | An IANA time zone ID, such as `America/New_York`, for dates, times, and night shading. On Windows, IANA IDs need Windows 10 version 1903 or later, and Windows IDs such as `Eastern Standard Time` also work. |
-| `--include-local-paths` | | Show the local roots of repositories without a GitHub remote. Without it, such a repository shows as its folder name. |
+| `--include-local-paths` | | Show the local roots of repositories without a GitHub remote. Without it, such a repository shows as its folder name, or as `(root folder)` when its root is a drive or a share, so two folders with the same name look the same. |
 | `--max-timeline-spans` | `20000` | The most requests, and the most tool calls, that the timeline draws: the latest ones. 0 to 100,000. |
 | `--generated-at` | Now | The generation time to record, in UTC, such as `2026-11-21T21:30:00Z`, to reproduce an earlier export. |
 | `--force` | | Replace existing files. |
@@ -356,7 +356,7 @@ The ZIP holds exactly six files: `manifest.json`, `report.html` (the same bytes 
 }
 ```
 
-`files` lists the other five files with their exact sizes and SHA-256 hashes; the manifest doesn't list itself. The hashes show that the files weren't changed after they were written, not who wrote them. The same gh-ledger build on the same operating system writes the same bytes again from an unchanged ledger: repeat the export's filters with `--generated-at` set to `generatedAtUtc` and `--time-zone` set to `timeZone.requested`, or to `timeZone.id`. A Windows ID works only on Windows, so pass an IANA `--time-zone` when a report may be reproduced elsewhere. A request recorded after the export but started before it changes the result.
+`files` lists the other five files with their exact sizes and SHA-256 hashes; the manifest doesn't list itself. The hashes show that the files weren't changed after they were written, not who wrote them. The same gh-ledger build on the same operating system writes the same bytes again from an unchanged ledger: repeat the export's filters with `--generated-at` set to `generatedAtUtc` and `--time-zone` set to `timeZone.requested`, or to `timeZone.id`. A Windows ID works only on Windows, so pass an IANA `--time-zone` when a report may be reproduced elsewhere. A request recorded after the export but started before it changes the result. `filter.repo` of a repository without a GitHub remote is its folder name, which `--repo` doesn't select (a slug has a `/`, and a folder name never does): to reproduce such an export, pass the repository's full root to `--repo`, or export with `--include-local-paths`, which records the root.
 
 ### What export includes
 

@@ -208,6 +208,34 @@ public sealed class ExportPrivacyTests
             row => row.GetProperty("repository").GetString() == ExportSeeds.LocalRoot(temp.Path));
     }
 
+    // A --repo that's a path shows as its last folder's name, however it ends, or as (root folder); nothing else of it
+    // reaches a file or the console.
+    [Theory]
+    [InlineData("C:/Users/Alice/private-9f3e/project/", "project")]
+    [InlineData(@"C:\Users\Alice\private-9f3e\project\\", "project")]
+    [InlineData("/home/alice/private-9f3e/project/", "project")]
+    [InlineData(@"\\fileserver-9f3e\share\project\", "project")]
+    [InlineData("//fileserver-9f3e/share/project/", "project")]
+    [InlineData("file:///C:/Users/Alice/private-9f3e/project/", "project")]
+    [InlineData(@"\\fileserver-9f3e\private-9f3e\", "(root folder)")]
+    [InlineData(@"C:\", "(root folder)")]
+    [InlineData("C:", "(root folder)")]
+    [InlineData("/", "(root folder)")]
+    public async Task EP7_ARepositoryGivenAsAPathShowsOnlyItsFolderName(string repository, string shown)
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+
+        CliRun run = await Harness(temp.Path).RunAsync("export", "--repo", repository, "--bundle");
+
+        using JsonDocument manifest = JsonDocument.Parse(Entry(temp.Path, "manifest.json"));
+        Assert.Equal(
+            (0, $"Wrote copilot-ledger-report.html: 0 requests in {shown} (last 30 days).\nWrote copilot-ledger-report.zip: report.html, manifest.json, and 4 telemetry files.\n", string.Empty),
+            (run.ExitCode, run.Out, run.Error));
+        Assert.Equal(shown, manifest.RootElement.GetProperty("filter").GetProperty("repo").GetString());
+        Assert.All(Texts(temp.Path), text => Assert.DoesNotContain("9f3e", text, StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task EP4_TheSameInputsWriteTheSameBytesAndAReplayReproducesThem()
     {
