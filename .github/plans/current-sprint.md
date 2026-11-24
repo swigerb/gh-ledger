@@ -39,7 +39,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 
 ## Tasks
 
-- [ ] Task 1: A Generated Large Ledger and an Opt-In Timing Harness, with "Before" Numbers (tests). #83. `LargeLedger` writes a 50,000-span, 75,000-tool-call ledger in two repositories. `ScopedQueryPerfTests.SQ1` is opt-in: it runs only when `GH_LEDGER_PERF=1` and otherwise returns at once. It times scoped and unscoped `audit`, `export --bundle`, and MCP `get_audit_findings`. Report the "before" numbers.
+- [x] Task 1: A Generated Large Ledger and an Opt-In Timing Harness, with "Before" Numbers (tests). #83. `LargeLedger` writes a 50,000-span, 75,000-tool-call ledger in two repositories. `ScopedQueryPerfTests.SQ1` is opt-in: it runs only when `GH_LEDGER_PERF=1` and otherwise returns at once. It times scoped and unscoped `audit`, `export --bundle`, and MCP `get_audit_findings`. Report the "before" numbers.
 - [ ] Task 2: Scoped Tool-Call Reads Select the Chains Once (CopilotLedger.Storage & tests). #83. `ExportToolCallWhereSql` replaces its correlated `EXISTS` with an uncorrelated `trace_id IN (SELECT trace_id FROM spans WHERE …)`, with no index or schema change. SQ2 is an always-on, bounded-time guard with exact counts. SQ1 gains its ratio assertions. Report the "after" numbers.
 - [ ] Task 3: Detecting the Windows Job, and Breaking Away When It Allows (CopilotLedger.Cli & tests). #78.
   - New types: `JobState`, `ICliPlatform.GetJobState()`, `DetachedLaunch`, and `DetachedLaunchPolicy`.
