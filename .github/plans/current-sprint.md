@@ -7,8 +7,9 @@
 | Target | .NET (`global.json`'s SDK, unchanged), zero Docker, no new packages |
 | Plan written | 2026-11-24, against `main` at `0f96a83` (Sprint 12, PR #88) |
 | Branch | `swigerb-sprint-14-import-speed-routed-audits` |
-| Requirements | Issue [#82](https://github.com/swigerb/gh-ledger/issues/82) remainder (quadratic import lookup; oversized ignored events), issue [#80](https://github.com/swigerb/gh-ledger/issues/80) remainder (`premium_model_trivial_turn` and routed requests), issue [#77](https://github.com/swigerb/gh-ledger/issues/77) (release provenance attestations), the 0.6.0 version bump and its 0.5.0 → 0.6.0 upgrade docs |
+| Requirements | Issue [#82](https://github.com/swigerb/gh-ledger/issues/82) remainder (quadratic import lookup; oversized events import never reads), issue [#80](https://github.com/swigerb/gh-ledger/issues/80) remainder (`premium_model_trivial_turn` and routed requests), issue [#77](https://github.com/swigerb/gh-ledger/issues/77) (release provenance attestations), the 0.6.0 version bump and its 0.5.0 → 0.6.0 upgrade docs |
 | Status | Current sprint. Sprint 12's plan is archived verbatim at `.github/plans/archive/sprint-12.md`. Sprint 13's is at `.github/plans/archive/sprint-13.md`. |
+| Amended | 2026-11-24, after Task 1 (`30dd55e`): Task 3's oversized rule follows import's normal-size rule instead of a two-type allowlist. See "Plan amendments". |
 
 ## How to use this plan
 
@@ -62,7 +63,7 @@ Global rules for every task:
 
 - [x] Task 1: Import Benchmark Script and Baseline (tests/benchmarks). A PowerShell 7 script that generates a large synthetic Copilot session, imports it three times with a given binary against temporary homes, and prints a timing table. The baseline is measured with a Release publish of the unchanged tree and recorded in the commit body.
 - [ ] Task 2: The Conversation-Live Index, Ensured on Every Open (CopilotLedger.Storage, docs & tests). `ix_spans_conversation_live` makes the importer's per-record live-span lookups indexed. Opening any format-7 ledger adds it when it's missing, whether the ledger is new, upgraded from format 6, or a format 7 that Sprint 12 created. The format number stays 7.
-- [ ] Task 3: Oversized Ignored Events Are Skipped (CopilotLedger.Core, docs & tests). An oversized Copilot line counts as skipped when the first 64 KiB of the line show a top-level `type` of `model.model_call_success` or `model.messages_snapshot`, so the log can complete. Every other oversized line stays malformed. Codex is unchanged.
+- [ ] Task 3: Oversized Lines of Unread Types Are Skipped (CopilotLedger.Core, docs & tests). An oversized Copilot line counts as skipped when the first 64 KiB of the line show a complete top-level `type` that isn't one of the event types import reads (`CopilotSessionLogSource.Types`), the same rule as for lines of normal size, so the log can complete. An oversized line of a type import reads, or whose type can't be read from the prefix, stays malformed. Codex is unchanged.
 - [ ] Task 4: `premium_model_trivial_turn` Skips Routed Requests (CopilotLedger.Core, CopilotLedger.Storage, docs & tests). `AuditSpan.ListCostUsd`. A GitHub AI credits request charged at least 5% below its list price was routed by Auto or Fusion, so the rule leaves it out. No schema change.
 - [ ] Task 5: Version 0.6.0 (all version places, docs & tests). Step 1 of `docs/releasing.md`, exactly. Rates unchanged.
 - [ ] Task 6: Release Provenance Attestations (.github/workflows, docs & tests). A SHA-pinned `actions/attest-build-provenance` step in the tag-only `release` job, with `id-token: write` and `attestations: write` on that job only. Verification commands in `docs/cli.md` and `docs/releasing.md`. `ReleaseWorkflowTests`.
@@ -114,7 +115,7 @@ Global rules for every task:
 
 ## Assumptions (not verified against a primary source)
 
-- **A1.** The ignored event types are exactly `model.model_call_success` and `model.messages_snapshot`. They come from issue #82 and the coordinator, and no real session log was opened to confirm them, by design. The existing `CopilotSessionLogSource.Types` list doesn't name them, so a short line of either type is already counted as skipped (unknown type).
+- **A1.** The oversized lines seen in practice are `model.model_call_success` and `model.messages_snapshot` events. They come from issue #82 and the coordinator, and no real session log was opened to confirm them, by design. Task 3's rule doesn't depend on these names: any type that isn't in `CopilotSessionLogSource.Types` is skipped, as a short line of that type already is. The names are used only in tests and the benchmark.
 - **A2.** In an oversized event line, the top-level `type` appears within the first 65,536 bytes. If it doesn't, the line stays malformed. That loses no data, but it doesn't help the log complete.
 - **A3.** A reported charge for an Auto or Fusion request already reflects the discount (F6, F7), so `cost_usd_pico < list_cost_usd_pico` for routed requests. This is issue #80's premise. Fusion requests after November 30, 2026 are charged at the list price and can't be told apart from a chosen model.
 - **A4.** A request charged 5% or more below its list price was routed. Nothing else in the rates (rounding of nano-AIU to pico-USD, or tier boundaries) produces a gap that large.
@@ -130,12 +131,16 @@ Global rules for every task:
 
   `user_version` stays 7, migration 7's text is unchanged, and an earlier format-7 build (Sprint 12, if any were installed) can still open the ledger. SQLite maintains the index for its writes. Adding migration 8 was rejected: it would make the upgrade one-way a second time for no format change.
 - **D3. Dry runs don't create it.** `import --dry-run` never writes the ledger (`docs/cli.md`), so on a ledger that no write command has opened since the upgrade, a dry run is as slow as before. Its results are identical either way. Documented in Task 2.
-- **D4. Oversized prefix.** The reader passes each oversized line's first `min(65,536, length)` bytes to the handler. `JsonFields.ReadTypePrefix` reads them as an incomplete JSON block. The line is skipped only if the top-level `type` string is complete, is one of the two ignored types, and appears after `session.start` with the log not stopped. Otherwise it's malformed, as today. Line hashing, line numbers, and offsets are unchanged. An oversized **unterminated** last line passes an empty prefix and stays malformed, because it's incomplete. A prefix can't see a second `type` property later in the line: the first one decides.
+- **D4. Oversized prefix (amended).** Import already skips a line of normal size as soon as its `type` shows it's none of the events it reads (`docs/cli.md`). Oversized lines follow the same rule. The reader passes each oversized line's first `min(65,536, length)` bytes to the handler. `JsonFields.ReadTypePrefix` reads them as an incomplete JSON block, against `CopilotSessionLogSource.Types`. The line is skipped only if the top-level `type` string is complete, is **not** one of the event types import reads (result -1), and appears after `session.start` with the log not stopped. An oversized line of a type import reads (result ≥ 0), or whose type can't be read from the prefix (result null), stays malformed, as today. This is as safe as an allowlist: a line of a type import never reads can't hold a record import would keep, at any size, so skipping it loses nothing. No list of special oversized types exists. Line hashing, line numbers, and offsets are unchanged. An oversized **unterminated** last line passes an empty prefix and stays malformed, because it's incomplete. A prefix can't see a second `type` property later in the line: the first one decides.
 - **D5. Routed means at least 5% below list (#80).** The rule leaves out a span when `ListCostUsd is decimal list && list > 0m && CostUsd <= list * 0.95m`. The literal request was "reported charge less than list cost". The 5% tolerance keeps a request whose charge differs from the rate card by rounding or a small rate drift in the rule, while Auto (10%) and Fusion (30%) clear it. No `ChargeSource` property is added. `ListCostUsd` is `null` when the ledger row's `list_cost_usd_pico` is NULL, which means "the same as the charge".
 - **D6. Attest with `actions/attest-build-provenance@4d10147` (v4.2.2).** This is the action that issue #77 names, and it's still maintained. Moving to `actions/attest` is deferred (S14-3). Subjects are the six binaries, `rates.json`, and `rates.v2.json`, listed explicitly (no glob). `gh-ledger-checksums.txt` isn't attested: it's derived from the attested files, and each file is verified by digest.
 - **D7. Manual runs never attest.** `workflow_dispatch` keeps skipping the `release` job, so a manual run builds, smoke-tests, checks rates, and uploads workflow artifacts, but never attests and never releases. Only the `release` job, which runs for a pushed `v*` tag, gets `id-token: write` and `attestations: write`. Top-level permissions stay `contents: read`, and `build` and `rates` get nothing new. Attesting manual-run artifacts was rejected: they aren't released, and an attestation for a binary nobody ships only adds noise to the repository's attestation list.
 - **D8. Authenticode is out of scope.** Windows binaries stay unsigned. The docs say so, and point to `gh attestation verify` instead.
 - **D9. Bump before the docs that would name it.** Task 5 bumps the version before Task 6 and Task 7 write docs that name `0.5.0`. VR3 fails on any unlisted mention of the *current* version. Writing "0.5.0 and earlier" while the version is still 0.5.0 would fail it, and after the bump it's fine.
+
+## Plan amendments
+
+- **PA1 (2026-11-24, after Task 1 at `30dd55e`; coordinator-approved).** Task 3 no longer special-cases `model.model_call_success` and `model.messages_snapshot`. An oversized line whose complete top-level `type`, read from the 64 KiB prefix, isn't one of the event types import reads counts as a skipped event, and the log can complete. An oversized line of a type import reads, or whose type can't be read from the prefix, stays malformed. Changed: the Requirements row, the Task 3 summary line, A1, D4, Task 3's title, contracts, Copilot `OnOversized` algorithm, tests (CS20 becomes a theory, CS21 gains two heads, CS22, CS24, and OV1 renamed, CS25–CS27 added), docs text, and acceptance; Task 8's wording; Task 9's privacy list; "Tests added this sprint"; S14-5. Task 1 and its completed text, including F11, are unchanged. Unchanged: the 64 KiB prefix, "the first `type` decides", the after-`session.start` condition, unterminated last lines, hashing, line numbers and offsets, Codex, D1–D3, D5–D9, and the task order.
 
 ## Task 1: Import Benchmark Script and Baseline
 
@@ -286,7 +291,7 @@ Also add `DROP INDEX IF EXISTS ix_spans_conversation_live;` to the format-6 scri
 - `git diff 0f96a83 -- src/CopilotLedger.Storage/UsageAuthority.cs` is empty.
 - Quick check, not a gate: `pwsh -File tests/benchmarks/Measure-ImportSpeed.ps1 -Binary <a Release publish of this commit> -Records 2000` finishes with run 2 taking under 5 s. Note the result in the commit body.
 
-## Task 3: Oversized Ignored Events Are Skipped
+## Task 3: Oversized Lines of Unread Types Are Skipped
 
 **Files:**
 
@@ -322,8 +327,8 @@ internal static void Read(
 // or that value isn't a string. The first top-level "type" decides; a later duplicate isn't seen.
 internal static int? ReadTypePrefix(ReadOnlySpan<byte> prefix, IReadOnlyList<string> types);
 
-// CopilotSessionLogSource (the per-log reader class that has OnOversized today)
-private static readonly string[] IgnoredOversizedTypes = ["model.model_call_success", "model.messages_snapshot"];
+// CopilotSessionLogSource (the per-log reader class that has OnOversized today). It uses the existing static Types list,
+// the event types import reads, unchanged. No other list of types is added.
 internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset);
 
 // CodexSessionLogSource
@@ -361,8 +366,8 @@ internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset); 
 
 **Algorithm (Copilot `OnOversized`):**
 
-1. If `_started`, `_stop is null`, and `JsonFields.ReadTypePrefix(prefix, IgnoredOversizedTypes) >= 0`, increment `_skipped` and return. Add no diagnostic.
-2. Otherwise, call `Malformed(ImportDiagnosticCode.OversizedLine, ImportEventKind.Unknown, null, number, offset)`, as today.
+1. If `_started`, `_stop is null`, and `JsonFields.ReadTypePrefix(prefix, Types) == -1` (a complete top-level `type` that import doesn't read), increment `_skipped` and return. Add no diagnostic.
+2. Otherwise (before `session.start`, after a stop, a type import reads, or a type the prefix can't show), call `Malformed(ImportDiagnosticCode.OversizedLine, ImportEventKind.Unknown, null, number, offset)`, as today.
 
 **Tests:**
 
@@ -373,23 +378,26 @@ internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset); 
 | CS5 (unchanged) | oversized `user.message`, then `UserMessage()` | MalformedLines 1, SkippedEvents 1, one `OversizedLine` diagnostic at line 2 |
 | CS18 `CS18_AnOversizedMessagesSnapshot_IsSkipped` | `Raw(O("{\"type\":\"model.messages_snapshot\",\"data\":{\"messages\":\"" + C))`, then `UserMessage()` | Status Read, MalformedLines 0, SkippedEvents 2, Diagnostics empty |
 | CS19 `CS19_AnOversizedModelCallSuccess_IsSkipped_WhereverItsTypeIs` | `Raw(O("{\"id\":\"00000000-0000-4000-8000-000000000002\",\"data\":{\"model\":\"m\",\"nested\":[1,{\"a\":true},null]},\"type\":\"model.model_call_success\",\"response\":\"" + C))`, then `Usage("u-1", "r-1")` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
-| CS20 `CS20_AnOversizedEventThatImportReads_StaysMalformed` | `Raw(O("{\"type\":\"session.usage_record\",\"data\":{\"usage\":{\"model\":\"" + C))` | MalformedLines 1, Records.Count 0, one `OversizedLine` diagnostic at line 2 |
-| CS21 `CS21_ATypeBeyondThePrefixOrUnreadable_StaysMalformed` (theory) | Five heads, each with `O(head)`: `"{\"data\":{\"messages\":\"" + new string('y', 70_000) + "\"},\"type\":\"model.messages_snapshot\",\"x\":\""` (type past 65,536 bytes); `"{\"type\":7,\"x\":\""`; `"{\"type\":null,\"x\":\""`; `"[{\"type\":\"model.messages_snapshot\",\"x\":\""`; `"{type:\"model.messages_snapshot\",\"x\":\""` | Each: MalformedLines 1, one `OversizedLine` diagnostic |
-| CS22 `CS22_AnEscapedIgnoredType_IsSkipped` | `Raw(O("{\"type\":\"model.messages\\u005fsnapshot\",\"x\":\""))` | MalformedLines 0, SkippedEvents 1 |
+| CS20 `CS20_AnOversizedEventThatImportReads_StaysMalformed` (theory) | Two heads, each `Raw(O(head))`: `"{\"type\":\"session.usage_record\",\"data\":{\"usage\":{\"model\":\"" + C`; `"{\"type\":\"session.usage\\u005frecord\",\"data\":{\"usage\":{\"model\":\"" + C` (escaped, still a type import reads) | Each: MalformedLines 1, SkippedEvents 0, Records.Count 0, one `OversizedLine` diagnostic at line 2 |
+| CS21 `CS21_ATypeBeyondThePrefixOrUnreadable_StaysMalformed` (theory) | Seven heads, each with `O(head)`: `"{\"pad\":\"" + new string('y', 65_508) + "\",\"type\":\"model.messages_snapshot\",\"x\":\""` (the prefix ends inside the `type` value, after `"type":"model.mess`: the value starts at byte 65,526, and the prefix is bytes 0–65,535); `"{\"data\":{\"messages\":\"" + new string('y', 70_000) + "\"},\"type\":\"model.messages_snapshot\",\"x\":\""` (type past 65,536 bytes); `"{\"x\":\""` (no `type` at all); `"{\"type\":7,\"x\":\""`; `"{\"type\":null,\"x\":\""`; `"[{\"type\":\"model.messages_snapshot\",\"x\":\""`; `"{type:\"model.messages_snapshot\",\"x\":\""` | Each: MalformedLines 1, SkippedEvents 0, one `OversizedLine` diagnostic at line 2 |
+| CS22 `CS22_AnEscapedUnreadType_IsSkipped` | `Raw(O("{\"type\":\"model.messages\\u005fsnapshot\",\"x\":\""))` | MalformedLines 0, SkippedEvents 1 |
 | CS23 `CS23_AnOversizedUnterminatedLastLine_StaysMalformed` | `WriteAsync(home, new CopilotSessionLogs(SessionId).Text() + O("{\"type\":\"model.messages_snapshot\",\"x\":\""))`, with no trailing `\n` | MalformedLines 1, one `OversizedLine` diagnostic at line 2 |
-| CS24 `CS24_AnOversizedIgnoredLineBeforeSessionStart_StaysMalformed` | `WriteAsync(home, O("{\"type\":\"model.messages_snapshot\",\"x\":\"") + "\n" + new CopilotSessionLogs(SessionId).Text())` | Status Read, MalformedLines 1, one `OversizedLine` diagnostic at line 1 |
+| CS24 `CS24_AnOversizedUnreadLineBeforeSessionStart_StaysMalformed` | `WriteAsync(home, O("{\"type\":\"model.messages_snapshot\",\"x\":\"") + "\n" + new CopilotSessionLogs(SessionId).Text())` | Status Read, MalformedLines 1, one `OversizedLine` diagnostic at line 1 |
+| CS25 `CS25_AnOversizedBinaryAsset_IsSkipped` | `Raw(O("{\"type\":\"session.binary_asset\",\"data\":{\"bytes\":\"" + C))`, then `Usage("u-1", "r-1")` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
+| CS26 `CS26_AnOversizedLineOfAnUnknownFutureType_IsSkipped` | `Raw(O("{\"type\":\"future.unknown_event\",\"data\":{\"blob\":\"" + C))`, then `Usage("u-1", "r-1")` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
+| CS27 `CS27_AnOversizedAssistantMessage_StaysMalformed` | `Raw(O("{\"type\":\"assistant.message\",\"data\":{\"content\":\"" + C))` | MalformedLines 1, SkippedEvents 0, one `OversizedLine` diagnostic at line 2 |
 | CX18 `CX18_AnOversizedRolloutLine_StaysMalformed_WhateverItsType` (`CodexRolloutTests`) | A valid rollout plus `Raw` of `{"type":"model.messages_snapshot","payload":{"x":"` padded to `MaxLineBytes + 1` as `O` does | MalformedLines 1, one `OversizedLine` diagnostic |
-| OV1 `OV1_ALogWhoseOversizedLinesAreIgnored_CompletesAndIsSkippedNextTime` (`ImportOversizedTests`, `CliHarness`) | Write `CopilotSessionLogs("s-ov")` with `Usage("u-1", "r-1")`, `Raw(O("{\"type\":\"model.messages_snapshot\",\"x\":\""))`, `Raw(O("{\"type\":\"model.model_call_success\",\"x\":\""))`, `Usage("u-2", "r-2")` to `harness.Context.CopilotHome`. Run `import --all --json` twice. | Run 1: exit 0; copilot source `recorded` 2, `malformedLines` 0, `skippedEvents` 2. Run 2: exit 0; `sessionsSkippedUnchanged` 1, `recorded` 0, `duplicate` 0. Neither stdout contains `C` or `xxxxxxxx`. |
+| OV1 `OV1_ALogWhoseOversizedLinesAreUnread_CompletesAndIsSkippedNextTime` (`ImportOversizedTests`, `CliHarness`) | Write `CopilotSessionLogs("s-ov")` with `Usage("u-1", "r-1")`, `Raw(O("{\"type\":\"model.messages_snapshot\",\"x\":\""))`, `Raw(O("{\"type\":\"model.model_call_success\",\"x\":\""))`, `Usage("u-2", "r-2")` to `harness.Context.CopilotHome`. Run `import --all --json` twice. | Run 1: exit 0; copilot source `recorded` 2, `malformedLines` 0, `skippedEvents` 2. Run 2: exit 0; `sessionsSkippedUnchanged` 1, `recorded` 0, `duplicate` 0. Neither stdout contains `C` or `xxxxxxxx`. |
 
 Before relying on CS18's "SkippedEvents 2", check that `UserMessage()` counts as one skipped event (CS5 shows it does). If an existing exit-code rule makes run 1's exit code differ from 0 with no malformed lines, stop and report it.
 
 **Docs (`docs/cli.md`):**
 
-- Report table row: `| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete. A longer line counts as a skipped event instead when its first 64 KiB show that it's a \`model.model_call_success\` or \`model.messages_snapshot\` event, which import never reads |`
-- In the JSON field list, change `` `skippedEvents` (events of other types) `` to `` `skippedEvents` (events of other types, including those longer than 8 MiB that import never reads) ``.
+- Report table row: `| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete. A longer line counts as a skipped event instead when its first 64 KiB show a top-level \`type\` that isn't one of the events import reads, the same rule as for shorter lines |`
+- In the JSON field list, change `` `skippedEvents` (events of other types) `` to `` `skippedEvents` (events of other types, including those longer than 8 MiB whose type shows in their first 64 KiB) ``.
 - In "Repairs" or "The import report", wherever the docs say a log with malformed lines is read again, add no new text. The behavior there is unchanged.
 
-**Acceptance:** CS5 and all existing import tests still pass unchanged. CS18–CS24, CX18, and OV1 pass. The reader's hash test vectors, if any, are unchanged. `git grep -n "Action<long, long> onOversized"` finds nothing.
+**Acceptance:** CS5 and all existing import tests still pass unchanged. CS18–CS27, CX18, and OV1 pass. The reader's hash test vectors, if any, are unchanged. `git grep -n "Action<long, long> onOversized"` and `git grep -n "IgnoredOversizedTypes" -- src tests` find nothing, and `src/` names neither `model.model_call_success` nor `model.messages_snapshot`. `CopilotSessionLogSource.Types` is unchanged.
 
 ## Task 4: `premium_model_trivial_turn` Skips Routed Requests
 
@@ -622,7 +630,7 @@ Use the same machine as Task 1 if possible, and say in the report whether it is.
 **Report contents, in this order:**
 
 1. Title `# Import speed benchmark`.
-2. What was measured: the generated session (Records, the two 9 MiB ignored lines after record Records/2, Copilot 1.0.114 shape), and that only generated data was read, with temporary `COPILOT_HOME` and `COPILOT_LEDGER_HOME`.
+2. What was measured: the generated session (Records, the two 9 MiB lines of types import never reads, after record Records/2, Copilot 1.0.114 shape), and that only generated data was read, with temporary `COPILOT_HOME` and `COPILOT_LEDGER_HOME`.
 3. Environment: OS, processors, .NET SDK (`dotnet --version`), and the before and after commits (`0f96a83` with Task 1's script, and this task's parent commit).
 4. The command lines above.
 5. The before table (from Task 1's commit body, verbatim) and the after table (verbatim), then a three-row comparison table `| Run | Before (s) | After (s) | Change |`.
@@ -645,7 +653,7 @@ Run, in a clean tree:
 4. Privacy:
    - `git diff 0f96a83 -- src` adds no column, no table, and no stored field;
    - Task 3 keeps nothing from a prefix;
-   - CS18–CS24 and OV1 assert that the canary never appears.
+   - CS18–CS27 and OV1 assert that the canary never appears.
 5. Boundaries:
    - `git diff 0f96a83 --stat -- global.json src/CopilotLedger.Core/Pricing/rates.json` is empty;
    - `git diff 0f96a83 -- src/CopilotLedger.Storage/LedgerMigrations.cs` adds only `Indexes`;
@@ -664,7 +672,7 @@ Run, in a clean tree:
 | Task | File | Tests |
 |---|---|---|
 | 2 | `Storage/ConversationLiveIndexTests.cs` | LX1–LX6 |
-| 3 | `Import/CopilotSessionGateTests.cs` | CS18–CS24 |
+| 3 | `Import/CopilotSessionGateTests.cs` | CS18–CS27 |
 | 3 | `Import/CodexRolloutTests.cs` | CX18 |
 | 3 | `Cli/ImportOversizedTests.cs` | OV1 |
 | 4 | `Audit/VelocityRuleTests.cs` | AR7: 8 new cases |
@@ -687,7 +695,7 @@ Hand back to `ledger-architect` for review mode. Release notes for 0.6.0 aren't 
 - **S14-2.** Showing routed (Auto/Fusion) requests and their discount in reports, receipts, and MCP extends S12-2. So does telling a Fusion request from a chosen model after the Fusion discount ends (A3).
 - **S14-3.** Moving from `actions/attest-build-provenance` to `actions/attest` (F2), and attesting `gh-ledger-checksums.txt` or an SBOM.
 - **S14-4.** Authenticode signing of the Windows binaries (#77, out of scope; D8).
-- **S14-5.** Verifying the two ignored event names against a real 1.0.115 log, with consent, and widening the prefix if `type` is ever later than 64 KiB (A1, A2).
+- **S14-5.** Confirming against a real 1.0.115 log, with consent, which event types grow past 8 MiB (A1), and widening the prefix if `type` is ever later than 64 KiB (A2).
 - **Carried from Sprint 12** (see `.github/plans/archive/sprint-12.md`):
   - S12-1 to S12-8, and S12-10 to S12-12, unchanged;
   - S12-9 (profiling the duplicate path on large stores) is done by Tasks 1, 2, and 8.
