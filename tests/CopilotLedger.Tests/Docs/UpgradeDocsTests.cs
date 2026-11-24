@@ -52,6 +52,40 @@ public sealed class UpgradeDocsTests
         Assert.InRange(format, 0, firstBlock);
     }
 
+    [Fact]
+    public void UD3_TheUpgradeGuideAndReferenceDescribeRepairingFormat7Imports()
+    {
+        string[] cliLines = Steps("cli.md", "**Upgrading or removing the extension.**", "## The daemon");
+        string ledgerFormat = Assert.Single(cliLines, line => line.StartsWith("**Ledger format.**", StringComparison.Ordinal));
+        string[] guideLines = Steps("guide.md", "## Upgrade or uninstall", "To remove gh-ledger, undo `install`:");
+        int upgrade = Array.FindIndex(guideLines, line => line == "gh extension upgrade ledger");
+        int repair = Array.FindIndex(guideLines, line => line == "gh ledger import --all");
+
+        Assert.Contains("format 7", ledgerFormat, StringComparison.Ordinal);
+        Assert.DoesNotContain("format 6", ledgerFormat, StringComparison.Ordinal);
+        Assert.True(upgrade >= 0 && repair > upgrade);
+        Assert.Contains("### Repairs", File.ReadAllText(RepositoryFile("docs", "cli.md")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UD4_TheDocumentedFormatMatchesTheLatestMigration()
+    {
+        Type migrationsType = typeof(CopilotLedger.Storage.SqliteLedgerStore).Assembly.GetType(
+            "CopilotLedger.Storage.LedgerMigrations",
+            throwOnError: true)!;
+        object migrations = migrationsType.GetProperty(
+            "Migrations",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!.GetValue(null)!;
+        object latest = ((System.Collections.IEnumerable)migrations).Cast<object>().Last();
+        int version = (int)latest.GetType().GetField("Item1")!.GetValue(latest)!;
+        string ledgerFormat = Assert.Single(
+            File.ReadAllLines(RepositoryFile("docs", "cli.md")),
+            line => line.StartsWith("**Ledger format.**", StringComparison.Ordinal));
+
+        Assert.Equal(7, version);
+        Assert.Contains($"format {version}", ledgerFormat, StringComparison.Ordinal);
+    }
+
     // The lines of docs/<file> from the first line that starts with start up to, not including, the next line that starts
     // with end.
     private static string[] Steps(string file, string start, string end)

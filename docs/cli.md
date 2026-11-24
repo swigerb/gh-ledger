@@ -52,7 +52,7 @@ It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTele
 
 **Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server.
 
-**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 6, for `gh ledger import`, the first time its daemon or any command opens it. That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
+**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 7, for `gh ledger import`, the first time its daemon or any command opens it. Format 7 keeps each request's list price beside the amount it was charged. After upgrading, run `gh ledger import --all` once so that requests imported before, and live requests whose session logs report their charge, are repaired (see [Repairs](#repairs)). That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
 
 To upgrade, close the Copilot sessions and apps that use the MCP server, and stop the daemon:
 
@@ -122,6 +122,17 @@ Every call is charged once, and live spans win. Requests are never matched by ti
 - A live span that arrives after its request was imported supersedes the imported row, in the same transaction: the imported row stays in the ledger but no longer counts in any report, MCP tool, budget, or circuit-breaker rule. A live span without a service request ID supersedes every imported row of its session, and any live span supersedes the imported rows of its session that have no ID. Those live spans may not cover every request of the session, so each later import whose scope holds such rows reports them as `Superseded, unmatched`, and its coverage as incomplete. They never count again.
 
 Importing again records nothing twice. A log that was imported completely is skipped while its size, last-write time, and SHA-256 hash stay the same, so import reads such a log once to hash it: the size and last-write time alone could miss a log rewritten in place. Any other log is read again, and the requests recorded from it before count as `Duplicate`. An import stopped by Ctrl+C or an error keeps the requests it recorded, and running it again completes it.
+
+### Repairs
+
+An import after upgrading reads every session log again once, even one it imported completely before, and repairs what it recorded from it in place:
+
+- **Charges.** A request imported before is priced again with the rates in use now; when anything about its price changed, such as the charge its log reports, its row is rewritten (`Repriced`). Its list price is kept beside the charge.
+- **Live requests.** A live request that the daemon recorded at the rate card, with a service request ID, gets the charge its session log reports, when the log reports a valid one (`Live repriced`). Its list price is kept. Live requests without a service request ID, such as those an earlier gh-ledger recorded, and those whose logs are gone or unsupported, keep the rate card's price.
+- **Tool calls.** An imported tool call that an earlier import attached to the wrong request moves to the request that asked for it (`Tool links relinked`); one whose request has no imported row, such as a request that a live span recorded, is removed (`toolLinksRemoved` in `--json`). Tool calls older than 7 days aren't kept, so they aren't repaired.
+- **Compactions.** Logs whose BYOK or failed compactions earlier versions couldn't read are read completely now.
+
+A dry run reports the same counts and changes nothing. Repairs never change which request counts: the rules of [Overlap with live spans](#overlap-with-live-spans) still decide that. Budgets, the circuit breaker, receipts, reports, export, and audit use the repaired charges from then on; circuit-breaker trips recorded before aren't re-evaluated.
 
 ### The import report
 

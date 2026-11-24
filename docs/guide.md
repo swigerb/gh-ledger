@@ -849,6 +849,14 @@ gh-ledger daemon started (pid 4242) on http://localhost:4318.
 ```
 <!-- /sample -->
 
+Repair what earlier versions imported:
+
+```shell
+gh ledger import --all
+```
+
+It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs).
+
 If it says instead that the daemon did not start, check your rates overlay:
 
 <!-- sample: rates-validate-upgrade -->
