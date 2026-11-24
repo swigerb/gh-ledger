@@ -14,7 +14,7 @@ public sealed class AlertDaemonTests
     private static readonly DateTimeOffset Now =
         DateTimeOffset.Parse("2026-11-21T12:00:00Z", CultureInfo.InvariantCulture);
     private const string AlertA =
-        "ALERT CopilotLedger circuit breaker tripped: swigerb/copilot-ledger @ feature/a: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status";
+        "ALERT gh-ledger circuit breaker tripped: swigerb/copilot-ledger @ feature/a: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status";
 
     [Fact]
     public async Task AD1_EndToEndOnWindows()
@@ -70,11 +70,11 @@ public sealed class AlertDaemonTests
             ],
             process.Arguments);
         Assert.Equal(
-            "<toast><visual><binding template=\"ToastGeneric\"><text>CopilotLedger circuit breaker tripped</text><text>swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status</text></binding></visual></toast>",
+            "<toast><visual><binding template=\"ToastGeneric\"><text>gh-ledger circuit breaker tripped</text><text>swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status</text></binding></visual></toast>",
             await FileRetry.ReadAllTextAsync(
                 Path.Combine(temp.Path, "data", "alert-toast.xml")));
         Assert.Contains(
-            "ALERT CopilotLedger circuit breaker tripped: swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status",
+            "ALERT gh-ledger circuit breaker tripped: swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt. Run: gh-ledger breaker status",
             harness.DaemonOutput);
 
         CliRun reset = await harness.RunInAsync(repo, "breaker", "reset");
@@ -153,7 +153,7 @@ public sealed class AlertDaemonTests
                         "display notification (item 2 of argv) with title (item 1 of argv)",
                         "-e",
                         "end run",
-                        "CopilotLedger circuit breaker tripped",
+                        "gh-ledger circuit breaker tripped",
                         "swigerb/copilot-ledger @ feature/a: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status",
                     ],
                     trip.Arguments);
@@ -169,7 +169,7 @@ public sealed class AlertDaemonTests
                         "display notification (item 2 of argv) with title (item 1 of argv)",
                         "-e",
                         "end run",
-                        "CopilotLedger branch budget exceeded",
+                        "gh-ledger branch budget exceeded",
                         "swigerb/copilot-ledger @ feature/ledger: 56.00 of 50.00 AI credits spent. Run: gh-ledger budget list",
                     ],
                     budgetRun.Arguments);
@@ -191,7 +191,7 @@ public sealed class AlertDaemonTests
                     "feature/ledger")).NotifiedAt);
         Assert.Contains(AlertA, harness.DaemonOutput);
         Assert.Contains(
-            "ALERT CopilotLedger branch budget exceeded: swigerb/copilot-ledger @ feature/ledger: 56.00 of 50.00 AI credits spent. Run: gh-ledger budget list",
+            "ALERT gh-ledger branch budget exceeded: swigerb/copilot-ledger @ feature/ledger: 56.00 of 50.00 AI credits spent. Run: gh-ledger budget list",
             harness.DaemonOutput);
         Assert.DoesNotContain("feature/b", harness.DaemonOutput);
         Assert.DoesNotContain("feature/c", harness.DaemonOutput);
@@ -274,7 +274,7 @@ public sealed class AlertDaemonTests
                 Assert.Equal(
                     [
                         "--app-name=CopilotLedger",
-                        "CopilotLedger circuit breaker tripped",
+                        "gh-ledger circuit breaker tripped",
                         "swigerb/copilot-ledger @ feature/a: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status",
                     ],
                     linux.Arguments);

@@ -84,7 +84,7 @@ public sealed class AuditMcpTests
 
         string[] lines = Text(result).Split('\n');
         Assert.Equal(3, lines.Length);
-        Assert.StartsWith("WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: ", lines[0]);
+        Assert.StartsWith("WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: ", lines[0]);
         Assert.StartsWith("WARNING: swigerb/copilot-ledger @ feature/ledger has spent ", lines[1]);
         using JsonDocument document = JsonDocument.Parse(lines[2]);
         Assert.Equal("open", document.RootElement.GetProperty("circuitBreaker").GetProperty("state").GetString());

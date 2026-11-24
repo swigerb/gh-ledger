@@ -193,7 +193,7 @@ internal static class ReceiptCommands
 
         context.Out.WriteLine($"Wrote {ReceiptMarkdown.ReceiptsDirectory}/{fileName} for {git.BranchName}.");
         context.Out.WriteLine(
-            "Commit it on the branch and push; the CopilotLedger action posts it on the pull request.");
+            "Commit it on the branch and push; the PR receipt action posts it on the pull request.");
         return 0;
     }
 }

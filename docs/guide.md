@@ -413,7 +413,7 @@ Budgets count Foundry BYOK spend at $0.01 per AI credit, so the branch's 617.75 
 
 <!-- sample: budget-alert -->
 ```text
-2026-11-21T21:30:00.0000000+00:00 ALERT CopilotLedger branch budget exceeded: contoso/webapp @ feature/search: 766.75 of 750.00 AI credits spent. Run: gh-ledger budget list
+2026-11-21T21:30:00.0000000+00:00 ALERT gh-ledger branch budget exceeded: contoso/webapp @ feature/search: 766.75 of 750.00 AI credits spent. Run: gh-ledger budget list
 ```
 <!-- /sample -->
 
@@ -492,7 +492,7 @@ gh ledger export-pr
 
 ```text
 Wrote .github/copilot-ledger/receipts/feature-search-38e7a3a2.md for feature/search.
-Commit it on the branch and push; the CopilotLedger action posts it on the pull request.
+Commit it on the branch and push; the PR receipt action posts it on the pull request.
 ```
 <!-- /sample -->
 
@@ -506,7 +506,7 @@ The action posts the receipt as a comment on the pull request:
 
 <!-- sample: receipt -->
 > <!-- copilot-ledger-receipt -->
-> ### CopilotLedger receipt for `feature/search`
+> ### gh-ledger receipt for `feature/search`
 >
 > - **GitHub AI Credits:** 617.75 credits ($6.18) across 6 turns: `claude-opus-5.5` 599.00, `mai-code-2` 18.75
 > - **Foundry BYOK:** $0.49 across 1 turn: `gpt-6.1-sol` $0.49
@@ -724,7 +724,7 @@ Then ask Copilot, for example, "How much has this branch cost so far?" Copilot c
 
 <!-- sample: mcp -->
 ```text
-WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1
+WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1
 {
   "repository": "contoso/webapp",
   "branch": "feature/search",
@@ -769,7 +769,7 @@ WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/sear
     ]
   },
   "warnings": [
-    "WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1"
+    "WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1"
   ]
 }
 ```
