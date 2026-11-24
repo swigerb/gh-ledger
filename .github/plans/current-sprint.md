@@ -1,20 +1,31 @@
-# Sprint 12: Billing & Import Fidelity
+# Sprint 14: Import Speed, Routed Audits, Provenance & 0.6.0
 
 | | |
 |---|---|
 | Architect | `ledger-architect` |
 | Builder | `ledger-builder` (MAI Code 2) |
-| Target | .NET (`global.json`'s SDK), zero Docker |
-| Plan written | 2026-11-24, against `main` at `69ae671` |
-| Branch | `swigerb-sprint-12-billing-import-fidelity` |
-| Requirements | Issues [#76](https://github.com/swigerb/gh-ledger/issues/76) (reported charge), [#82](https://github.com/swigerb/gh-ledger/issues/82) (BYOK and failed compactions), [#85](https://github.com/swigerb/gh-ledger/issues/85) (tool links by `apiCallId`), [#79](https://github.com/swigerb/gh-ledger/issues/79) (local BYOK by model), [#75](https://github.com/swigerb/gh-ledger/issues/75) (Copilot CLI 1.0.115) |
-| Status | Current sprint. Sprint 11 is complete and archived verbatim at `.github/plans/archive/sprint-11.md`. A parallel Sprint 13 owns the audit, export tool-call queries, daemon start, and alert text (see "Integration boundaries"). |
+| Target | .NET (`global.json`'s SDK, unchanged), zero Docker, no new packages |
+| Plan written | 2026-11-24, against `main` at `0f96a83` (Sprint 12, PR #88) |
+| Branch | `swigerb-sprint-14-import-speed-routed-audits` |
+| Requirements | Issue [#82](https://github.com/swigerb/gh-ledger/issues/82) remainder (quadratic import lookup; oversized events import never reads), issue [#80](https://github.com/swigerb/gh-ledger/issues/80) remainder (`premium_model_trivial_turn` and routed requests), issue [#77](https://github.com/swigerb/gh-ledger/issues/77) (release provenance attestations), the 0.6.0 version bump and its 0.5.0 → 0.6.0 upgrade docs |
+| Status | Current sprint. Sprint 12's plan is archived verbatim at `.github/plans/archive/sprint-12.md`. Sprint 13's is at `.github/plans/archive/sprint-13.md`. |
+| Amended | 2026-11-24, after Task 1 (`30dd55e`): Task 3's oversized rule follows import's normal-size rule instead of a two-type allowlist. 2026-11-24, after Task 2 (`36f8c27`): Task 3's test vectors repaired (PA2). See "Plan amendments". 2026-11-24, after Task 9 (`81d6bf9`): review fixes R1 and R2 added as Tasks 10 and 11. See "Review after Task 9". |
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification, runs the verification commands, changes the line to `- [x]`, and stops. Tasks are sequential; each builds on the ones before it, and each is one commit, `Sprint 12 Task N: <Title>`, with the repository's `Co-authored-by` trailer.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification, runs the verification commands, changes the line to `- [x]`, and stops. Tasks are sequential, and each builds on the ones before it. Each task is one commit, titled `Sprint 14 Task N: <Title>`, with the repository's `Co-authored-by` trailer.
 
-This plan is a **specification**, not copy-exact code. Each task gives the files, the public and internal contracts (names, types, and members are fixed), schemas, numbered algorithms, exact test vectors, acceptance criteria, and verification commands. Implement exactly those contracts. Where a task says "exactly", the value, string, name, or order is fixed. Where it leaves an implementation detail open (a private helper's name, a loop's shape), choose the simplest one that matches the surrounding code's style. Don't add features, options, logging, caching, or fast paths the task doesn't ask for, and don't refactor code outside the task's files.
+This plan is a **specification**, not copy-exact code. Each task gives:
+
+- the files;
+- the public and internal contracts (names, types, and members are fixed);
+- schemas and DDL;
+- numbered algorithms;
+- exact test vectors;
+- acceptance criteria;
+- verification commands.
+
+Implement exactly those contracts. Where a task says "exactly", the value, string, name, or order is fixed. Where it leaves a detail open (a private helper's name, a loop's shape), choose the simplest option that matches the surrounding code's style. Don't add features, options, logging, caching, or fast paths the task doesn't ask for. Don't refactor code outside the task's files.
 
 After **every** task:
 
@@ -23,950 +34,768 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
-The build must report 0 warnings and 0 errors (`TreatWarningsAsErrors` is on in `Directory.Build.props`), and the test run must report 0 failed and 0 skipped. Record the passed count in the commit message body (`Tests: <n> passed`). Before Task 1, run the suite once on the unchanged tree and record the baseline (Sprint 11 ended at 1,740; docs-only commits since then add none).
+The build must report 0 warnings and 0 errors (`TreatWarningsAsErrors` is on in `Directory.Build.props`). The test run must report 0 failed and 0 skipped. Record the passed count in the commit message body as `Tests: <n> passed`. The baseline at `0f96a83` is **1,921 passed, 0 failed, 0 skipped** (measured 2026-11-24 while planning).
 
 Global rules for every task:
 
-- **Money is `decimal` only.** No `double`, `float`, or `Math.Round` on money; no SQLite `REAL`. The one place a binary double appears is the IEEE-754 bit pattern of an OTLP `doubleValue`, which `NanoAiu.TryFromIeee754Bits` decodes with integer arithmetic only (no `BitConverter.Int64BitsToDouble`, no `double` local).
-- **Hermetic tests.** Temporary directories, `ManualTimeProvider`, `FakeCliPlatform`, `CliHarness`, synthetic `CopilotSessionLogs` fixtures. No test opens a socket, starts a process, runs `git`, uses Docker or the network, or reads `~/.copilot`, `~/.codex`, or `~/.copilot-ledger`.
-- **Privacy.** Nothing new is stored except the columns this plan lists. No prompt, response, reasoning, tool argument, tool result, or summary text is read; the new session-log paths are only those this plan allowlists.
-- **Expected money in tests is written as `decimal` literals** (`0.0473886m`), never computed from the code under test unless the task says "equals the rate-card result of the same span".
-- **No version bump.** `<Version>` stays `0.5.0`, and `src/CopilotLedger.Core/Pricing/rates.json` is unchanged (no rate changed; see "Verified facts").
-- **Stay inside the boundaries** in "Integration boundaries". If a task can't be done without touching a Sprint 13 file other than as this plan allows, stop and report it.
+- **Money is `decimal` only.** No `double`, `float`, or `Math.Round` on money, and no SQLite `REAL`. The benchmark script's timings are seconds, not money, and may use `[double]`.
+- **Hermetic tests.** Use temporary directories, `ManualTimeProvider`, `FakeCliPlatform`, `CliHarness`, `LedgerSql`, and synthetic `CopilotSessionLogs` and `CodexRollouts` fixtures. No test may:
+  - open a socket, start a process, or run `git`;
+  - use Docker or the network;
+  - read `~/.copilot`, `~/.codex`, or `~/.copilot-ledger`.
+
+  The benchmark script (Task 1) is **not** a test. `dotnet test` never runs it.
+- **Privacy.** Nothing new is stored. No prompt, response, reasoning, tool argument, tool result, or summary text is read or kept. Task 3 reads, at most, the first 65,536 bytes of an oversized line, and only to find its top-level `type`. It keeps nothing from them. The benchmark reads only the session log it generates.
+- **No new packages, and `global.json` is unchanged.** `src/CopilotLedger.Core/Pricing/rates.json` is unchanged in every task, including `ratesVersion`.
+- **Public contracts change only as listed.** These are the only public or internal contract changes this sprint:
+  - `LedgerMigrations.Indexes` (Task 2);
+  - `JsonlLineReader.OversizedHandler` and `JsonlLineReader.PrefixBytes` (Task 3);
+  - `JsonFields.ReadTypePrefix` (Task 3);
+  - the two `OnOversized` signatures (Task 3);
+  - `AuditSpan.ListCostUsd` (Task 4);
+  - `<Version>` 0.6.0 (Task 5).
+
+  CLI options, JSON fields, MCP tools, OTLP handling, the ledger format number (7), and every report's output stay as they are.
+- **Version strings in top-level docs.** After Task 5, no line in `README.md`, `docs/*.md`, `.github/workflows/*.yml`, `src/`, or `tests/` may name `0.6.0`, except the places that `VersionPlacesTests` lists (VR3). New text says "this version" instead. Naming `0.5.0` or `v0.5.0` is allowed.
 - If a contract here doesn't compile against the code, a referenced line has moved, or a test vector disagrees with the code's arithmetic, **stop and report it**. Don't redesign.
 
 ## Tasks
 
-- [x] Task 1: Reported-Charge Primitives (CopilotLedger.Core & tests). `ReportedChargeState`, `ReportedCharge`, and `NanoAiu`: exact validation of a nano-AIU count from a JSON number or an IEEE-754 double's bits, and its exact conversion to USD, AI credits, and pico-USD.
-- [x] Task 2: The Calculator Bills the Reported Charge, Keeps the List Price, and Prices Local BYOK by Model (CopilotLedger.Core, docs & tests). `NormalizedGenAiSpan.ReportedCharge`; `CreditCalculationResult.ListUsdCost` and `ChargeSource`; the reported charge replaces the rate-card charge for priced GitHub AI-credit requests, and a malformed or inapplicable one is rejected; issue #79's `localOffload.models` rule for provider-billed requests.
-- [x] Task 3: OTLP Reads `github.copilot.nano_aiu` (CopilotLedger.Otlp & tests). An exact integer from `doubleValue` in JSON and protobuf, and the normalizer's reported charge on inference spans only.
-- [x] Task 4: Ledger Format 7 (CopilotLedger.Storage, docs & tests). `spans.list_cost_usd_pico`, `spans.charge_source`, `import_sessions.import_revision`, and a partial index on imported tool links; the store writes and validates the new columns, and `docs/cli.md`'s import allowlist lists them.
-- [x] Task 5: Live Spans Record the Charged Amount (CopilotLedger.Otlp, CopilotLedger.Storage, docs & tests). End to end from OTLP to the ledger; `IngestResult.RejectedReportedCharges`; budgets, the breaker, and receipts use the charged amount.
-- [x] Task 6: Import Reads `totalNanoAiu`, and the Report Gains Its Sprint 12 Counts (CopilotLedger.Core, CopilotLedger.Storage, CopilotLedger.Cli, docs & tests). Usage records and compactions bill their reported charge; `ReportedChargeRejected` diagnostics; six new report counts, table rows, and JSON fields.
-- [x] Task 7: Import BYOK and Failed Compactions (CopilotLedger.Core, docs & tests). Issue #82's seven classification rules and `compactionAttemptId` as a BYOK compaction's record key.
-- [x] Task 8: Link Imported Tool Calls by `apiCallId` (CopilotLedger.Core, CopilotLedger.Storage, docs & tests). `assistant.message` IDs only, parent-chain resolution at the end of the log, the fallback count, and canaries.
-- [x] Task 9: Import Copilot CLI 1.0.115 Sessions (CopilotLedger.Core, docs & tests). The gate's maximum becomes 1.0.115, with 1.0.115's missing-field rules; 1.0.116 still fails closed.
-- [x] Task 10: Re-Import Repairs Billing in Place (CopilotLedger.Storage, docs & tests). Import revision 1 re-reads every log once; imported rows are repriced, and live GitHub rows take the log's reported charge, in the real run and the dry run alike.
-- [x] Task 11: Re-Import Repairs Tool Links in Place (CopilotLedger.Storage, docs & tests). Imported links move to the request that asked for them, or are removed when that request has no imported row, in the real run and the dry run alike.
-- [x] Task 12: Upgrade Guidance and Reference Consistency (docs & tests). Format 7 in the upgrade steps, "run `gh ledger import` once after upgrading", and the reference's billing and repair notes.
-- [x] Task 14: Review Fix: Import and Upgrade Docs Match the Code (docs & tests). `docs/cli.md`'s "Read, never stored" names both `totalNanoAiu` paths and becomes whole sentences; `docs/configuration.md`'s compaction bullet says "that GitHub billed"; `docs/guide.md`'s repair step follows the daemon-start troubleshooting; `ImportPrivacyTests.IP5` enforces the read list. Listed before Task 13 on purpose: Task 13's check 7 depends on it.
-- [x] Task 13: Final Verification (no product change). Full build and test gates, money and privacy sweeps, boundary and version checks.
+- [x] Task 1: Import Benchmark Script and Baseline (tests/benchmarks). A PowerShell 7 script that generates a large synthetic Copilot session, imports it three times with a given binary against temporary homes, and prints a timing table. The baseline is measured with a Release publish of the unchanged tree and recorded in the commit body.
+- [x] Task 2: The Conversation-Live Index, Ensured on Every Open (CopilotLedger.Storage, docs & tests). `ix_spans_conversation_live` makes the importer's per-record live-span lookups indexed. Opening any format-7 ledger adds it when it's missing, whether the ledger is new, upgraded from format 6, or a format 7 that Sprint 12 created. The format number stays 7.
+- [x] Task 3: Oversized Lines of Unread Types Are Skipped (CopilotLedger.Core, docs & tests). An oversized Copilot line counts as skipped when the first 64 KiB of the line show a complete top-level `type` that isn't one of the event types import reads (`CopilotSessionLogSource.Types`), the same rule as for lines of normal size, so the log can complete. An oversized line of a type import reads, or whose type can't be read from the prefix, stays malformed. Codex is unchanged.
+- [x] Task 4: `premium_model_trivial_turn` Skips Routed Requests (CopilotLedger.Core, CopilotLedger.Storage, docs & tests). `AuditSpan.ListCostUsd`. A GitHub AI credits request charged at least 5% below its list price was routed by Auto or Fusion, so the rule leaves it out. No schema change.
+- [x] Task 5: Version 0.6.0 (all version places, docs & tests). Step 1 of `docs/releasing.md`, exactly. Rates unchanged.
+- [x] Task 6: Release Provenance Attestations (.github/workflows, docs & tests). A SHA-pinned `actions/attest-build-provenance` step in the tag-only `release` job, with `id-token: write` and `attestations: write` on that job only. Verification commands in `docs/cli.md` and `docs/releasing.md`. `ReleaseWorkflowTests`.
+- [x] Task 7: 0.5.0 → 0.6.0 Upgrade Docs (docs & tests). Format 6 → 7 is one-way. Copy the data directory first, stop the daemon and close the MCP sessions, upgrade, run `gh ledger import --all` once, and roll back with `--pin v0.5.0` and the copy. `UpgradeDocsTests.UD5`.
+- [x] Task 8: Import Benchmark Report (docs/test-reports). Run the Task 1 script against a Release publish of this branch and record before and after in `docs/test-reports/<date>-import-benchmark.md`.
+- [x] Task 9: Final Verification (no product change). Build and test gates, a `publish` whose `--version` is `0.6.0`, money, privacy, and boundary sweeps, and confirmation that the rates are unchanged.
+- [x] Task 10: LX6 Reaches the Live-Span Lookups (tests only). Review fix R1: LX6 uses service request IDs that import accepts, so its two dry runs reach `UsageAuthority.GatherAsync`, and it asserts what they decided.
+- [x] Task 11: The Oversized Rule Is Copilot's (docs only). Review fix R2: `docs/cli.md` says that only a Copilot line longer than 8 MiB can count as a skipped event. A longer Codex line is always malformed.
 
 ## Starting point
 
-- `main` at `69ae671` ("Correct and extend the live end-to-end test report (#86)"), after Sprint 11's PR #73 (`ba399c3`) and two documentation commits. Product version `0.5.0` (`src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`). Ledger format 6 (`LedgerMigrations.cs:166–210`). Copilot import window 1.0.103–1.0.114 (`CopilotSessionLogSource.cs:11–12`).
-- What this plan depends on, read from the code at `69ae671`:
-  - **Calculator.** `JsonRateCardCalculator.Calculate` (`JsonRateCardCalculator.cs:122–300`): the provider-billed guard returns `OtherProvider` before local models are consulted (`:152–158`); `localByKnownModel` requires `BillingSource.Endpoint` (`:160–163`). `CreditCalculationResult.UsdCost` is the billed USD and `AiCredits = UsdCost / 0.01m` for GitHub AI credits.
-  - **OTLP.** `OtlpAnyValue` keeps no double (`OtlpModel.cs`); the JSON reader turns `doubleValue` into `Kind = Double` with no value (`OtlpJsonTraceReader.cs:157–160`); the protobuf reader discards field 4's fixed64 (`OtlpProtobufTraceReader.cs:239–243`). The normalizer builds the inference span around `GenAiSpanNormalizer.cs:190–215`.
-  - **Storage.** `cost_usd_pico` is what budgets, the breaker, receipts, export, and audit sum. `InsertSql` (`SqliteLedgerStore.cs:10–36`) and `AddInsertParameters` write a span. Import resolution is `SqliteLedgerStore.Imports.cs` with `UsageAuthority.cs`; the dry run is `LedgerSnapshot.cs`, which must decide exactly as the store does.
-  - **Import.** `CopilotSessionLogSource` reads allowlisted paths only (`PathTree`, `JsonFields`); `JsonFields.Integer` keeps only an `Int64` (`JsonFields.cs:98, 177`). Tool calls are owned by "the latest usage record of the tool's agent" (`ToolStart`, `:556–573`). A compaction must be successful and carry a service request ID (`:477–540`). `LedgerImporter` skips a complete, unchanged log (`LedgerImporter.cs:143–153`) and writes the checkpoint after the last batch (`:282–305`).
-  - **Fixtures.** `tests/CopilotLedger.Tests/TestSupport/CopilotSessionLogs.cs` writes 1.0.114 shapes. Its `Compaction` already writes `compactionTokensUsed.copilotUsage.totalNanoAiu = 11_855_545_000`, and its `Event` gives every line an `id` and a `parentId` equal to the previous line's `id`.
+- `main` at `0f96a83`, "Sprint 12: Billing and import fidelity (#88)", after Sprint 13 (`5d3bfbf`, PR #87).
+- Product version: `0.5.0`.
+- Ledger format: 7 (`LedgerMigrations.cs:212–220`).
+- Copilot import window: 1.0.103–1.0.115.
+- Tests: 1,921 passed.
+- What this plan depends on, read from the code at `0f96a83`:
+  - **Import lookups.** `UsageAuthority.GatherAsync` (`UsageAuthority.cs:230–268`) runs once per imported record. It runs `EXISTS (SELECT 1 FROM spans WHERE conversation_id = @conversation AND ingest_source = 'otlp')` and the same with `AND canonical_usage_id IS NULL`. `ReconcileConversationAsync` (`:290–315`) has the same subqueries. No index starts with `conversation_id`, so each lookup scans `spans`, and importing n records into a ledger of n rows is O(n²).
+  - **Store open.** `SqliteLedgerStore.InitializeAsync` (`SqliteLedgerStore.cs:102–175`):
+    1. sets WAL;
+    2. refuses a newer `user_version`;
+    3. runs each pending migration under `BEGIN IMMEDIATE`, re-reading `user_version` inside the transaction;
+    4. sets `_initialized = true`.
 
-## Verified facts (retrieved 2026-11-24)
+    `LedgerSnapshot`, which `import --dry-run` uses, opens the ledger read-only and never migrates.
+  - **Line reader.** `JsonlLineReader.Read` (`JsonlLineReader.cs`) stops keeping a line's bytes once it passes `maxLineBytes` and calls `onOversized(lineNumber, byteOffset)` at its end, or at EOF. Its only callers are `CopilotSessionLogSource.cs:210` and `CodexSessionLogSource.cs:174`. Both pass `OnOversized`, which counts a malformed line with `ImportDiagnosticCode.OversizedLine` (`CopilotSessionLogSource.cs:317–318`, `CodexSessionLogSource.cs:245–246`). `LedgerImporter` marks a log complete only when `MalformedLines == 0`, so a log with an oversized line is read again by every import.
+  - **Audit.** `SqliteLedgerStore.ReadAuditSpansAsync` (`SqliteLedgerStore.Audit.cs:100–180`) selects 25 columns and builds `AuditSpan`. `PremiumModelTrivialTurnRule` filters candidates at lines 22–36. `list_cost_usd_pico` is NULL when the row was charged at the rate card ("the same as `cost_usd_pico`", migration 7's comment). Otherwise it holds the rate card's price beside a reported charge.
+  - **Release workflow.** `.github/workflows/release.yml`:
+    - top-level `permissions: contents: read`;
+    - jobs `build` (matrix of six), `rates`, and `release`;
+    - `release` has `if: github.event_name == 'push' && github.ref_type == 'tag'` and `permissions: contents: write`;
+    - `release` steps: checkout, download-artifact, "Add the rates and checksums", "Create the release".
 
-| # | Fact | Source |
+    `workflow_dispatch` is a trigger, but the `if` skips `release`.
+
+## Verified facts
+
+| # | Fact | Source (retrieved 2026-11-24) |
 |---|---|---|
-| F1 | On a `chat` span, `github.copilot.nano_aiu` is the AI units this turn consumed; 1 AIU = 10⁹ nano AIU. On `invoke_agent` it's the session total, and GitHub says to read the total from the root `invoke_agent` only because summing every span double-counts. gh-ledger sums `chat` spans only and never prices `invoke_agent` (a non-billable operation), so it counts each turn once. | [OpenTelemetry reference for Copilot](https://docs.github.com/en/copilot/reference/enterprise-administrators/opentelemetry-reference) |
-| F2 | `github.copilot.cost` is a multiplier, not money; it isn't read. `github.copilot.request.type = compaction` marks compaction spans (already chat spans). | Same page |
-| F3 | 1 AI credit = $0.01. | [Models and pricing for GitHub Copilot](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) |
-| F4 | Auto model selection bills 10% less than the selected model's rate. | [Changelog 2026-07-01](https://github.blog/changelog/2026-07-01-copilot-cli-auto-model-selection-routes-based-on-task/) |
-| F5 | Copilot Fusion bills 30% less "for a limited time". | [Changelog 2026-10-28](https://github.blog/changelog/2026-10-28-route-and-orchestrate-models-with-github-copilot-fusion/) |
-| F6 | OTLP `AnyValue`: `int_value = 3` (int64, varint), `double_value = 4` (IEEE-754 double, wire type 1 fixed64, little-endian). Proto3's JSON mapping allows a double as a number or a string (`"NaN"`, `"Infinity"`, `"1.5"`). | [opentelemetry-proto `common.proto`](https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/common/v1/common.proto); [Proto3 JSON mapping](https://protobuf.dev/programming-guides/json/) |
-| F7 | `Utf8JsonReader.TryGetDecimal` (probed with the repository's SDK): `47388600`, `47388600.0`, `4.73886E7`, and `4.73886e+7` → 47388600; `1e21` → true; `9007199254740993` → true (so a range check is needed); `-0` → 0; `0.5` → 0.5; `1E-400` → **true with value 0** (underflow); `1e400` → false; `79228162514264337593543950336` → false. | Local probe, 2026-11-24 |
-| F8 | Copilot CLI 1.0.115 has been the latest release since 2026-11-24T13:03:50Z; 1.0.116-0 is a prerelease (2026-11-24T16:43Z). 1.0.115's notes list no session-log schema change. `ProducerVersion` parses `1.0.116-0` as 1.0.116 (fails closed) and `1.0.115-8` as 1.0.115. | `gh release list --repo github/copilot-cli`; release notes of v1.0.115 |
-| F9 | GitHub's published rates are unchanged since 2026-11-20, so `rates.json` doesn't change. | F3's page, compared with `rates.json`'s `ratesVersion` |
+| F1 | `actions/attest-build-provenance` latest release is `v4.2.2`, published 2026-08-06T19:59:04Z. Tag `v4.2.2` points to commit `4d101475d8b20a2381f78447822ac1eab6504dd8`. | `gh api repos/actions/attest-build-provenance/releases/latest`; `gh api repos/actions/attest-build-provenance/commits/v4.2.2 --jq .sha` (re-checked at plan commit time) |
+| F2 | v4 of `attest-build-provenance` is a composite wrapper around `actions/attest` (v4.2.1, `508db95…`). Its README says new implementations should consider `actions/attest` directly. It takes `subject-path` (newline-separated paths or globs), signs with Sigstore (public-good instance for public repositories), and stores the attestation through the attestations API. | https://github.com/actions/attest-build-provenance (README and `action.yml` at `4d10147`) |
+| F3 | The required job permissions are `id-token: write` (to get the OIDC token for Sigstore) and `attestations: write` (to persist the attestation). `artifact-metadata: write` and `packages: write` are needed only with `push-to-registry` or a storage record, which this sprint doesn't use. `contents: read` is needed only for a private repository's checkout; the `release` job already has `contents: write` for `gh release create`. | Same README, "Usage" and "Permissions" |
+| F4 | swigerb/gh-ledger is public, so attestations go to the public Sigstore instance and anyone can verify them. | `gh repo view swigerb/gh-ledger --json visibility` → `PUBLIC` |
+| F5 | `gh attestation verify <file> --repo <owner>/<repo>` verifies by the file's SHA-256 digest. `--signer-workflow <owner>/<repo>/<path>` requires the workflow that signed it, and `--source-ref <ref>` requires the ref it ran on. | `gh attestation verify --help`, gh 2.103.3 |
+| F6 | Auto model selection: "If you are on a paid Copilot plan, you qualify for a 10% discount on model costs while using auto model selection in Copilot Chat, or Copilot cloud agent." | https://docs.github.com/en/copilot/concepts/models/auto-model-selection, "Discount for using auto model selection" |
+| F7 | Copilot Fusion: "Through November 30, 2026, users on paid Copilot plans receive a 30% discount on model costs when using Copilot Fusion. When you use Copilot Fusion, you're billed for each model it uses, at that model's standard rate. There's no separate charge for Copilot Fusion." | https://docs.github.com/en/copilot/concepts/models/copilot-fusion, "Billing for Copilot Fusion" |
+| F8 | One GitHub AI credit is $0.01 (`AiCreditMath`, unchanged since Sprint 10). | Repository code and `docs/configuration.md` |
+| F9 | SQLite stores `CREATE INDEX IF NOT EXISTS ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp';` in `sqlite_master.sql` as `CREATE INDEX ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp'`. `pragma_index_list('spans')` reports it as `ix_spans_conversation_live\|0\|c\|1` (name, unique, origin, partial). Both `GatherAsync` subqueries plan as `SEARCH spans USING COVERING INDEX ix_spans_conversation_live (conversation_id=?)`, and `… (conversation_id=? AND canonical_usage_id=?)` for the `IS NULL` one. | Planning probe, SQLite 3.50.4 (Python `sqlite3`), 2026-11-24 |
+| F10 | SQLite refuses `ALTER TABLE spans DROP COLUMN canonical_usage_id` or `… ingest_source` while a partial index refers to the column ("error in index ix_spans_conversation_live after drop column"). Test fixtures that build an older format by dropping those columns must `DROP INDEX ix_spans_conversation_live;` first. | Same probe |
+| F11 | Baseline import of a generated 20,000-record session with two 9 MiB ignored lines, using `0f96a83`'s Release build on the planning machine: run 1 took 141.86 s (exit 2, recorded 20,000, malformed 2). An unchanged re-run took 282.62 s (exit 2, duplicate 20,000, malformed 2), because the log never completes. After manually adding the Task 2 index, the same re-run took 1.9 s. | Planning probe, 2026-11-24 (Task 1 re-measures it reproducibly) |
 
-Local session logs (304 logs on the architect's machine) were inspected **for key names, JSON types, enum values, and counts only**, with scripts that printed nothing else:
+## Assumptions (not verified against a primary source)
 
-| # | Observation |
-|---|---|
-| L1 | In 1.0.103–1.0.114 usage records, `data.usage.apiCallId` equals `data.usage.accounting.usageId` in all 69,286 records that have both; one record has no `apiCallId`. No `apiCallId` repeats within a log. |
-| L2 | From `tool.execution_start`, following `parentId` reaches an `assistant.message` directly in 66,474 cases and through earlier `tool.execution_start`/`tool.execution_complete` events in 30,369; about 100 pass through `hook.*`, `assistant.turn_*`, `subagent.started`, or `user.message`. 96,302 reach a message whose `data.apiCallId` matches a usage record; 631 reach a message without `apiCallId`. |
-| L3 | 1.0.115 (one session): `session.usage_record` omits `data.usage.isByok`, `cacheDetailsReported`, `numToolCalls`, `isAuto`, and `apiCallId`, and adds `data.apiCallIdFromUsageId: true`. It keeps `accounting` (`usageId`, `sequence`, `sourceSessionId`), `provider` (`kind` = `copilot`), `serviceRequestId`, `copilotUsage.totalNanoAiu` (integer), and the token fields. Its `assistant.message` has `data.apiCallId`. |
-| L4 | In the 1.0.103–1.0.115 window, every compaction with `compactionTokensUsed` has `requestCount` 1, `model`, the four token counts, and `duration`. Shapes: successful with `serviceRequestId`, `copilotUsage`, and `provider` (1,665); successful with none of the three (BYOK, 104); failed with all three (2); failed with none (11). `compactionAttemptId` and `clientRequestId` are always present, distinct, and unique across all logs. |
+- **A1.** The oversized lines seen in practice are `model.model_call_success` and `model.messages_snapshot` events. They come from issue #82 and the coordinator, and no real session log was opened to confirm them, by design. Task 3's rule doesn't depend on these names: any type that isn't in `CopilotSessionLogSource.Types` is skipped, as a short line of that type already is. The names are used only in tests and the benchmark.
+- **A2.** In an oversized event line, the top-level `type` appears within the first 65,536 bytes. If it doesn't, the line stays malformed. That loses no data, but it doesn't help the log complete.
+- **A3.** A reported charge for an Auto or Fusion request already reflects the discount (F6, F7), so `cost_usd_pico < list_cost_usd_pico` for routed requests. This is issue #80's premise. Fusion requests after November 30, 2026 are charged at the list price and can't be told apart from a chosen model.
+- **A4.** A request charged 5% or more below its list price was routed. Nothing else in the rates (rounding of nano-AIU to pico-USD, or tier boundaries) produces a gap that large.
 
-### Assumptions (not verifiable from a primary source)
+## Decisions
 
-- **A1.** A session log's `copilotUsage.totalNanoAiu` is the same charge, in the same unit, as the live span's `github.copilot.nano_aiu` for that request, and 1 AIU = 1 AI credit. Evidence: issue #76's measurements (Auto and Fusion requests whose reported AIU equal 0.9× and 0.7× the rate card), and Sprint 11's live check that rate-card pricing matched Copilot's own display. GitHub's pages name the unit "AI units" and price "AI credits" without stating the equality.
-- **A2.** 1.0.115's usage shape (L3) is from one session. BYOK usage records, compactions, and `tool.execution_complete` written by 1.0.115 weren't observed; Task 9's rules fail closed for any 1.0.115 shape they don't cover.
-- **A3.** Issue #76 lists "a string" as malformed. Proto3 JSON allows a double as a string (F6); this plan follows #76 and rejects any string `doubleValue` for `nano_aiu`, conservatively. An `intValue` string such as `"47388600"` is the int64 JSON mapping and is accepted (the JSON reader already reads it as `Int`).
+- **D1. Index, not cache (#82).** A partial covering index `ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp'` turns each per-record lookup into an O(log n) seek, with the `UsageAuthority` SQL unchanged. Its literal `'otlp'` matches the partial index's `WHERE`, which SQLite requires before it can use the index. A per-import cache was rejected: it must be invalidated by every live write in the same transaction, it duplicates `UsageAuthority`'s decision logic, and it still costs a scan per conversation.
+- **D2. Ensured on open, not a migration.** The index is created by `InitializeAsync` after the migration loop, whenever it's missing. That covers:
+  - a new ledger;
+  - format 6 → 7 (migration 7 runs, then the index is added);
+  - a format-7 ledger that Sprint 12 created without the index;
+  - a ledger where something dropped it.
 
-## Coordinator decisions (fixed)
+  `user_version` stays 7, migration 7's text is unchanged, and an earlier format-7 build (Sprint 12, if any were installed) can still open the ledger. SQLite maintains the index for its writes. Adding migration 8 was rejected: it would make the upgrade one-way a second time for no format change.
+- **D3. Dry runs don't create it.** `import --dry-run` never writes the ledger (`docs/cli.md`), so on a ledger that no write command has opened since the upgrade, a dry run is as slow as before. Its results are identical either way. Documented in Task 2.
+- **D4. Oversized prefix (amended).** Import already skips a line of normal size as soon as its `type` shows it's none of the events it reads (`docs/cli.md`). Oversized lines follow the same rule. The reader passes each oversized line's first `min(65,536, length)` bytes to the handler. `JsonFields.ReadTypePrefix` reads them as an incomplete JSON block, against `CopilotSessionLogSource.Types`. The line is skipped only if the top-level `type` string is complete, is **not** one of the event types import reads (result -1), and appears after `session.start` with the log not stopped. An oversized line of a type import reads (result ≥ 0), or whose type can't be read from the prefix (result null), stays malformed, as today. This is as safe as an allowlist: a line of a type import never reads can't hold a record import would keep, at any size, so skipping it loses nothing. No list of special oversized types exists. Line hashing, line numbers, and offsets are unchanged. An oversized **unterminated** last line passes an empty prefix and stays malformed, because it's incomplete. A prefix can't see a second `type` property later in the line: the first one decides.
+- **D5. Routed means at least 5% below list (#80).** The rule leaves out a span when `ListCostUsd is decimal list && list > 0m && CostUsd <= list * 0.95m`. The literal request was "reported charge less than list cost". The 5% tolerance keeps a request whose charge differs from the rate card by rounding or a small rate drift in the rule, while Auto (10%) and Fusion (30%) clear it. No `ChargeSource` property is added. `ListCostUsd` is `null` when the ledger row's `list_cost_usd_pico` is NULL, which means "the same as the charge".
+- **D6. Attest with `actions/attest-build-provenance@4d10147` (v4.2.2).** This is the action that issue #77 names, and it's still maintained. Moving to `actions/attest` is deferred (S14-3). Subjects are the six binaries, `rates.json`, and `rates.v2.json`, listed explicitly (no glob). `gh-ledger-checksums.txt` isn't attested: it's derived from the attested files, and each file is verified by digest.
+- **D7. Manual runs never attest.** `workflow_dispatch` keeps skipping the `release` job, so a manual run builds, smoke-tests, checks rates, and uploads workflow artifacts, but never attests and never releases. Only the `release` job, which runs for a pushed `v*` tag, gets `id-token: write` and `attestations: write`. Top-level permissions stay `contents: read`, and `build` and `rates` get nothing new. Attesting manual-run artifacts was rejected: they aren't released, and an attestation for a binary nobody ships only adds noise to the repository's attestation list.
+- **D8. Authenticode is out of scope.** Windows binaries stay unsigned. The docs say so, and point to `gh attestation verify` instead.
+- **D9. Bump before the docs that would name it.** Task 5 bumps the version before Task 6 and Task 7 write docs that name `0.5.0`. VR3 fails on any unlisted mention of the *current* version. Writing "0.5.0 and earlier" while the version is still 0.5.0 would fail it, and after the bump it's fine.
 
-- **D1, repair in place.** Re-running `gh ledger import` updates each existing imported row's billed charge (and every other pricing column), its tool links, and logs that #82 left incomplete. Import revision 1 (`LedgerImporter.CurrentImportRevision`) makes every log that an earlier gh-ledger imported be read once more after the upgrade, even if unchanged (Task 10).
-- **D2, live spans recorded before #76.** A live row can be corrected from its session log when, and only when, the row has a canonical usage ID (recorded by a format-6 daemon with a service request ID), is `github_ai_credits`/`priced`, isn't already `reported`, and its log's record carries a valid `totalNanoAiu`. Import then sets its `cost_usd_pico` to the reported charge and `charge_source` to `reported`, and keeps its list price. A live row without a canonical ID, whose log is gone or unsupported, or whose record has no valid charge keeps its rate-card charge. This is documented in `docs/cli.md` (Task 12).
-- **D3, list price vs billed spend.** `spans.list_cost_usd_pico` keeps the rate-card price; `spans.cost_usd_pico` remains the charged amount, which budgets, the circuit breaker, receipts, export, and audit already sum. A reported charge that's malformed, or that can't apply to the request, falls back to the rate card, sets `charge_source = 'rejected'`, and is counted (`IngestResult.RejectedReportedCharges`; the import report's `reportedChargesRejected` and the `reportedChargeRejected` diagnostic).
-- **D4, #85 privacy.** From `assistant.message`, import reads only the envelope `id` and `parentId` and `data.apiCallId`; from `tool.execution_start` and `tool.execution_complete`, it adds only the envelope `id` and `parentId`. It never reads `content`, `reasoningText`, `reasoningOpaque`, `encryptedContent`, `toolRequests`, `reasoningBlocks`, or tool arguments or results. Canary tests cover the ledger, the report, and the diagnostics, and `docs/cli.md`'s allowlist and "Never read" list change in the same task.
-- **D5, schema.** This sprint owns ledger format 7 and its upgrade guidance. Sprint 13 adds no schema change.
-- **D6, version.** Product version stays `0.5.0`; `rates.json` doesn't change.
+## Plan amendments
 
-## Integration boundaries (Sprint 13)
+- **PA1 (2026-11-24, after Task 1 at `30dd55e`; coordinator-approved).** Task 3 no longer special-cases `model.model_call_success` and `model.messages_snapshot`. An oversized line whose complete top-level `type`, read from the 64 KiB prefix, isn't one of the event types import reads counts as a skipped event, and the log can complete. An oversized line of a type import reads, or whose type can't be read from the prefix, stays malformed. Changed: the Requirements row, the Task 3 summary line, A1, D4, Task 3's title, contracts, Copilot `OnOversized` algorithm, tests (CS20 becomes a theory, CS21 gains two heads, CS22, CS24, and OV1 renamed, CS25–CS27 added), docs text, and acceptance; Task 8's wording; Task 9's privacy list; "Tests added this sprint"; S14-5. Task 1 and its completed text, including F11, are unchanged. Unchanged: the 64 KiB prefix, "the first `type` decides", the after-`session.start` condition, unterminated last lines, hashing, line numbers and offsets, Codex, D1–D3, D5–D9, and the task order.
+- **PA2 (2026-11-24, after Task 2 at `36f8c27`; plan-text repair, no behavior change).** Task 3's tests now agree with PA1's rule and the code. CS5 (an oversized `user.message`, a type import doesn't read) expects MalformedLines 0, SkippedEvents 2, and no diagnostics, instead of PA1's leftover "unchanged" malformed expectation. CS19, CS25, CS26, and OV1 use valid service request IDs (`R1`, `R2`) instead of `"r-1"`/`"r-2"`, which `UsageIdentity.NormalizeServiceRequestId` rejects. `O`, `R1`, `R2`, CX18's fixture, OV1's harness and assertions, the nested reader class names in the contracts, CS18's precondition note, the acceptance text, and "Tests added this sprint" are made explicit. Task 2's LX6 text is left as committed.
 
-Sprint 13 runs in parallel and owns these. **Don't edit them**:
+## Task 1: Import Benchmark Script and Baseline
 
-- `src/CopilotLedger.Core/Audit/**`.
-- The tool-call queries in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs` and `src/CopilotLedger.Storage/SqliteLedgerStore.Audit.cs`.
-- `WindowsDetachedProcess.cs` and daemon start (`DaemonCommands`, `DaemonHost` start path).
-- Breaker and budget alert text.
-- The audit, export, daemon, and install sections of the docs, **except** the one sentence of `docs/cli.md`'s "**Ledger format.**" paragraph that names the format number, which Task 12 changes from 6 to 7 (D5 makes it ours; it's a one-word change plus one added sentence).
+**Files:** `tests/benchmarks/Measure-ImportSpeed.ps1` (new). No product or test-project change. The script is outside every project, so `dotnet test` never runs it.
 
-Shared semantics, without edits: Sprint 13's audit and export read `cost_usd_pico` as billed spend, which is exactly what D3 keeps, and `span_links.owner_span_row_id`, whose meaning Task 11 keeps (an imported link's owner is the imported row of the request that asked for the tool). No query in a Sprint 13 file needs to change for this sprint.
+**Contract:**
 
----
-
-## Task 1 specification: Reported-Charge Primitives
-
-**Files**
-
-- New `src/CopilotLedger.Core/Pricing/ReportedCharge.cs`
-- New `src/CopilotLedger.Core/Pricing/NanoAiu.cs`
-- New `tests/CopilotLedger.Tests/Pricing/NanoAiuTests.cs`
-
-**Contracts**
-
-```csharp
-namespace CopilotLedger.Core.Pricing;
-
-// What a request's own billing report said it was charged, in nano AI units (1 AIU = 1 AI credit = 10^9 nano AIU).
-public enum ReportedChargeState
-{
-    Absent = 0,      // no reported charge
-    Valid,           // NanoAiu holds an exact, non-negative integer no greater than NanoAiu.MaxExact
-    Malformed,       // present but unusable: negative, fractional, NaN, infinite, above 2^53, or not a number
-}
-
-public readonly record struct ReportedCharge(ReportedChargeState State, long NanoAiu)
-{
-    public static ReportedCharge Absent => default;
-    public static ReportedCharge Malformed => new(ReportedChargeState.Malformed, 0);
-    public static ReportedCharge Valid(long nanoAiu);   // ArgumentOutOfRangeException unless 0 <= nanoAiu <= NanoAiu.MaxExact
-}
-
-public static class NanoAiu
-{
-    public const long MaxExact = 9_007_199_254_740_992;            // 2^53
-    public static bool TryFromJsonNumber(ReadOnlySpan<byte> utf8Json, out long nanoAiu);
-    public static bool TryFromIeee754Bits(ulong bits, out long nanoAiu);
-    public static decimal ToUsd(long nanoAiu);        // nanoAiu * 0.00000000001m  (1 nano AIU = $10^-11)
-    public static decimal ToAiCredits(long nanoAiu);  // nanoAiu / 1_000_000_000m
-    public static long ToPicoUsd(long nanoAiu);       // checked(nanoAiu * 10)
-}
+```powershell
+#Requires -Version 7.2
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)] [string] $Binary,        # a published gh-ledger (gh-ledger.exe on Windows)
+    [ValidateRange(2, 1000000)] [int] $Records = 20000,
+    [string] $WorkRoot,                              # default: <temp>/gh-ledger-import-benchmark-<yyyyMMdd-HHmmss>
+    [switch] $KeepFiles
+)
 ```
 
-`ToUsd`, `ToAiCredits`, and `ToPicoUsd` throw `ArgumentOutOfRangeException` for a value outside `0..MaxExact`.
+**Algorithm:**
 
-**Algorithm, `TryFromJsonNumber(utf8Json)`** (one JSON value, such as a property's raw text):
+1. `$ErrorActionPreference = 'Stop'`. Resolve `$Binary` to a full path, and throw `"Binary <path> doesn't exist."` if it isn't a file.
+2. Set `$WorkRoot`, defaulting to `Join-Path ([IO.Path]::GetTempPath()) ("gh-ledger-import-benchmark-" + (Get-Date -Format yyyyMMdd-HHmmss))`. If it exists and has any entry, throw `"WorkRoot <path> isn't empty."`. Create `<WorkRoot>/copilot-home` and `<WorkRoot>/ledger-home`.
+3. Generate `<WorkRoot>/copilot-home/session-state/6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f/events.jsonl` with a `System.IO.StreamWriter`: UTF-8 without BOM, `NewLine = "\n"`. Event `n` (1-based) has:
+   - ID `'00000000-0000-4000-8000-{0:x12}' -f n`;
+   - timestamp 2026-11-20T12:00:00Z plus n seconds, `yyyy-MM-ddTHH:mm:ss.fffZ`, invariant culture;
+   - `parentId` null for event 1, else the previous ID.
 
-1. Create a `Utf8JsonReader` over `utf8Json`. If `Read()` is false or `TokenType != JsonTokenType.Number`, return false. (Strings, `true`, `null`, objects, and arrays are false.)
-2. If `!reader.TryGetDecimal(out decimal value)`, return false (F7: `1e400`, values above `decimal.MaxValue`).
-3. If `value < 0` return false. If `value != decimal.Truncate(value)` return false. If `value > MaxExact` return false.
-4. If `value == 0`: the token's mantissa (the bytes of `reader.ValueSpan` before the first `e` or `E`) must contain no digit other than `0`; otherwise return false. (F7: `1E-400` reads as 0.)
-5. `nanoAiu = (long)value`; return true.
+   Each line is `{"type":"<type>","data":<data>,"id":"<id>","timestamp":"<time>","parentId":<parent>}`.
+   1. `session.start` with data `{"sessionId":"6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f","version":1,"producer":"copilot-agent","copilotVersion":"1.0.114","startTime":"2026-11-20T12:00:00.000Z","context":{"cwd":"<WorkRoot with / separators>"},"alreadyInUse":false}`.
+   2. For i = 1..Records, `session.usage_record` with data `{"usage":{"model":"claude-haiku-4.5","provider":{"id":"copilot","kind":"copilot","label":"GitHub Copilot"},"modelDisplayName":"claude-haiku-4.5","inputTokens":1000,"outputTokens":100,"cacheReadTokens":0,"cacheWriteTokens":0,"reasoningTokens":0,"duration":1000,"initiator":"user","isByok":false,"apiCallId":"u-<i:d8>","serviceRequestId":"<'10000000-0000-4000-8000-{0:x12}' -f i>","accounting":{"sourceSessionId":"6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f","sequence":<i>,"usageId":"u-<i:d8>"},"cacheDetailsReported":true,"numToolCalls":0}}`.
+   3. Right after record `[int]($Records / 2)`, write two ignored oversized lines:
+      - `model.messages_snapshot` with data `{"messages":"<x × 9,437,184>"}`;
+      - `model.model_call_success` with data `{"response":"<x × 9,437,184>"}`.
 
-**Algorithm, `TryFromIeee754Bits(bits)`** (integer arithmetic only):
+      Each is longer than 8 MiB.
 
-1. `exponent = (int)((bits >> 52) & 0x7FF)`, `mantissa = bits & 0x000F_FFFF_FFFF_FFFF`, `negative = (bits >> 63) != 0`.
-2. If `exponent == 0x7FF`: return false (NaN or infinity).
-3. If `exponent == 0 && mantissa == 0`: `nanoAiu = 0`, return true (+0 and −0).
-4. If `exponent == 0`: return false (subnormal: never an integer ≥ 1).
-5. If `negative`: return false.
-6. `significand = mantissa | (1UL << 52)`, `shift = exponent - 1075`.
-7. If `shift >= 0`: if `shift > 1` return false; `value = significand << shift`; return `value <= MaxExact` (with `nanoAiu = (long)value`). (`shift` 0 or 1 covers every integer up to 2^54; anything larger exceeds 2^53.)
-8. If `shift <= -53`: return false (a positive value below 1).
-9. `low = significand & ((1UL << -shift) - 1)`; if `low != 0` return false (fractional). `nanoAiu = (long)(significand >> -shift)`; return true.
+   The filler is the letter `x` only: the file never holds real content.
+4. Save the current `COPILOT_HOME` and `COPILOT_LEDGER_HOME`, then set them to `<WorkRoot>/copilot-home` and `<WorkRoot>/ledger-home`. In `try`, do runs 1–3; in `finally`, restore both variables (removing any that were unset), and delete `$WorkRoot` unless `-KeepFiles`.
+5. Each run uses a `System.Diagnostics.Stopwatch` around `& $Binary import --all --json`, capturing stdout. Record `$LASTEXITCODE`, then parse the JSON. From the `sources` element whose `source` is `copilot`, take `sessionsScanned`, `sessionsSkippedUnchanged`, `recorded`, `duplicate`, `malformedLines`, and `skippedEvents`. If `sessionsScanned` isn't 1, throw `"Run <n> scanned <m> sessions, not 1."`.
+   - Run 1: the first import into an empty ledger.
+   - Run 2: the same command again, unchanged.
+   - Run 3: append `"\n"` to `events.jsonl` (`[IO.File]::AppendAllText`), which changes its bytes but not its events, then the same command.
+6. Write to the output (`Write-Output`):
+   - `Binary: <path>`;
+   - `Version: <& $Binary --version>`;
+   - `OS: <[System.Runtime.InteropServices.RuntimeInformation]::OSDescription>`;
+   - `Processors: <[Environment]::ProcessorCount>`;
+   - `Records: <Records>`;
+   - `Log bytes: <length of events.jsonl before run 1>`.
 
-**Tests** (`NanoAiuTests`, xUnit `[Theory]` rows count as one test each):
+   Then write this markdown table, with seconds formatted `F2` using the invariant culture:
 
-| Test | Input | Expected |
-|---|---|---|
-| NA1 `TryFromJsonNumber` accepts | `47388600`, `47388600.0`, `4.73886E7`, `4.73886e+7`, `0`, `-0`, `0.0e5`, `9007199254740992` | true; 47388600, 47388600, 47388600, 47388600, 0, 0, 0, 9007199254740992 |
-| NA2 `TryFromJsonNumber` rejects | `9007199254740993`, `1e21`, `0.5`, `-1`, `1E-400`, `1e400`, `79228162514264337593543950336`, `"47388600"`, `true`, `null`, `{}`, `[]` | false |
-| NA3 `TryFromIeee754Bits` accepts | `0x418698BDC0000000` (47388600.0), `0x4340000000000000` (2^53), `0x3FF0000000000000` (1.0), `0x41CDCD6500000000` (1e9), `0x0000000000000000` (+0), `0x8000000000000000` (−0) | true; 47388600, 9007199254740992, 1, 1000000000, 0, 0 |
-| NA4 `TryFromIeee754Bits` rejects | `0x4340000000000001` (2^53+2), `0x3FE0000000000000` (0.5), `0x7FF8000000000000` (NaN), `0x7FF0000000000000` (+∞), `0xFFF0000000000000` (−∞), `0xBFF0000000000000` (−1.0), `0x0000000000000001` (subnormal), `0x4440000000000000` (2^69) | false |
-| NA5 conversions | 47388600 | `ToUsd` = `0.000473886m`; `ToAiCredits` = `0.0473886m`; `ToPicoUsd` = `473886000` |
-| NA6 conversions at the bounds | 0; 9007199254740992 | 0m, 0m, 0; `90071.99254740992m`, `9007199.254740992m`, `90071992547409920` |
-| NA7 out of range | −1; 9007199254740993 | each of `ToUsd`, `ToAiCredits`, `ToPicoUsd`, and `ReportedCharge.Valid` throws `ArgumentOutOfRangeException` |
-| NA8 defaults | `default(ReportedCharge)` | `State == Absent`, `NanoAiu == 0`; `ReportedCharge.Absent == default` |
-| NA9 no binary floating point | the text of `NanoAiu.cs` and `ReportedCharge.cs` | contains none of `double`, `float`, `Double`, `Single`, `BitConverter` (read the files from the repository root, as `ExportPrivacyTests.EP6` does) |
-
-**Acceptance:** the nine tests pass; no other file changes.
-
----
-
-## Task 2 specification: The Calculator Bills the Reported Charge, Keeps the List Price, and Prices Local BYOK by Model
-
-**Files**
-
-- `src/CopilotLedger.Core/Telemetry/NormalizedGenAiSpan.cs`
-- `src/CopilotLedger.Core/Pricing/CreditCalculationResult.cs`
-- New `src/CopilotLedger.Core/Pricing/ChargeSource.cs`
-- `src/CopilotLedger.Core/Pricing/JsonRateCardCalculator.cs`
-- `tests/CopilotLedger.Tests/Pricing/BillingSourceTests.cs` (BI8's `openai` row)
-- New `tests/CopilotLedger.Tests/Pricing/ReportedChargePricingTests.cs`
-- `docs/configuration.md` ("How usage is priced", "Imported requests", "Local models and savings")
-
-**Contracts**
-
-```csharp
-// NormalizedGenAiSpan gains:
-public ReportedCharge ReportedCharge { get; init; }     // github.copilot.nano_aiu, or an imported totalNanoAiu; Absent by default
-
-// New file ChargeSource.cs
-namespace CopilotLedger.Core.Pricing;
-public enum ChargeSource
-{
-    RateCard = 0,   // UsdCost is the rate card's price
-    Reported,       // UsdCost is the request's valid reported charge
-    Rejected,       // a reported charge was present but malformed or inapplicable; UsdCost is the rate card's price
-}
-
-// CreditCalculationResult gains:
-public decimal ListUsdCost { get; init; }               // the rate card's billed USD for this request, whatever was charged
-public ChargeSource ChargeSource { get; init; }         // where UsdCost came from
-```
-
-The existing comment on `UsdCost` becomes `// charged USD: the reported charge when ChargeSource is Reported, else the rate card's`. `AiCredits` keeps its definition (`UsdCost / 0.01m` for GitHub AI credits).
-
-**Algorithm, `Calculate(span)`:**
-
-1. Rename today's body to `private CreditCalculationResult CalculateAtRateCard(NormalizedGenAiSpan span)` and make every `Result(...)` it returns set `ListUsdCost = UsdCost` and `ChargeSource = ChargeSource.RateCard`.
-2. Apply issue #79 inside `CalculateAtRateCard`:
-   1. Compute `localModel` (today's `_localModels.FirstOrDefault(item => item.Matches(model))`, null when `model` is null) **before** the provider-billed guard.
-   2. The guard returns `OtherProvider` only when `span.BillingSource == BillingSource.Provider && !MatchesValue(span.ProviderName, _localProviders) && !MatchesValue(span.ProviderName, _foundryProviders) && localModel is null`.
-   3. The local condition gains a fifth alternative: `span.BillingSource == BillingSource.Provider && localModel is not null && !MatchesValue(span.ProviderName, _foundryProviders)`. (A provider listed under `foundryByok.providerNames` stays Foundry BYOK even when its model is a local model.)
-3. `Calculate(span)`: `rateCard = CalculateAtRateCard(span)`, then by `span.ReportedCharge.State`:
-   1. `Absent` → return `rateCard`.
-   2. `Malformed` → return `rateCard with { ChargeSource = ChargeSource.Rejected }`, unless `rateCard.Status == PricingStatus.NotBillableOperation`, which returns `rateCard` unchanged (non-inference spans never count a charge).
-   3. `Valid(n)` and `rateCard.Channel == BillingChannel.GitHubAiCredits && rateCard.Status == PricingStatus.Priced` → return `rateCard with { UsdCost = NanoAiu.ToUsd(n), AiCredits = NanoAiu.ToAiCredits(n), ChargeSource = ChargeSource.Reported }`. `ListUsdCost`, `Breakdown`, `TierName`, `EstimatedCloudSavedUsd`, and `ApiEquivalent` stay the rate card's.
-   4. `Valid(0)` on any other channel or status → `rateCard` unchanged (a zero charge doesn't contradict a request GitHub didn't bill, such as BYOK or local).
-   5. `Valid(n > 0)` on any other channel or status, except `NotBillableOperation` → `rateCard with { ChargeSource = ChargeSource.Rejected }`. (`NotBillableOperation` → `rateCard` unchanged.) Using a charge for `unknown_model` or `no_rate_for_date` requests is deferred.
-
-**Tests** (`ReportedChargePricingTests`, using the embedded rates and a fixed `StartTime` of `2026-11-20T00:00:00Z`; the "chat span" is `OperationName = chat`, no endpoint, `RequestModel = ResponseModel = "claude-haiku-4.5"`, `InputTokens = 1000`, `OutputTokens = 100`, `BillingSource.Endpoint`):
-
-| Test | Span | Expected |
-|---|---|---|
-| RCP1 | chat span, `ReportedCharge.Valid(47388600)` | `Channel` GitHubAiCredits, `Status` Priced, `UsdCost == 0.000473886m`, `AiCredits == 0.0473886m`, `ChargeSource == Reported`, `ListUsdCost` equals `UsdCost` of the same span with `ReportedCharge.Absent`, and `Breakdown` equals that span's `Breakdown` |
-| RCP2 | the same span without a charge | `ChargeSource == RateCard`, `ListUsdCost == UsdCost` |
-| RCP3 | `Malformed` | the rate-card result with `ChargeSource == Rejected` |
-| RCP4 | `OperationName = invoke_agent`, `Valid(47388600)` | `Status == NotBillableOperation`, `UsdCost == 0m`, `ChargeSource == RateCard` |
-| RCP5 | `ServerAddress = "localhost"` (local), `Valid(0)` then `Valid(5)` | `ChargeSource == RateCard`, then `Rejected`; `UsdCost == 0m` both times |
-| RCP6 | an unknown model `zz-unknown`, `Valid(47388600)` | `Status == UnknownModel`, `ChargeSource == Rejected`, `UsdCost == 0m` |
-| RCP7 | `Valid(9007199254740992)` | `UsdCost == 90071.99254740992m`, `AiCredits == 9007199.254740992m` |
-| RCP8 (#79) | `BillingSource.Provider`, `ProviderName = "openai"`, `RequestModel = "qwen3.8-27b-cuda-gpu:1"` | `Channel == Local`, `Status == LocalOffload`, `ModelId == "qwen3.8-27b"`, `EstimatedCloudSavedUsd > 0m`, `UsdCost == 0m` |
-| RCP9 (#79) | the same with `RequestModel = "gpt-oss-unlisted"` | `Status == OtherProvider` |
-| RCP10 (#79) | an overlay calculator whose `foundryByok.providerNames` lists `"contoso"`, `ProviderName = "contoso"`, local model `qwen3.8-27b` | `Channel == FoundryByok` (not Local) |
-
-`BillingSourceTests.BI8`: the `openai` row (a provider-billed `openai` request whose model is a local model) now expects `(BillingChannel.Local, PricingStatus.LocalOffload)`; the Foundry row is unchanged. If BI8's `openai` row uses a model that isn't a local model, leave the row and add RCP8 only; report which applied.
-
-**Docs (`docs/configuration.md`)**
-
-- "How usage is priced", GitHub AI Credits row, "What's recorded": `AI credits and USD: the charge Copilot reports for the request (github.copilot.nano_aiu, or totalNanoAiu in a session log) when it's valid, which includes discounts such as Auto's 10% and Copilot Fusion's; otherwise GitHub's published prices (1 AI credit = $0.01)`.
-- After that table, add a paragraph: "**Charged amount and list price.** gh-ledger records both. The charged amount is what budgets, the circuit breaker, receipts, reports, export, and audit use. The list price is the rate card's price for the same tokens. A reported charge that isn't a whole number of nano AI units from 0 to 2^53 (negative, fractional, NaN, infinite, too large, or text), or that's reported for a request GitHub didn't bill at a known price, isn't trusted: the request is charged at the rate card and counted as a rejected charge."
-- "Imported requests": replace the BYOK bullet and the closing paragraph about `openai` with: "A Copilot BYOK request is local when its `providerType` is in `localOffload.providerNames`, or when its model is one of `localOffload.models` and its `providerType` isn't in `foundryByok.providerNames`; Foundry BYOK when its `providerType` is in `foundryByok.providerNames`; and `other_provider` otherwise. So a BYOK request through a local server that speaks OpenAI's API, which Copilot logs with provider type `openai`, is local when its model is listed in `localOffload.models`, such as Qwen3.8-27B's `qwen3.8-27b-cuda-gpu:1`, and `other_provider` when it isn't." Keep the Codex bullet; append "with the same model rule" to it.
-- "Local models and savings": add one sentence after the first paragraph: "A request that its provider billed, such as an imported BYOK request, is local too when its model is one of `localOffload.models`."
-
-**Acceptance:** RCP1–RCP10 pass; BI8 updated as above; every existing pricing test passes unchanged otherwise; the docs say what the code does.
-
----
-
-## Task 3 specification: OTLP Reads `github.copilot.nano_aiu`
-
-**Files**
-
-- `src/CopilotLedger.Otlp/Decoding/OtlpModel.cs`
-- `src/CopilotLedger.Otlp/Decoding/OtlpJsonTraceReader.cs`
-- `src/CopilotLedger.Otlp/Decoding/OtlpProtobufTraceReader.cs`
-- `src/CopilotLedger.Otlp/Normalization/GenAiAttributeNames.cs`
-- `src/CopilotLedger.Otlp/Normalization/GenAiSpanNormalizer.cs`
-- New `tests/CopilotLedger.Tests/Otlp/NanoAiuAttributeTests.cs`
-
-**Contracts**
-
-```csharp
-// OtlpValueKind.Double's comment becomes: // recognized; only an exact non-negative integer value is kept (DoubleAsNanoAiu)
-// OtlpAnyValue gains:
-public long? DoubleAsNanoAiu { get; init; }   // set when Kind is Double and the value is an integer from 0 to 2^53 (NanoAiu)
-
-// GenAiAttributeNames gains:
-public const string NanoAiu = "github.copilot.nano_aiu";
-```
-
-**Algorithm**
-
-1. JSON (`doubleValue`): when `value.ValueKind == JsonValueKind.Number` and `NanoAiu.TryFromJsonNumber(Encoding.UTF8.GetBytes(value.GetRawText()), out long n)`, return `{ Kind = Double, DoubleAsNanoAiu = n }`; otherwise `{ Kind = Double }` (a string, `null`, or an invalid number keeps `DoubleAsNanoAiu` null).
-2. Protobuf (field 4, wire type 1): `ulong bits = reader.ReadFixed64()` (adapt to its existing return type without a `double`); when `NanoAiu.TryFromIeee754Bits(bits, out long n)`, `{ Kind = Double, DoubleAsNanoAiu = n }`; otherwise `{ Kind = Double }`.
-3. Normalizer: only where it builds an **inference** span, set `ReportedCharge` from the attribute `github.copilot.nano_aiu` (`FindAttribute`):
-   1. Absent attribute → `ReportedCharge.Absent`.
-   2. `Kind == Int` and `0 <= IntValue <= NanoAiu.MaxExact` → `ReportedCharge.Valid(IntValue)`.
-   3. `Kind == Double` and `DoubleAsNanoAiu is long n` → `ReportedCharge.Valid(n)`.
-   4. Anything else present (a negative or too-large `Int`, an invalid `Double`, `String`, `Bool`, `Bytes`, `Array`, `KeyValueList`, or `Empty`) → `ReportedCharge.Malformed`.
-   Non-inference spans (such as `invoke_agent` and `execute_tool`) never read the attribute.
-
-**Tests** (`NanoAiuAttributeTests`; build OTLP JSON and protobuf payloads with the existing decoding tests' helpers):
-
-| Test | Input | Expected |
-|---|---|---|
-| NO1 | JSON chat span, `nano_aiu` as `{"doubleValue": 47388600}` | normalized `ReportedCharge == Valid(47388600)` |
-| NO2 | JSON chat span, `{"intValue": "47388600"}` and `{"intValue": 47388600}` | `Valid(47388600)` both |
-| NO3 | JSON chat span, `doubleValue` of `0.5`, `-1`, `9007199254740993`, `"47388600"`, `"NaN"`, `"Infinity"` | `Malformed` each |
-| NO4 | JSON chat span, `{"stringValue": "47388600"}`, `{"boolValue": true}` | `Malformed` |
-| NO5 | protobuf chat span, field 4 bits `0x418698BDC0000000` | `Valid(47388600)` |
-| NO6 | protobuf chat span, bits NaN `0x7FF8000000000000`, 0.5 `0x3FE0000000000000`, −1 `0xBFF0000000000000`, 2^53+2 `0x4340000000000001` | `Malformed` each |
-| NO7 | protobuf chat span, `int_value` −5 | `Malformed` |
-| NO8 | `invoke_agent` span with `doubleValue` 47388600 | its normalized span (if the normalizer returns one) has `ReportedCharge.Absent`, and the ingest test in Task 5 shows it's never priced |
-| NO9 | chat span without the attribute | `Absent` |
-| NO10 | `OtlpAnyValue` of a JSON `doubleValue` 1.5 | `Kind == Double`, `DoubleAsNanoAiu == null` |
-
-**Acceptance:** NO1–NO10 pass; every existing OTLP decoding and normalizer test passes unchanged.
-
----
-
-## Task 4 specification: Ledger Format 7
-
-**Files**
-
-- `src/CopilotLedger.Storage/LedgerMigrations.cs`
-- `src/CopilotLedger.Storage/SqliteLedgerStore.cs` (`InsertSql`, `AddInsertParameters`, `ValidateEntry`, and a new `ChargeSourceName` mapping beside the existing channel and status mappings)
-- `src/CopilotLedger.Storage/ImportSessionCheckpoint.cs`, `src/CopilotLedger.Storage/UsageAuthority.cs` (checkpoint columns only)
-- `src/CopilotLedger.Storage/LedgerSnapshot.cs` (checkpoint read on format < 7)
-- New `tests/CopilotLedger.Tests/Storage/SchemaVersion7Tests.cs`
-- Tests that pin `user_version` 6 or "the supported version 6": `SchemaVersion6Tests`, `ApiEquivalentStoreTests`, `SpanLinkStoreTests`, `LedgerSnapshotTests`, `SqliteLedgerStoreTests` (change 6 to 7 where they assert the latest version; a test that **sets** `user_version = 6` to simulate a format-6 ledger keeps 6)
-- `docs/cli.md` (the import allowlist between `<!-- import-allowlist -->` and `<!-- /import-allowlist -->` only; see "Docs" below)
-
-> **The import allowlist changes with the schema.** `ImportPrivacyTests.IP2` requires every column of the created schema to be listed in `docs/cli.md`'s import allowlist (or in its "left empty" set), and `IP3` requires every column an import fills to be listed. Import fills all three new columns as soon as this task's store writes them (`list_cost_usd_pico` and `charge_source` on every insert, `import_revision` on every checkpoint, all non-NULL). So this task adds them to the allowlist in the same commit as the migration; a schema column is never added in one task and documented in a later one. The wording below is true at this task (every imported row is charged at the rate card until Task 6 reads `totalNanoAiu`); Task 6 replaces the `spans.charge_source` Copilot cell.
-
-**DDL (migration 7, exactly):**
-
-```sql
-ALTER TABLE spans ADD COLUMN list_cost_usd_pico INTEGER
-    CHECK (list_cost_usd_pico IS NULL OR list_cost_usd_pico >= 0);
-ALTER TABLE spans ADD COLUMN charge_source TEXT NOT NULL DEFAULT 'rate_card'
-    CHECK (charge_source IN ('rate_card', 'reported', 'rejected')
-           AND (charge_source <> 'reported' OR (billing_channel = 'github_ai_credits' AND pricing_status = 'priced')));
-ALTER TABLE import_sessions ADD COLUMN import_revision INTEGER NOT NULL DEFAULT 0 CHECK (import_revision >= 0);
-CREATE INDEX ix_span_links_import_span ON span_links (span_id) WHERE owner_span_row_id IS NOT NULL;
-```
-
-with the comment above it: `// Charged amounts (Sprint 12). cost_usd_pico stays the charged amount that every report sums; list_cost_usd_pico is the rate card's price, and NULL means "the same as cost_usd_pico" (every row recorded before format 7, and any row a running format-6 daemon writes after the upgrade, was charged at the rate card). import_revision 0 marks logs imported before Sprint 12's import fixes, which the next import reads again.`
-
-- The migration writes no row and never changes `import_sessions.complete`. `list_cost_usd_pico` is nullable on purpose: a gh-ledger 0.5.0 daemon still running after the binary is upgraded inserts without the new columns, and NULL then reads correctly as "list = charged".
-- **Readers that need the list price** use `COALESCE(list_cost_usd_pico, cost_usd_pico)`. No report reads it in this sprint.
-
-**Store**
-
-- `InsertSql` adds `list_cost_usd_pico` and `charge_source` after `imported_tool_call_count` (columns and `@list_cost_usd_pico`, `@charge_source` values). `AddInsertParameters` writes `PicoUsd.FromUsd(calculation.ListUsdCost)` and `ChargeSourceName(calculation.ChargeSource)`.
-- `ChargeSourceName`: `RateCard → "rate_card"`, `Reported → "reported"`, `Rejected → "rejected"`; any other value throws `ArgumentOutOfRangeException`.
-- `ValidateEntry` also checks `ListUsdCost` as it checks `UsdCost` (non-negative and convertible by `PicoUsd.FromUsd`), and rejects `ChargeSource == Reported` unless `Channel == GitHubAiCredits && Status == Priced`, with `ArgumentException("A reported charge applies only to priced GitHub AI-credit requests.")`.
-- `ImportSessionCheckpoint` gains `public int ImportRevision { get; init; }` with the comment `// LedgerImporter.CurrentImportRevision when written; 0 for checkpoints written before format 7`. `UpsertCheckpointAsync` writes it (`import_revision`, in the insert and the `DO UPDATE SET`); `ReadCheckpointAsync` gains a `bool hasImportRevision` parameter and selects `import_revision` when it's true and `0` otherwise. The store passes `true`; `LedgerSnapshot` passes `SchemaVersion >= 7`. `ValidateCheckpoint` rejects a negative `ImportRevision`.
-
-**Tests** (`SchemaVersion7Tests`):
-
-| Test | Steps | Expected |
-|---|---|---|
-| SV7-1 | create a format-6 ledger as `SchemaVersion6Tests` does (format-6 DDL by migrations 1–6, `user_version = 6`) with one live span (`cost_usd_pico` 473886000) and one checkpoint with `complete = 1`; open it with `SqliteLedgerStore.InitializeAsync` | `user_version` 7; the span's `list_cost_usd_pico` IS NULL, `charge_source` `rate_card`, `cost_usd_pico` 473886000; the checkpoint's `complete` 1 and `import_revision` 0; `ix_span_links_import_span` exists in `sqlite_master` |
-| SV7-2 | record an entry whose calculation is `UsdCost 0.000473886m`, `ListUsdCost 0.000527m`, `ChargeSource Reported`, GitHub/priced | `cost_usd_pico` 473886000, `list_cost_usd_pico` 527000000, `charge_source` `reported` |
-| SV7-3 | insert by SQL a span with `charge_source = 'reported'` and `billing_channel = 'local'` | `SqliteException` (CHECK) |
-| SV7-4 | `ValidateEntry` with `ChargeSource Reported` and `Channel Local` | `ArgumentException` with the message above |
-| SV7-5 | upsert then read a checkpoint with `ImportRevision = 1` | read back 1 |
-| SV7-6 | `LedgerSnapshot` on a format-6 ledger with a checkpoint | `GetImportSessionAsync` returns it with `ImportRevision == 0`; the ledger's `user_version` stays 6 |
-| SV7-7 | insert by SQL, as a format-6 daemon would, a span without the two new columns | the row has `list_cost_usd_pico` NULL and `charge_source` `rate_card` |
-
-**Docs (`docs/cli.md` import allowlist, exactly):**
-
-1. Insert these two rows immediately after the row whose first cell begins `` `spans.model_id` `` ("Priced from the fields above, as for live spans"):
-
-   ```markdown
-   | `spans.list_cost_usd_pico` | The rate card's price, from the fields above | Priced from the fields above |
-   | `spans.charge_source` | `rate_card` | `rate_card` |
+   ```text
+   | Run | Seconds | Exit | Scanned | Skipped unchanged | Recorded | Duplicate | Malformed lines | Skipped events |
+   |---|---|---|---|---|---|---|---|---|
+   | 1 first | … |
+   | 2 unchanged | … |
+   | 3 changed bytes | … |
    ```
 
-2. In the row whose cells read "The import's own results", append `` , `import_sessions.import_revision` `` to the first cell, after `` `import_sessions.imported_at_unix_ms` ``.
+**Baseline (do this in this task, after writing the script):**
 
-Change nothing else in `docs/cli.md`. No test is added for the docs; `ImportPrivacyTests` already enforces them.
-
-**Acceptance:** SV7-1–SV7-7 pass; tests that assert the latest version now say 7 (`Database user_version 99 is newer than the supported version 7.`); `ImportPrivacyTests` (including `IP2` and `IP3`) passes with the two new rows and the added `import_revision` column; no Sprint 13 file is edited.
-
----
-
-## Task 5 specification: Live Spans Record the Charged Amount
-
-**Files**
-
-- `src/CopilotLedger.Otlp/Ingestion/IngestResult.cs`, `src/CopilotLedger.Otlp/Ingestion/LedgerIngestor.cs`
-- New `tests/CopilotLedger.Tests/Otlp/ReportedChargeIngestTests.cs`
-- `tests/CopilotLedger.Tests/Otlp/LedgerIngestorTests.cs` (only if a helper calculator, such as `OverflowingCalculator`, needs `ListUsdCost`)
-- `docs/configuration.md` (one sentence in "Charged amount and list price")
-
-**Contracts**
-
-```csharp
-// IngestResult gains:
-public int RejectedReportedCharges { get; init; }   // inference spans recorded at the rate card because their reported charge was rejected
+```powershell
+git stash list   # must be empty; the tree must equal 0f96a83 plus this script
+dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r win-x64 -o "$env:TEMP\gh-ledger-bench-before"
+pwsh -NoProfile -File tests/benchmarks/Measure-ImportSpeed.ps1 -Binary "$env:TEMP\gh-ledger-bench-before\gh-ledger.exe"
 ```
 
-**Algorithm (`LedgerIngestor.IngestAsync`)**
+On Linux or macOS, use that platform's RID and the binary without `.exe`. The before run takes several minutes; on the planning machine, runs 1 and 2 took about 142 s and 283 s (F11).
 
-1. After `calculation = _calculator.Calculate(attributed)`, also check `PicoUsd.FromUsd(calculation.ListUsdCost)` inside the existing cost-out-of-range `try` (same `catch`, same `costRejected++`).
-2. Count `calculation.ChargeSource == ChargeSource.Rejected` for every entry passed to `RecordAsync` into `RejectedReportedCharges`. A rejected charge isn't a rejected span: `RejectedSpans`, `FirstRejectionReason`, and the OTLP partial-success response are unchanged.
+**Acceptance:**
 
-**Tests** (`ReportedChargeIngestTests`, using `LedgerIngestorTests`' in-memory OTLP JSON helpers and a temporary ledger):
+- The script runs to completion against the unchanged tree and prints the table. Copy its whole output verbatim into the commit body under `Baseline (0f96a83):`, then `Tests: <n> passed`.
+- Expected shape of the before-table. If it differs, report it; don't fix product code in this task.
+  - Run 1: exit 2, recorded = Records, malformed lines 2.
+  - Run 2: skipped unchanged 0, duplicate = Records, malformed lines 2.
+  - Run 3: duplicate = Records, malformed lines 2.
+- `git grep -n "\.copilot-ledger\|\.copilot\b" -- tests/benchmarks` finds nothing: the script never names the real homes.
+- No test count change. The baseline remains 1,921.
 
-| Test | Steps | Expected |
-|---|---|---|
-| RI1 (#76 AC1) | ingest one `chat` span (model `claude-haiku-4.5`, 1000 input, 100 output, no endpoint) with `github.copilot.nano_aiu` `{"doubleValue": 47388600}` | the row's `cost_usd_pico` 473886000 (0.0473886 AI credits), `charge_source` `reported`, `list_cost_usd_pico` = the rate card's price of the same span in pico-USD (from `PicoUsd.FromUsd(calculator.Calculate(spanWithoutCharge).UsdCost)`); `RejectedReportedCharges` 0 |
-| RI2 (#76 AC1) | the same span without the attribute | `cost_usd_pico` = that rate-card price, `charge_source` `rate_card`, `list_cost_usd_pico` = `cost_usd_pico` |
-| RI3 (#76 AC2) | an `invoke_agent` span with `nano_aiu` 11855545000 and one chat span with 47388600 in the same trace | the ledger sums 473886000 pico-USD for the trace; the `invoke_agent` span has no `spans` row |
-| RI4 (#76 AC3) | chat spans with `doubleValue` `0.5`, `-1`, `"NaN"`, and `9007199254740993` | four rows at the rate card with `charge_source` `rejected`; `RejectedReportedCharges` 4; `RejectedSpans` 0 |
-| RI5 (#76 AC5) | after RI1's span, query branch spend as `branch --since all --json` does and build the receipt as `ReceiptCommandTests` does | the receipt's total AI credits and USD equal the branch row's: `0.0473886` and `0.000473886` |
-| RI6 (#76 AC5) | a branch budget of $0.0005 with RI1's span (`0.000473886`), then a second identical span | budget status before the second: under budget; after: over (the budget sums the charged amount, not the list price) |
-| RI7 (#76 AC5) | the circuit breaker's credit-velocity evaluation over RI1's span with a threshold between the charged and the list price | evaluates against the charged amount (use `CircuitBreakerMonitorTests`' setup; pick a threshold strictly between the two amounts computed in the test) |
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`; the baseline commands above.
 
-RI5–RI7 assert behavior through existing public APIs only; **no** budget, breaker, or receipt code changes (they already sum `cost_usd_pico`). If one of them fails, stop and report it: it means a reader uses something other than `cost_usd_pico`.
+## Task 2: The Conversation-Live Index, Ensured on Every Open
 
-**Docs:** append to the "Charged amount and list price" paragraph: "The daemon counts rejected charges per request and records each as charged at the rate card."
+**Files:**
 
-**Acceptance:** RI1–RI7 pass; no file under `src/CopilotLedger.Core/Breaker`, `src/CopilotLedger.Core/Audit`, or alert text changes.
+- `src/CopilotLedger.Storage/LedgerMigrations.cs`
+- `src/CopilotLedger.Storage/SqliteLedgerStore.cs`
+- `docs/cli.md`
+- New `tests/CopilotLedger.Tests/Storage/ConversationLiveIndexTests.cs`
+- The test fixtures named under "Fixture fixes"
 
----
+`UsageAuthority.cs` is **unchanged**.
 
-## Task 6 specification: Import Reads `totalNanoAiu`, and the Report Gains Its Sprint 12 Counts
-
-**Files**
-
-- `src/CopilotLedger.Core/Import/JsonFields.cs`
-- `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (`UsagePaths`, `CompactionPaths`, `Usage`, `Compaction`)
-- `src/CopilotLedger.Core/Import/ImportedUsageRecord.cs`, `src/CopilotLedger.Core/Import/SessionImportMapper.cs`
-- `src/CopilotLedger.Core/Import/ImportDiagnosticCode.cs`
-- `src/CopilotLedger.Storage/ImportRecordResult.cs`
-- `src/CopilotLedger.Storage/Import/ImportReport.cs`, `src/CopilotLedger.Storage/Import/LedgerImporter.cs` (`Tally`, pricing loop, per-log diagnostics)
-- `src/CopilotLedger.Cli/Import/ImportCommands.cs` (`Rows`, `WriteJson`, `Message`)
-- `tests/CopilotLedger.Tests/TestSupport/CopilotSessionLogs.cs`
-- New `tests/CopilotLedger.Tests/Import/CopilotReportedChargeTests.cs`
-- Exact-output tests that change: `ImportCommandTests` (table rows and JSON), `GuideSamplesTests` samples via `docs/guide.md`, and any compaction amount assertions (see "Fixture default" below)
-- `docs/cli.md` (import report table, JSON fields, allowlist), `docs/guide.md` (import samples)
-
-**Contracts**
+**Contract (`LedgerMigrations`):**
 
 ```csharp
-// JsonFields gains:
-// The value at path as a reported charge: Absent when the path is missing or JSON null; Valid for a JSON number that
-// NanoAiu.TryFromJsonNumber accepts; Malformed for any other value (another number, a string, a bool, an object, an array).
-internal ReportedCharge NanoAiu(string path);
-// Value gains a field set only for JSON numbers: the NanoAiu.TryFromJsonNumber result over reader.ValueSpan (null if false).
-
-// ImportedUsageRecord gains:
-public ReportedCharge ReportedCharge { get; init; }   // totalNanoAiu; Absent when the log has none
-
-// SessionImportMapper.ToSpan copies it: ReportedCharge = record.ReportedCharge.
-
-// ImportDiagnosticCode gains, appended after SupersededUnmatched:
-ReportedChargeRejected,       // set by the importer: requests of the log charged at the rate card because their reported charge was rejected
-
-// ImportRecordResult gains (all default 0; Tasks 10 and 11 set them):
-public int Repriced { get; init; }
-public int LiveRepriced { get; init; }
-public int ToolLinksRelinked { get; init; }
-public int ToolLinksRemoved { get; init; }
-
-// SessionLogReadResult gains (Task 8 sets it):
-public long ToolCallsFallback { get; init; }          // tool calls linked by file order because their apiCallId chain didn't resolve
-
-// ImportSourceReport gains (required, after ToolLinksRecorded):
-public required long ToolLinksRelinked { get; init; }        // imported tool links moved to the request that asked for them
-public required long ToolLinksRemoved { get; init; }         // imported tool links removed: their request has no imported row
-public required long ToolLinksFallback { get; init; }        // tool calls linked by file order (no resolvable apiCallId)
-public required long Repriced { get; init; }                 // imported rows whose pricing was rewritten
-public required long LiveRepriced { get; init; }             // live rows given their log's reported charge
-public required long ReportedChargesRejected { get; init; }  // requests priced at the rate card because their reported charge was rejected
+// Indexes that every ledger of the latest format has. Opening the ledger adds one that's missing, without changing
+// user_version: SQLite keeps an index current for every writer, including an earlier build of the same format.
+// ix_spans_conversation_live: the importer's per-record live-span lookups (UsageAuthority), which name 'otlp' literally
+// so that SQLite can use this partial index.
+public static IReadOnlyList<(string Name, string Sql)> Indexes { get; } =
+[
+    ("ix_spans_conversation_live",
+     "CREATE INDEX IF NOT EXISTS ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp';"),
+];
 ```
 
-`ImportSourceReport.Complete` is unchanged: none of the six makes coverage incomplete.
+`Migrations` and migration 7's text are unchanged.
 
-**Session-log paths (allowlist additions):** `UsagePaths` gains `("data.usage.copilotUsage.totalNanoAiu", 0)`; `CompactionPaths` gains `("data.compactionTokensUsed.copilotUsage.totalNanoAiu", 0)`. `Usage` sets `ReportedCharge = fields.NanoAiu("data.usage.copilotUsage.totalNanoAiu")` for every record; `Compaction` sets `ReportedCharge = fields.NanoAiu("data.compactionTokensUsed.copilotUsage.totalNanoAiu")`. A malformed charge never makes a record unsupported: it's priced at the rate card and counted.
+**Algorithm (`SqliteLedgerStore.InitializeAsync`, after the migration loop, before `_initialized = true`):** for each `(name, sql)` in `LedgerMigrations.Indexes`:
 
-**Importer:** for every in-scope record priced in this run (whatever its resolution), count `calculation.ChargeSource == Rejected` per log; add it to `tally.ReportedChargesRejected`, and when it's above 0, add a diagnostic `{ Source, LogId, Code = ReportedChargeRejected, Count }` after the `CostOutOfRange` one. Also check `PicoUsd.FromUsd(calculation.ListUsdCost)` inside the existing cost-out-of-range `try`. `tally.ToolLinksFallback += result.ToolCallsFallback` for each log read; `Repriced`, `LiveRepriced`, `ToolLinksRelinked`, and `ToolLinksRemoved` sum the batch results' fields.
+1. Run `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = @name;` outside a transaction. If it returns 1, continue.
+2. `await using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);` (BEGIN IMMEDIATE, as the migrations do).
+3. Run the same count inside the transaction. If it returns 0, execute `sql` in the transaction.
+4. `await transaction.CommitAsync(cancellationToken);`
 
-**CLI (exact):**
+A second process that waits on the write lock then sees the index and only commits an empty transaction.
 
-- `Rows` gains, after `("Unpriced", …)` and in this order: `("Charges rejected", r => r.ReportedChargesRejected)`, `("Repriced", r => r.Repriced)`, `("Live repriced", r => r.LiveRepriced)`, `("Tool links relinked", r => r.ToolLinksRelinked)`.
-- `WriteJson`'s per-source fields gain, right after `toolLinksRecorded` and in this order: `toolLinksRelinked`, `toolLinksRemoved`, `toolLinksFallback`, `repriced`, `liveRepriced`, `reportedChargesRejected`.
-- `Message`: `ImportDiagnosticCode.ReportedChargeRejected => $"{Plural(count, "reported charge")} couldn't be used; charged at the rate card"`.
+**Fixture fixes:** each test that turns a ledger back into an older format by dropping `spans.canonical_usage_id` or `spans.ingest_source` must run `DROP INDEX ix_spans_conversation_live;` first (F10). At `0f96a83`, those scripts are in:
 
-**Fixture support (`CopilotSessionLogs`):**
+- `tests/CopilotLedger.Tests/Storage/LedgerSnapshotTests.cs` (~line 82);
+- `Storage/ApiEquivalentStoreTests.cs` (~line 125);
+- `Storage/SchemaVersion6Tests.cs` (~line 72);
+- `Storage/SpanLinkStoreTests.cs` (~lines 36, 397, 595).
 
-- `Usage(...)` gains `long? totalNanoAiu = null`; when not null it writes `usage["copilotUsage"] = { "totalNanoAiu": totalNanoAiu, "tokenDetails": [ { "tokenType": "input", "tokenCount": input } ] }` before `accounting`.
-- `Compaction(...)` gains `long? totalNanoAiu = 11_855_545_000` (today's value); null omits `copilotUsage`.
-- **Fixture default:** compactions in existing tests now carry a valid charge of 11,855,545,000 nano AIU, so they're charged **11.855545 AI credits = $0.11855545** instead of the rate card. Update each existing assertion that pins a compaction's billed amount to those exact values, or pass `totalNanoAiu: null` where the test is about rate-card pricing. Report the list of tests changed in the commit body.
+Also add `DROP INDEX IF EXISTS ix_spans_conversation_live;` to the format-6 script in `SchemaVersion7Tests` (`CreateFormat6Async`), so that it builds a true format 6. Run the suite to find any other such script: the error is `error in index ix_spans_conversation_live after drop column`. Fix only by adding the `DROP INDEX` line; don't change what any test asserts.
 
-**Tests** (`CopilotReportedChargeTests`, through `LedgerImporter` on a temporary ledger):
+**Tests (`ConversationLiveIndexTests`, all through public APIs and `LedgerSql`):**
 
-| Test | Log | Expected |
-|---|---|---|
-| IRC1 (#76 AC4) | one usage record `totalNanoAiu: 47388600` | its row: `cost_usd_pico` 473886000, `charge_source` `reported`, `list_cost_usd_pico` = the rate-card price; report `AiCredits == 0.0473886m`, `ReportedChargesRejected == 0` |
-| IRC2 | the same without `copilotUsage` | rate card, `charge_source` `rate_card` |
-| IRC3 | `totalNanoAiu` written as `0.5`, `-1`, `"47388600"`, `9007199254740993`, and `{}` (five records) | five rows at the rate card, `charge_source` `rejected`; `ReportedChargesRejected == 5`; one diagnostic `reportedChargeRejected` with `Count == 5`; coverage complete (exit 0 through the CLI) |
-| IRC4 (#76 AC4) | a compaction with the fixture default | 11.855545 AI credits ($0.11855545), `reported` |
-| IRC5 | a BYOK usage record (`providerType` `anthropic`) with `totalNanoAiu: 5` | `other_provider`, `charge_source` `rejected` (D3: a positive charge for a request GitHub didn't bill) |
-| IRC6 | `ImportCommandTests`' table and JSON fixtures, updated | the four new rows appear after `Unpriced` with 0s; the six JSON fields appear after `toolLinksRecorded` with 0s |
-| IRC7 | the `--dry-run` of IRC3 | the same counts and diagnostic; nothing written |
-
-**Docs:**
-
-- `docs/cli.md` report table: after `Unpriced`, rows `Charges rejected` ("Requests charged at the rate card because the charge their log reported isn't valid or can't apply"), `Repriced` ("Requests imported before whose pricing changed, which this import rewrote; see [Repairs](#repairs)"), `Live repriced` ("Live requests that this import gave the charge their log reported; see [Repairs](#repairs)"), `Tool links relinked` ("Imported tool calls moved to the request that asked for them; see [Repairs](#repairs)"). (Task 12 adds the "Repairs" heading; until then the anchor is a forward reference, which is fine.)
-- JSON field list: after `toolLinksRecorded`, add `toolLinksRelinked`, `toolLinksRemoved`, `toolLinksFallback` (tool calls linked to the latest request of their agent because their `apiCallId` couldn't be followed), `repriced`, `liveRepriced`, `reportedChargesRejected`; the diagnostic codes gain `reportedChargeRejected`.
-- Allowlist table (Task 4 already added the `spans.list_cost_usd_pico` and `spans.charge_source` rows and `import_sessions.import_revision`; don't add them again, or `DocumentedColumns` fails with "listed twice"): replace the `spans.charge_source` row's Copilot cell, `` `rate_card` ``, with: `reported` when `data.usage.copilotUsage.totalNanoAiu`, or a compaction's `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, is a valid charge for a priced GitHub request; `rejected` when it's present but not; else `rate_card`. Its Codex cell stays `` `rate_card` ``, and the `spans.list_cost_usd_pico` row is unchanged. Add `spans.cost_usd_pico`'s note: "the reported charge when `charge_source` is `reported`".
-- `docs/guide.md`: update the import samples' tables (the four new rows) so `GuideSamplesTests` passes.
-
-**Acceptance:** IRC1–IRC7 and every updated exact-output test pass; `ImportPrivacyTests` passes with the updated allowlist.
-
----
-
-## Task 7 specification: Import BYOK and Failed Compactions
-
-**Files**
-
-- `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (`CompactionPaths`, `Compaction`, and the latest BYOK provider by model)
-- `src/CopilotLedger.Core/Import/ImportedUsageRecord.cs` (comment on `RecordKey` only)
-- `tests/CopilotLedger.Tests/Import/CopilotCompactionTests.cs` (tests that asserted "failed" or "no service request ID" is unsupported change to the rules below)
-- New `tests/CopilotLedger.Tests/Import/CopilotCompactionShapeTests.cs`
-- `docs/cli.md` (allowlist rows for `span_id` and `import_record_aliases.record_key_sha256`; "Read, never stored")
-
-**Paths:** `CompactionPaths` gains `("data.compactionAttemptId", 2048)` and `("data.compactionTokensUsed.provider.id", 64)` (only so that `provider` is recorded as an object; `provider.id` is never used). `IsObject("data.compactionTokensUsed.provider")` and `IsObject("data.compactionTokensUsed.copilotUsage")` decide presence. `summaryContent`, `clientRequestId`, `requestId`, `checkpointPath`, and `attemptMetrics` stay unread.
-
-**Session state:** `Session` keeps `_latestByokProviderByModel` (`Dictionary<string, string>`, `StringComparer.OrdinalIgnoreCase`): each valid BYOK usage record sets `[model] = providerType.ToLowerInvariant()` when `providerType` is a string.
-
-**Algorithm (`Compaction`), the first rule that matches decides** (`srid` = normalized `data.serviceRequestId`; `success` = `fields.Boolean("data.success")`; `charge` = `fields.NanoAiu("data.compactionTokensUsed.copilotUsage.totalNanoAiu")`):
-
-0. Unchanged: no `compactionTokensUsed` (and no duplicate) → skipped event. A duplicate property → parsed, unsupported, field = the duplicate.
-1. `success` isn't a boolean → parsed, unsupported, field `data.success`.
-2. `success == false && srid is null && !IsObject(copilotUsage)` → **skipped event** (`_skipped++`, not parsed): a failed attempt nobody billed.
-3. `success == false && srid is not null && charge.State == Valid` → a charged GitHub compaction: the success path's checks and record (rule 5), with its `ReportedCharge`.
-4. `success == false` (anything else) → parsed, unsupported, field `data.success`.
-5. `success == true && srid is not null` → today's path, unchanged except `ReportedCharge = charge` (Task 6).
-6. `success == true && srid is null && !IsObject(provider) && !IsObject(copilotUsage) && compactionAttemptId is not null` → a **BYOK compaction**: today's checks for `timestamp`, `compactionTokensUsed` object, `requestCount == 1`, `model`, tokens, and duration (not `provider.kind`), then a record with `RecordKey = compactionAttemptId`, `ServiceRequestId = null`, `ProviderName = _latestByokProviderByModel.GetValueOrDefault(model)` (null when none), `BillingSource = BillingSource.Provider`, `ReportedCharge = Absent`, cache states `Reported`, `ToolCallCount = 0`, and the agent and turn as today.
-7. Otherwise (`success == true` with no `srid` and a provider, a `copilotUsage`, or no `compactionAttemptId`) → parsed, unsupported, field `data.serviceRequestId`.
-
-A BYOK compaction has no canonical ID, so it's recorded only from sessions without live spans (`Ambiguous-overlap` otherwise), as other BYOK requests are. Its record key is `compactionAttemptId`, stored only as `ImportIds.RecordKeySha256(Copilot, Compaction, attemptId)` and in `span_id`'s hash.
-
-**Tests** (`CopilotCompactionShapeTests`; fixtures change `Compaction(...)` with `change:`):
-
-| Test | Log | Expected |
-|---|---|---|
-| CC1 (#82 AC1) | `session.start` 1.0.114; one BYOK usage record (`providerType` `anthropic`, model `claude-haiku-4.5`); a successful BYOK compaction (no `serviceRequestId`, no `provider`, no `copilotUsage`, `compactionAttemptId` `c0000000-0000-4000-8000-0000000000b1`); a failed charged compaction (`success` false, `serviceRequestId` `srv-failed-1`, the default charge); a failed uncharged compaction (`success` false, no `serviceRequestId`, no `copilotUsage`) | through the CLI, `import --all` exits 0 with coverage complete; recorded: the BYOK usage record, the BYOK compaction (provider `anthropic`, `other_provider`), and the failed charged compaction (11.855545 AI credits, `reported`); `SkippedEvents` includes the uncharged one; the second run reports `Skipped, unchanged` 1 |
-| CC2 (#82 AC2) | a successful GitHub compaction missing `inputTokens` | unsupported, coverage incomplete (exit 2), the log isn't skipped next run |
-| CC3 | `success` is `"true"` (a string) | unsupported, field `data.success` |
-| CC4 | failed with `serviceRequestId` and no `copilotUsage` | unsupported, field `data.success` |
-| CC5 | failed with `serviceRequestId` and `totalNanoAiu` `0.5` | unsupported, field `data.success` (a failed compaction is recorded only on a valid charge) |
-| CC6 | successful, no `serviceRequestId`, but a `copilotUsage` | unsupported, field `data.serviceRequestId` |
-| CC7 | successful BYOK compaction with no earlier BYOK record of its model | recorded with `provider_name` NULL, `other_provider` |
-| CC8 | CC1's log in a session that has a live span | the BYOK compaction is `Ambiguous-overlap`; the failed charged one is recorded (or overlap-skipped when the live span carries its service request ID) |
-| CC9 (privacy) | CC1's log with `summaryContent`, `clientRequestId`, `requestId`, `checkpointPath` set to the fixture `Canary` | no canary in any ledger table, the report's text or JSON, or diagnostics; the raw `compactionAttemptId` appears nowhere in the ledger |
-
-**Docs (`docs/cli.md`):** `spans.span_id` and `import_record_aliases.record_key_sha256` rows: "…or a compaction's `data.serviceRequestId`, or a BYOK compaction's `data.compactionAttemptId`". "Read, never stored": add "`data.compactionAttemptId`, stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `copilotUsage` are present". "Imported requests" in `docs/configuration.md` gains: "A compaction that Copilot billed is recorded even when it failed; a failed compaction that nobody billed is skipped. A compaction through your own provider (BYOK) is priced as that provider's requests are, by the provider of the latest BYOK request with the same model."
-
-**Acceptance:** CC1–CC9 pass; `summaryContent` is never read.
-
----
-
-## Task 8 specification: Link Imported Tool Calls by `apiCallId`
-
-**Files**
-
-- `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (`Types`, `Kinds`, new `AssistantMessagePaths`, `ToolStartPaths`, `ToolCompletePaths`, `UsagePaths`, `OnLine`, `Usage`, `ToolStart`, `ToolComplete`, `Finish`, `PendingTool`)
-- `src/CopilotLedger.Core/Import/ImportEventKind.cs` (append `AssistantMessage`)
-- `src/CopilotLedger.Core/Import/SessionLogReadResult.cs` (`ToolCallsFallback`, added in Task 6, now set)
-- `tests/CopilotLedger.Tests/TestSupport/CopilotSessionLogs.cs`
-- New `tests/CopilotLedger.Tests/Import/CopilotToolLinkTests.cs`
-- `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs` (one new test)
-- `docs/cli.md` (allowlist rows for `span_links`, "Read, never stored", "Never read")
-
-**Paths (exact):**
-
-- `Types` gains `"assistant.message"` (and `Kinds` gains `ImportEventKind.AssistantMessage`, appended to the enum).
-- `AssistantMessagePaths = new(("id", 2048), ("parentId", 2048), ("data.apiCallId", 2048))`.
-- `ToolStartPaths` and `ToolCompletePaths` each gain `("id", 2048)` and `("parentId", 2048)`.
-- `UsagePaths` gains `("data.usage.apiCallId", 2048)`.
-
-Nothing else is read from `assistant.message`. An `assistant.message` still counts as a skipped event (`_skipped++`), so `SkippedEvents` doesn't change for existing logs.
-
-**Session state:**
-
-- `_chain`: `Dictionary<string, (ImportEventKind Kind, string? ParentId, string? ApiCallId)>` (ordinal), keyed by envelope `id`, for `assistant.message`, `tool.execution_start`, and `tool.execution_complete` events with no duplicate property and a string `id`. A repeated `id` keeps the first entry.
-- `_usageKeyByApiCallId`: `Dictionary<string, string>` (ordinal): each **valid** usage record sets `[apiCallId ?? usageId] = usageId`, where `apiCallId = fields.String("data.usage.apiCallId")`. A repeated key keeps the first.
-- `PendingTool` gains `string? ParentId` (the start event's `parentId`). Completed calls are kept as pending results (fallback owner, parent ID, and the fields `ImportedToolCall` needs) and turned into `ImportedToolCall`s in `Finish`.
-
-**Algorithm (`Finish`, for each completed tool call, in completion order):**
-
-1. `id = call.ParentId`; `hops = 0`.
-2. While `id is not null && hops < 100`: `hops++`; if `!_chain.TryGetValue(id, out entry)` → stop (unresolved). If `entry.Kind == AssistantMessage` → if `entry.ApiCallId is not null && _usageKeyByApiCallId.TryGetValue(entry.ApiCallId, out owner)` → resolved with `owner`; otherwise unresolved; stop. Else (`ToolExecutionStart` or `ToolExecutionComplete`) → `id = entry.ParentId`.
-3. Resolved → `OwnerRecordKey = owner`. Unresolved → `OwnerRecordKey = call.FallbackOwner` (today's rule: the latest usage record of the tool's agent at its start); when that's null, the call is dropped as today. Count `ToolCallsFallback` for every call whose owner came from the fallback and wasn't null.
-
-**Fixture support (`CopilotSessionLogs`):**
-
-- `Event(...)` gains `string? parentId = null`; when given, it replaces the automatic `parentId`. Add `public string LastId` (the last event's `id`).
-- `AssistantMessage(string apiCallId, string? parentId = null)` writes `assistant.message` with `data`: `messageId`, `apiCallId`, `content = Canary`, `reasoningText = Canary`, `reasoningOpaque = Canary`, `encryptedContent = Canary`, `toolRequests = [ { "toolCallId": "<id>", "name": Canary, "arguments": { "command": Canary } } ]`, `reasoningBlocks = [ Canary ]`.
-- `ToolStart(...)` and `ToolComplete(...)` gain `string? parentId = null`.
-
-**Tests** (`CopilotToolLinkTests`):
-
-| Test | Log (same agent throughout) | Expected |
-|---|---|---|
-| TL1 (#85 AC1) | `AssistantMessage("api-A")` → id `mA`; `Usage("api-A", "srv-A", numToolCalls: 2)`; `AssistantMessage("api-B")`; `Usage("api-B", "srv-B")`; `ToolStart("t1", "bash", parentId: mA)` → `s1`; `ToolStart("t2", "bash", parentId: s1)`; `ToolComplete("t1", true, parentId: s1)`; `ToolComplete("t2", true)` | both links' `owner_span_row_id` is A's row and their `trace_id` A's trace; none is B's; `ToolLinksFallback == 0` |
-| TL2 (#85 AC2) | TL1, but the tool start's `parentId` names an unknown ID | the call falls back to B (today's rule) and `ToolLinksFallback == 1` |
-| TL3 | the chain passes through a `hook.start` event | fallback, counted |
-| TL4 | the message's `apiCallId` matches no usage record | fallback, counted |
-| TL5 | a usage record without `data.usage.apiCallId`, its message's `apiCallId` equals its `usageId` | resolved (1.0.115's shape, L3) |
-| TL6 | a `parentId` cycle of two tool events | fallback after at most 100 hops, counted; no exception |
-| TL7 | a usage record that arrives **after** its tool starts and completes | resolved to it (resolution is at the end of the log) |
-| TL8 | 1.0.114 fixtures used by existing tool tests | every existing tool-link test passes unchanged |
-| TL9 | `--dry-run` of TL1 | `toolLinksRecorded` 2, `toolLinksFallback` 0 |
-
-`ImportPrivacyTests` gains **IP-AM1 (#85 AC3):** a log with `AssistantMessage` canaries (all six fields above) and tool arguments and results holding `Canary`; after import, no table of the ledger, the text report, the JSON report, or any diagnostic contains `Canary`. Use the existing privacy tests' whole-database scan.
+| ID | Name | Vector | Expected |
+|---|---|---|---|
+| LX1 | `LX1_ANewLedger_HasTheIndex` | `new SqliteLedgerStore(path, time).InitializeAsync()` | `RowsAsync(path, "SELECT name \|\| '\|' \|\| \"unique\" \|\| '\|' \|\| origin \|\| '\|' \|\| partial FROM pragma_index_list('spans') WHERE name = 'ix_spans_conversation_live'")` is `["ix_spans_conversation_live\|0\|c\|1"]`. `RowsAsync(path, "SELECT name FROM pragma_index_info('ix_spans_conversation_live') ORDER BY seqno")` is `["conversation_id", "canonical_usage_id"]`. `ScalarAsync(path, "SELECT sql FROM sqlite_master WHERE name = 'ix_spans_conversation_live'")` is `CREATE INDEX ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp'`. `PRAGMA user_version` is 7. |
+| LX2 | `LX2_AFormat6Ledger_UpgradesTo7AndGainsTheIndex` | Initialize, record one live span with `TestSpans.Chat(conversationId: "c-1")`, then run `SchemaVersion7Tests`' format-6 script (with the `DROP INDEX` first, as above) and `PRAGMA user_version = 6;`. Open a new store on the path and initialize. | `user_version` 7; the LX1 index row is present; `SELECT COUNT(*) FROM spans` is 1; `charge_source` of that row is `rate_card`. |
+| LX3 | `LX3_ASprint12Format7Ledger_GainsTheIndex` | Initialize, record the same span, `DROP INDEX ix_spans_conversation_live;` (user_version stays 7), then open a new store and initialize. | `user_version` 7; the index row is present; the span count is 1. |
+| LX4 | `LX4_OpeningIsIdempotentAndConcurrentOpensAgree` | On one new path, `Task.WhenAll` of two `InitializeAsync` calls on two store instances, then a third, sequential `InitializeAsync`. | No exception; `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_spans_conversation_live'` is 1; `user_version` 7. |
+| LX5 | `LX5_TheImportLookups_UseTheIndex` | On an initialized empty ledger, `RowsAsync` of `EXPLAIN QUERY PLAN SELECT EXISTS (SELECT 1 FROM spans WHERE conversation_id = 'c' AND ingest_source = 'otlp'), EXISTS (SELECT 1 FROM spans WHERE conversation_id = 'c' AND ingest_source = 'otlp' AND canonical_usage_id IS NULL)`, joining the rows' `detail` column. | The joined text contains `USING COVERING INDEX ix_spans_conversation_live (conversation_id=?)` and `USING COVERING INDEX ix_spans_conversation_live (conversation_id=? AND canonical_usage_id=?)`. If the bundled SQLite words the plan differently, stop and report it; don't loosen the assertion. |
+| LX6 | `LX6_ADryRun_NeverCreatesTheIndex_AndDecidesTheSame` | `CliHarness` with a Copilot log (`CopilotSessionLogs("s-a")` with `Usage("u-1", "r-1")` and `Usage("u-2", "r-2")`). Initialize the harness's ledger, insert one live span for conversation `s-a` with `TestSpans.Chat(conversationId: "s-a")` through the store, then `DROP INDEX ix_spans_conversation_live;`. Run `import --all --dry-run --json` (A). Then initialize a store on the path, which adds the index, and run the same command (B). | After A, the index is absent (count 0). A and B have exit codes equal to each other, and identical stdout. After B, the index is present. |
 
 **Docs (`docs/cli.md`):**
 
-- Allowlist row `span_links.trace_id`, `span_links.conversation_id`, `span_links.owner_span_row_id`: "The usage record whose response asked for the tool: the one whose `data.usage.apiCallId` (or usage ID) equals `data.apiCallId` of the `assistant.message` that the tool's `parentId` chain reaches through tool events; when the chain doesn't reach one, the latest usage record of the tool's agent".
-- "Read, never stored": add "the envelope `id` and `parentId` of `assistant.message`, `tool.execution_start`, and `tool.execution_complete`, `data.apiCallId` of `assistant.message`, and `data.usage.apiCallId` of usage records, which tie a tool call to the request that asked for it".
-- "Never read": replace "user and assistant messages" with "user and assistant message content (`content`, `transformedContent`), reasoning (`reasoningText`, `reasoningOpaque`, `reasoningBlocks`, `encryptedContent`), the tool requests a message makes (`toolRequests`)", keeping the rest of the list.
+- In the `**Ledger format.**` paragraph, after "the first time its daemon or any command opens it.", insert: `Opening a format 7 ledger also adds an index that import uses to match its requests with live ones, when it's missing; on a large ledger that can take a moment once, and it doesn't change the format.` The paragraph must still not contain `format 6` (UD3).
+- In the `--dry-run` bullet under "Import past sessions", append: `Because it never writes the ledger, it doesn't add the index that the paragraph on the ledger format describes, so until the daemon or another command has opened the ledger with this version, a dry run of a large session can take much longer than the import itself; its results are the same.`
 
-**Acceptance:** TL1–TL9 and IP-AM1 pass; the only new paths are those listed.
+**Acceptance:**
 
----
+- LX1–LX6 pass, the fixture fixes change no assertion, and `UpgradeDocsTests` UD1–UD4 still pass (the format stays 7).
+- `git diff 0f96a83 -- src/CopilotLedger.Storage/UsageAuthority.cs` is empty.
+- Quick check, not a gate: `pwsh -File tests/benchmarks/Measure-ImportSpeed.ps1 -Binary <a Release publish of this commit> -Records 2000` finishes with run 2 taking under 5 s. Note the result in the commit body.
 
-## Task 9 specification: Import Copilot CLI 1.0.115 Sessions
+## Task 3: Oversized Lines of Unread Types Are Skipped
 
-**Files**
+**Files:**
 
-- `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (`MaximumVersion`, `Usage`, the gate's comment)
-- `src/CopilotLedger.Cli/Import/ImportCommands.cs` (only if the supported-range text is a literal rather than built from `MaximumVersion`)
-- `tests/CopilotLedger.Tests/TestSupport/CopilotSessionLogs.cs` (`Usage115`)
-- New `tests/CopilotLedger.Tests/Import/Copilot115Tests.cs`
-- `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`, `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs` (the "1.0.103 to 1.0.114 are supported" text)
-- `docs/cli.md` (versions table), `docs/guide.md` (any version range it states)
+- `src/CopilotLedger.Core/Import/JsonlLineReader.cs`
+- `src/CopilotLedger.Core/Import/JsonFields.cs`
+- `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`
+- `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`
+- `docs/cli.md`
+- `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`
+- `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs`
+- New `tests/CopilotLedger.Tests/Cli/ImportOversizedTests.cs`
 
-**Contract:** `MaximumVersion = new(1, 0, 115)`. The gate's comment says "Copilot 1.0.103 to 1.0.115".
+`ImportLimits` is unchanged.
 
-**Algorithm (`Usage`), only when the session's `copilotVersion` ≥ 1.0.115** (keep the parsed `ProducerVersion` from `Start`; earlier versions keep today's rules exactly):
-
-1. `cacheDetailsReported` **absent** (`!IsPresent`) → treated as `false`. Present but not a boolean → unsupported as today.
-2. `isByok` **absent** → treated as `false` only when `provider.kind == "copilot"`, `serviceRequestId` is not null, and `IsPresent("data.usage.copilotUsage.totalNanoAiu")`; otherwise unsupported, field `data.usage.isByok`. Present but not a boolean → unsupported as today.
-3. `numToolCalls` absent → `ToolCallCount = null` (today's behavior).
-4. `apiCallId` absent → the usage key is `usageId` (Task 8 already does this).
-5. `data.apiCallIdFromUsageId` and `isAuto` aren't read.
-
-**Fixture (`Usage115`)**: writes `session.usage_record` with `data.usage` = `model`, `responseModel` (optional), `provider { id: "copilot", kind: "copilot", label: "GitHub Copilot" }`, `modelDisplayName`, the four token counts, `reasoningTokens` 0, `duration`, `initiator`, `serviceRequestId`, `copilotUsage { totalNanoAiu, tokenDetails: [] }` (when `totalNanoAiu` isn't null), and `accounting { sourceSessionId, sequence, usageId }`; and `data.apiCallIdFromUsageId = true`. No `isByok`, `cacheDetailsReported`, `numToolCalls`, `isAuto`, or `apiCallId`.
-
-**Tests** (`Copilot115Tests`):
-
-| Test | Log | Expected |
-|---|---|---|
-| V115-1 (#75 AC1) | `session.start` 1.0.115; two `Usage115` records (`totalNanoAiu` 47388600 and 11855545); an `AssistantMessage` per record and one tool call per record linked by chain | both recorded (0.0473886 and 0.011855545 AI credits, `reported`); `imported_tool_call_count` NULL; both tool links resolved; coverage complete, exit 0 |
-| V115-2 (#75 AC1) | the same, `--dry-run` then real run on a fresh ledger | dry-run and real-run reports have identical counts (every `ImportSourceReport` field) |
-| V115-3 (#75 AC1) | a live span carrying `srv-115-a` recorded first, then the log | that record is `Overlap-skipped`; the other is recorded |
-| V115-4 | a `Usage115` without `copilotUsage` | unsupported, field `data.usage.isByok` (fail closed) |
-| V115-5 | a `Usage115` whose `provider.kind` is `byok-custom` | unsupported, field `data.usage.isByok` |
-| V115-6 | a 1.0.114 log with a usage record missing `cacheDetailsReported` | unsupported, field `data.usage.cacheDetailsReported` (old rules unchanged) |
-| V115-7 (#75 AC2) | `session.start` with `copilotVersion` `1.0.116` and `1.0.116-0` | `UnsupportedProducerVersion`, not read; the CLI warning is exactly the existing content-free text with "1.0.103 to 1.0.115 are supported" |
-| V115-8 (#75 AC3) | V115-1's log with canaries in `Usage115`'s unread places (`modelDisplayName`, a `toolCounts` key) and the messages | no canary in the ledger, report, or diagnostics |
-
-`CopilotSessionGateTests`: the `1.0.115` row becomes `Read`, `1.0.116` stays unsupported.
-
-**Docs:** `docs/cli.md` versions table: "1.0.103 to 1.0.115". Add after the table: "A new Copilot version is read only after gh-ledger has been checked against its logs; until then its sessions are reported as unsupported, and nothing is guessed."
-
-**Acceptance:** V115-1–V115-8 pass; no 1.0.114 behavior changes.
-
----
-
-## Task 10 specification: Re-Import Repairs Billing in Place
-
-**Files**
-
-- `src/CopilotLedger.Storage/Import/LedgerImporter.cs` (`CurrentImportRevision`, the skip check, the checkpoint)
-- `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs`, `src/CopilotLedger.Storage/UsageAuthority.cs`, `src/CopilotLedger.Storage/SqliteLedgerStore.cs` (a shared pricing-columns helper)
-- `src/CopilotLedger.Storage/LedgerSnapshot.cs`
-- New `tests/CopilotLedger.Tests/Import/ImportRepairTests.cs`
-
-**Contracts**
+**Contracts:**
 
 ```csharp
-// LedgerImporter gains:
-public const int CurrentImportRevision = 1;   // raise it when a fix changes what import records from an unchanged log
+// JsonlLineReader
+internal const int PrefixBytes = 64 * 1024;   // the start of an oversized line that its handler sees
 
-// UsageAuthority gains:
-// A row's pricing columns, as AddInsertParameters writes them. ListCostPico and ChargeSource read as COALESCE(list, cost)
-// and 'rate_card' on format < 7.
-internal readonly record struct StoredPricing(
-    string BillingChannel, string PricingStatus, string RatesVersion, string? ModelId, string? RateCardModelId,
-    string? TierName, long CostPico, long SavedPico, long ListCostPico, string ChargeSource,
-    long? ApiEquivalentPico, string? ApiEquivalentStatus, string? ApiRateCardModelId, string? ApiRatesVersion,
-    string? ApiRateCardSha256);
-internal static StoredPricing PricingOf(CreditCalculationResult calculation);   // the values AddInsertParameters would write
-internal static Task<StoredPricing> ReadPricingAsync(SqliteConnection, SqliteTransaction?, long rowId, int schemaVersion, CancellationToken);
-internal static Task<int> RewritePricingAsync(SqliteTransaction, long rowId, StoredPricing pricing, CancellationToken); // imported rows only
-internal static Task<int> ApplyReportedToLiveAsync(SqliteTransaction, long rowId, long costPico, CancellationToken);
+// prefix: the line's first min(PrefixBytes, its length) bytes, valid only during the call; empty for an oversized last
+// line without "\n", which is incomplete.
+internal delegate void OversizedHandler(ReadOnlySpan<byte> prefix, long lineNumber, long byteOffset);
+
+internal static void Read(
+    Stream stream, long maxBytes, int maxLineBytes, LineHandler onLine,
+    OversizedHandler onOversized,                // was Action<long, long>
+    Action<long, long> onUnterminated, IncrementalHash? hash, CancellationToken cancellationToken);
+
+// JsonFields
+// The index in types of the top-level "type" string of a JSON object that may be cut off anywhere: -1 when it's another
+// string, and null when the prefix isn't the start of a JSON object, or ends before a top-level "type" string is complete,
+// or that value isn't a string. The first top-level "type" decides; a later duplicate isn't seen.
+internal static int? ReadTypePrefix(ReadOnlySpan<byte> prefix, IReadOnlyList<string> types);
+
+// CopilotSessionLogSource.Session (the nested per-log reader class that has OnOversized today). It uses the existing
+// private static CopilotSessionLogSource.Types list, the event types import reads, unchanged. No other list of types is added.
+internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset);
+
+// CodexSessionLogSource.Rollout (the nested per-rollout reader class that has OnOversized today)
+internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset);   // ignores prefix; behavior unchanged
 ```
 
-Refactor `AddInsertParameters` so it takes the 15 pricing values from `PricingOf(calculation)`; insert, compare, and rewrite then use identical values.
+**Algorithm (reader):**
 
-**Algorithm**
+1. Keep an `int prefixLength`, initially 0.
+2. When a line first exceeds `maxLineBytes` (the `lineLength + count > maxLineBytes` branch), before setting `oversized = true`:
+   1. If `lineLength < PrefixBytes`, copy `min(PrefixBytes - lineLength, count)` bytes from `chunk[start..]` to `line[lineLength..]`, and set `prefixLength = lineLength + copied`.
+   2. Otherwise, set `prefixLength = PrefixBytes`.
 
-1. **Skip check.** A log is skipped as unchanged only when its checkpoint is complete, `checkpoint.ImportRevision >= CurrentImportRevision`, and size, last-write time, and SHA-256 match. The checkpoint the importer writes sets `ImportRevision = CurrentImportRevision`. So after the upgrade every log is read once more.
-2. **Own imported row (`RecordImportedAsync`).** For an entry resolved `Duplicate` whose own row exists (`UsageAuthority.RecordedRowAsync` returns a row; today's call is no longer limited to entries with tool links): `stored = ReadPricingAsync(row)`; `wanted = PricingOf(entry.Calculation)`; if `stored != wanted`, `RewritePricingAsync` (`UPDATE spans SET` the 15 columns `WHERE id = @id AND ingest_source <> 'otlp'`) and `Repriced++`.
-3. **Live row (D2).** After deciding, when `canonical is not null`, `facts.Owner == CanonicalOwner.Live`, and `entry.Calculation.ChargeSource == ChargeSource.Reported`: `ApplyReportedToLiveAsync(facts.OwnerRowId, PicoUsd.FromUsd(entry.Calculation.UsdCost))` runs
-   ```sql
-   UPDATE spans
-      SET list_cost_usd_pico = COALESCE(list_cost_usd_pico, cost_usd_pico),
-          cost_usd_pico = @cost,
-          charge_source = 'reported'
-    WHERE id = @id AND ingest_source = 'otlp'
-      AND billing_channel = 'github_ai_credits' AND pricing_status = 'priced'
-      AND charge_source <> 'reported';
-   ```
-   and `LiveRepriced` adds the rows it changed (0 or 1). This applies whether the resolution is `OverlapSkipped` or `Duplicate` (an alias written by an earlier import). A live row already `reported` is never changed.
-4. **Rows another record owns** (a `Duplicate` without its own row, such as a fork's copy) aren't repriced; their own log's import reprices them.
-5. **Dry run (`LedgerSnapshot.EvaluateAsync`).** Decide the same: for an own-row `Duplicate`, compare `ReadPricingAsync(row, SchemaVersion)` with `PricingOf(calculation)` and count `Repriced` when different; for a live owner, count `LiveRepriced` when the row is `github_ai_credits`/`priced` and its charge source (read as `rate_card` on format < 7) isn't `reported`. Remember each row ID counted (`HashSet<long>`) so the same row counts once per run, as the real run's second update would change nothing. Write nothing.
-6. `RecordImportedAsync` returns `Repriced` and `LiveRepriced` in `ImportRecordResult`; the importer sums them (Task 6).
+   `line` is always at least `ChunkBytes` (64 KiB) long, because it's rented with that size and only grows, so the copy fits. Don't reset `line`'s bytes until the line ends.
+3. At the line's `\n`, call `onOversized(line.AsSpan(0, prefixLength), lineNumber, lineOffset)`. Then reset `prefixLength = 0` along with `lineLength` and `oversized`.
+4. At EOF with `oversized`, call `onOversized(ReadOnlySpan<byte>.Empty, lineNumber, lineOffset)`.
+5. Everything else is unchanged:
+   - hashing every byte read;
+   - blank-line handling;
+   - `\r` trimming;
+   - line numbers and offsets;
+   - the 8 MiB limit.
 
-**Tests** (`ImportRepairTests`; "earlier import" = build the state by recording entries through the store with the old pricing, then run the importer):
+**Algorithm (`ReadTypePrefix`):**
 
-| Test | Setup | Expected |
+1. Create `Utf8JsonReader reader = new(prefix, isFinalBlock: false, new JsonReaderState(Options))` with the class's existing `Options`. Wrap steps 2–5 in `try { … } catch (JsonException) { return null; }`.
+2. If `!reader.Read()` or `reader.TokenType != JsonTokenType.StartObject`, return null.
+3. Loop:
+   1. If `!reader.Read()`, return null.
+   2. If `TokenType == EndObject`, return null.
+   3. The token is a `PropertyName`. If `TextEquals(ref reader, "type")`, go to step 4.
+   4. Otherwise, if `!reader.Read()` or `!reader.TrySkip()`, return null (the value is cut off).
+4. If `!reader.Read()` or `TokenType != String`, return null.
+5. For `i` in `0..types.Count`, return `i` if `TextEquals(ref reader, types[i])`. Return -1.
+
+**Algorithm (Copilot `OnOversized`):**
+
+1. If `_started`, `_stop is null`, and `JsonFields.ReadTypePrefix(prefix, Types) == -1` (a complete top-level `type` that import doesn't read), increment `_skipped` and return. Add no diagnostic.
+2. Otherwise (before `session.start`, after a stop, a type import reads, or a type the prefix can't show), call `Malformed(ImportDiagnosticCode.OversizedLine, ImportEventKind.Unknown, null, number, offset)`, as today.
+
+**Tests:**
+
+`O(head)` is a private static test helper: `head + new string('x', ImportLimits.MaxLineBytes + 1 - head.Length - 3) + "\"}}"`, an ASCII line exactly `MaxLineBytes + 1` bytes long. Add it to `CopilotSessionGateTests`, and add an identical private copy to `ImportOversizedTests` (OV1). CX18 inlines the same formula. `C` is `CopilotSessionLogs.Canary`. Each `CopilotSessionGateTests` test also calls `AssertNoCanary(result)`.
+
+`R1` is `"11111111-1111-4111-8111-111111111111"` and `R2` is `"22222222-2222-4222-8222-222222222222"`, the same values as `ImportCommandTests.S1` and `S2`. Declare them as private constants in each test class that uses them. A `Usage` record needs a service request ID that `UsageIdentity.NormalizeServiceRequestId` accepts (a non-empty UUID); with anything else, such as `"r-1"`, it's an unsupported usage shape, no record is created, and the log never completes.
+
+| ID | Log (after `session.start` unless stated) | Expected |
 |---|---|---|
-| RR1 (D1) | an imported row recorded at the rate card (`charge_source` `rate_card`) and a complete checkpoint with `import_revision` 0 for the unchanged log; the log's record has `totalNanoAiu` 47388600 | the log isn't skipped; `Repriced == 1`; the row's `cost_usd_pico` 473886000, `charge_source` `reported`, `list_cost_usd_pico` the rate-card price; the checkpoint's `import_revision` 1 |
-| RR2 | run RR1's import again | `Skipped, unchanged` 1; `Repriced == 0` |
-| RR3 (D2) | a live row (`otlp`, canonical ID of `srv-L`, rate card, `charge_source` `rate_card`, `list_cost_usd_pico` NULL); the log has `srv-L` with `totalNanoAiu` 47388600 | `Overlap-skipped` 1, `LiveRepriced == 1`; the live row's `cost_usd_pico` 473886000, `list_cost_usd_pico` = its old cost, `charge_source` `reported` |
-| RR4 (D2) | RR3 with the alias already written by an earlier import (`live`) | `Duplicate` 1, `LiveRepriced == 1`, same row values |
-| RR5 (D2) | a live row already `reported` at 400000000 pico; the log says 47388600 | unchanged; `LiveRepriced == 0` |
-| RR6 (D2) | a live row without a canonical ID in the same conversation | unchanged; the record is `Ambiguous-overlap` |
-| RR7 (#79 repair) | an imported BYOK row recorded `other_provider` before the overlay listed its model; the overlay now lists it | `Repriced == 1`; the row is `local`/`local_offload` with savings |
-| RR8 (#82 repair) | a checkpoint `complete = 0` left by a BYOK compaction that was unsupported | the compaction is recorded; the checkpoint becomes complete |
-| RR9 (dry run) | RR1, RR3, and RR7's states, `--dry-run` | the same `Repriced` and `LiveRepriced` as the real run, and the ledger file's bytes are unchanged |
-| RR10 (dry run on format 6) | RR1's state in a format-6 ledger (built by SQL) | dry run reports `Repriced == 1`; the ledger stays format 6 |
-| RR11 (budgets) | after RR3, the branch total from the store | equals the reported charge, not the old rate-card cost |
+| CS5 `CS5_ALineLongerThan8MiBIsDiscardedUnread` (name and log unchanged; assertions change, see below) | oversized `user.message` (head `"{\"type\":\"user.message\",\"data\":{\"content\":\"" + C`, as today), then `UserMessage()` | MalformedLines 0, SkippedEvents 2, Diagnostics empty. Still asserts the oversized line is exactly `MaxLineBytes + 1` bytes, and `AssertNoCanary(result)` |
+| CS18 `CS18_AnOversizedMessagesSnapshot_IsSkipped` | `Raw(O("{\"type\":\"model.messages_snapshot\",\"data\":{\"messages\":\"" + C))`, then `UserMessage()` | Status Read, MalformedLines 0, SkippedEvents 2, Diagnostics empty |
+| CS19 `CS19_AnOversizedModelCallSuccess_IsSkipped_WhereverItsTypeIs` | `Raw(O("{\"id\":\"00000000-0000-4000-8000-000000000002\",\"data\":{\"model\":\"m\",\"nested\":[1,{\"a\":true},null]},\"type\":\"model.model_call_success\",\"response\":\"" + C))`, then `Usage("u-1", R1)` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
+| CS20 `CS20_AnOversizedEventThatImportReads_StaysMalformed` (theory) | Two heads, each `Raw(O(head))`: `"{\"type\":\"session.usage_record\",\"data\":{\"usage\":{\"model\":\"" + C`; `"{\"type\":\"session.usage\\u005frecord\",\"data\":{\"usage\":{\"model\":\"" + C` (escaped, still a type import reads) | Each: MalformedLines 1, SkippedEvents 0, Records.Count 0, one `OversizedLine` diagnostic at line 2 |
+| CS21 `CS21_ATypeBeyondThePrefixOrUnreadable_StaysMalformed` (theory) | Seven heads, each with `O(head)`: `"{\"pad\":\"" + new string('y', 65_508) + "\",\"type\":\"model.messages_snapshot\",\"x\":\""` (the prefix ends inside the `type` value, after `"type":"model.mess`: the value starts at byte 65,526, and the prefix is bytes 0–65,535); `"{\"data\":{\"messages\":\"" + new string('y', 70_000) + "\"},\"type\":\"model.messages_snapshot\",\"x\":\""` (type past 65,536 bytes); `"{\"x\":\""` (no `type` at all); `"{\"type\":7,\"x\":\""`; `"{\"type\":null,\"x\":\""`; `"[{\"type\":\"model.messages_snapshot\",\"x\":\""`; `"{type:\"model.messages_snapshot\",\"x\":\""` | Each: MalformedLines 1, SkippedEvents 0, one `OversizedLine` diagnostic at line 2 |
+| CS22 `CS22_AnEscapedUnreadType_IsSkipped` | `Raw(O("{\"type\":\"model.messages\\u005fsnapshot\",\"x\":\""))` | MalformedLines 0, SkippedEvents 1 |
+| CS23 `CS23_AnOversizedUnterminatedLastLine_StaysMalformed` | `WriteAsync(home, new CopilotSessionLogs(SessionId).Text() + O("{\"type\":\"model.messages_snapshot\",\"x\":\""))`, with no trailing `\n` | MalformedLines 1, one `OversizedLine` diagnostic at line 2 |
+| CS24 `CS24_AnOversizedUnreadLineBeforeSessionStart_StaysMalformed` | `WriteAsync(home, O("{\"type\":\"model.messages_snapshot\",\"x\":\"") + "\n" + new CopilotSessionLogs(SessionId).Text())` | Status Read, MalformedLines 1, one `OversizedLine` diagnostic at line 1 |
+| CS25 `CS25_AnOversizedBinaryAsset_IsSkipped` | `Raw(O("{\"type\":\"session.binary_asset\",\"data\":{\"bytes\":\"" + C))`, then `Usage("u-1", R1)` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
+| CS26 `CS26_AnOversizedLineOfAnUnknownFutureType_IsSkipped` | `Raw(O("{\"type\":\"future.unknown_event\",\"data\":{\"blob\":\"" + C))`, then `Usage("u-1", R1)` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
+| CS27 `CS27_AnOversizedAssistantMessage_StaysMalformed` | `Raw(O("{\"type\":\"assistant.message\",\"data\":{\"content\":\"" + C))` | MalformedLines 1, SkippedEvents 0, one `OversizedLine` diagnostic at line 2 |
+| CX18 `CX18_AnOversizedRolloutLine_StaysMalformed_WhateverItsType` (`CodexRolloutTests`) | `new CodexRollouts(Thread).Raw(head + new string('x', ImportLimits.MaxLineBytes + 1 - head.Length - 3) + "\"}}")`, with `head` = `"{\"type\":\"model.messages_snapshot\",\"payload\":{\"x\":\""` | Status Read, MalformedLines 1, one `OversizedLine` diagnostic at line 2 |
+| OV1 `OV1_ALogWhoseOversizedLinesAreUnread_CompletesAndIsSkippedNextTime` (`ImportOversizedTests`, `CliHarness` built as `ImportCommandTests.Harness` builds it, with `ManualTimeProvider(new DateTimeOffset(2026, 11, 23, 12, 0, 0, TimeSpan.Zero))`) | Write `new CopilotSessionLogs("s-ov").Usage("u-1", R1).Raw(O("{\"type\":\"model.messages_snapshot\",\"x\":\"")).Raw(O("{\"type\":\"model.model_call_success\",\"x\":\"")).Usage("u-2", R2)` to `harness.Context.CopilotHome` (not active). Run `import --all --json` twice. | Run 1: exit 0, stderr empty; `sources[0]` (copilot) `recorded` 2, `malformedLines` 0, `unsupportedUsageShapes` 0, `skippedEvents` 2, `coverage` `"complete"`. Run 2: exit 0, stderr empty; `sessionsSkippedUnchanged` 1, `recorded` 0, `duplicate` 0. Neither stdout contains `C` or `xxxxxxxx`. |
 
-**Docs:** none here (Task 12 writes "Repairs").
+Before relying on CS18's "SkippedEvents 2", check that `UserMessage()` counts as one skipped event (CS2 shows it does: `{not json` then `UserMessage()` gives SkippedEvents 1). If an existing exit-code rule makes run 1's exit code differ from 0 with no malformed lines, stop and report it.
 
-**Acceptance:** RR1–RR11 pass; every existing import, snapshot, and authority test passes.
-
----
-
-## Task 11 specification: Re-Import Repairs Tool Links in Place
-
-**Files**
-
-- `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs` (`InsertOwnedLinkAsync` becomes `UpsertOwnedLinkAsync`; removal)
-- `src/CopilotLedger.Storage/LedgerSnapshot.cs`
-- `tests/CopilotLedger.Tests/Import/ImportRepairTests.cs` (new tests)
-
-**Contracts**
+**CS5's changed assertions.** `user.message` isn't in `Types`, so under D4 its oversized line is skipped. In `CS5_ALineLongerThan8MiBIsDiscardedUnread`, keep the name, the log, the byte-length assertion, and `AssertNoCanary(result)`. Replace every statement between the byte-length assertion and `AssertNoCanary(result)` with exactly:
 
 ```csharp
-private enum LinkWrite { Unchanged, Inserted, Relinked }
-// The imported link for link.SpanId in link.ConversationId (owner_span_row_id IS NOT NULL), made to belong to ownerRowId and
-// link.TraceId: inserted when there's none, updated in place when its owner or trace differs.
-private static Task<LinkWrite> UpsertOwnedLinkAsync(SqliteTransaction, GenAiSpanLink link, long ownerRowId, long recordedAtUnixMs, CancellationToken);
-// Removes this conversation's imported links with these span IDs; returns how many.
-private static Task<int> RemoveOwnedLinksAsync(SqliteTransaction, IReadOnlyList<GenAiSpanLink> links, CancellationToken);
+Assert.Equal(0, result.MalformedLines);
+Assert.Equal(2, result.SkippedEvents);
+Assert.Empty(result.Diagnostics);
 ```
 
-**Algorithm**
+(They were `MalformedLines` 1, `SkippedEvents` 1, and one `OversizedLine` diagnostic at line 2. CS20 and CS27 now cover the malformed path.)
 
-1. `UpsertOwnedLinkAsync`: `SELECT trace_id, owner_span_row_id FROM span_links WHERE span_id = @span AND conversation_id = @conversation AND owner_span_row_id IS NOT NULL ORDER BY trace_id` (uses `ix_span_links_import_span`).
-   1. No row → today's `INSERT … ON CONFLICT (trace_id, span_id) DO NOTHING`; `Inserted` when it inserted, else `Unchanged`.
-   2. The first row has `trace_id = link.TraceId` and `owner_span_row_id = ownerRowId` → `Unchanged`.
-   3. Otherwise → `UPDATE span_links SET trace_id = @trace, owner_span_row_id = @owner WHERE trace_id = @old_trace AND span_id = @span` → `Relinked`.
-   4. Any further rows (more than one imported link with that span ID in the conversation) are deleted and counted as removed.
-2. `RecordImportedAsync`:
-   - `Recorded` → `UpsertOwnedLinkAsync` for each link with the new row: `Inserted` adds to `ToolLinksRecorded`, `Relinked` to `ToolLinksRelinked`.
-   - `Duplicate` with its own row → the same with the own row (today only inserted new links).
-   - `OverlapSkipped`, `AmbiguousOverlap`, and `Duplicate` without its own row → `RemoveOwnedLinksAsync(entry.ToolLinks)` (`DELETE FROM span_links WHERE span_id = @span AND conversation_id = @conversation AND owner_span_row_id IS NOT NULL`), added to `ToolLinksRemoved`. These requests have no imported row, so an imported link left there by an earlier import belongs to the wrong request.
-   - Live links (`owner_span_row_id IS NULL`) are never changed or removed.
-3. `LedgerSnapshot.EvaluateAsync` decides the same with an in-memory overlay `Dictionary<(string Conversation, string SpanId), (string TraceId, long? Owner)?>` (null value = removed in this run) over the ledger's rows; for a `Recorded` entry, any existing imported link with the span ID counts as `Relinked` (the new row is necessarily a different owner). It writes nothing.
+**Docs (`docs/cli.md`):**
 
-**Tests**
+- Report table row: `| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete. A longer line counts as a skipped event instead when its first 64 KiB show a top-level \`type\` that isn't one of the events import reads, the same rule as for shorter lines |`
+- In the JSON field list, change `` `skippedEvents` (events of other types) `` to `` `skippedEvents` (events of other types, including those longer than 8 MiB whose type shows in their first 64 KiB) ``.
+- In "Repairs" or "The import report", wherever the docs say a log with malformed lines is read again, add no new text. The behavior there is unchanged.
 
-| Test | Setup | Expected |
+**Acceptance:** CS5 passes with exactly the changed assertions above. All other existing tests pass unchanged. CS18–CS27, CX18, and OV1 pass. The reader's hash test vectors, if any, are unchanged. `git grep -n "Action<long, long> onOversized"` and `git grep -n "IgnoredOversizedTypes" -- src tests` find nothing, and `src/` names neither `model.model_call_success` nor `model.messages_snapshot`. `CopilotSessionLogSource.Types` is unchanged.
+
+## Task 4: `premium_model_trivial_turn` Skips Routed Requests
+
+**Files:**
+
+- `src/CopilotLedger.Core/Audit/AuditSpan.cs`
+- `src/CopilotLedger.Core/Audit/PremiumModelTrivialTurnRule.cs`
+- `src/CopilotLedger.Storage/SqliteLedgerStore.Audit.cs`
+- `docs/cli.md`
+- `tests/CopilotLedger.Tests/Audit/VelocityRuleTests.cs`
+- `tests/CopilotLedger.Tests/Cli/AuditCommandTests.cs`
+
+No schema, CLI, or JSON change.
+
+**Contracts:**
+
+```csharp
+// AuditSpan, after CostUsd
+public decimal? ListCostUsd { get; init; }   // the rate card's price beside a reported charge; null: the same as CostUsd
+
+// PremiumModelTrivialTurnRule
+private const decimal RoutedChargeRatio = 0.95m;   // charged at least 5% below list: Auto (10%) or Fusion (30%) routed it
+```
+
+**Algorithm:**
+
+1. **Store.** Append `list_cost_usd_pico` as the 26th column (index 25) of `ReadAuditSpansAsync`'s `SELECT`, after `ingest_source`. Set `ListCostUsd = rows.IsDBNull(25) ? null : PicoUsd.ToUsd(rows.GetInt64(25))`. No `COALESCE`.
+2. **Rule.** In the candidate loop, after the existing `continue` conditions and before the tier lookup, add: `if (span.ListCostUsd is decimal list && list > 0m && span.CostUsd <= list * RoutedChargeRatio) continue;`. Nothing else changes: grouping, thresholds, metrics, impact (still from rates, not `CostUsd`), and severity stay the same.
+3. Update `AuditSpan`'s and the rule's header comments in one line each to mention routed requests.
+
+**Test vectors (`AR7` theory, new cases in `PremiumCases` and the `switch`).** Let `At` be the existing `"at"` expected string, `"warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0.273 premium_model_trivial_turn"`. `Trivial(n)` spans cost `0.0312m`.
+
+| Case | Input | Expected |
 |---|---|---|
-| RL1 (D1, #85 repair) | TL1's log; the ledger holds the state an earlier import left: both rows recorded, both tool links owned by B's row with B's trace, checkpoint revision 0 | `ToolLinksRelinked == 2`; both links now have A's row and A's trace; `span_links` has exactly 2 imported rows for the conversation |
-| RL2 | RL1 again | `Skipped, unchanged` 1 |
-| RL3 | an imported link owned by an imported row, whose correct owner (by chain) is a record that's `Overlap-skipped` | `ToolLinksRemoved == 1`; no imported link with that span ID remains |
-| RL4 | a live link (`owner_span_row_id` NULL) with the same `span_id` text | untouched |
-| RL5 (dry run) | RL1 and RL3, `--dry-run` | the same `ToolLinksRelinked` and `ToolLinksRemoved`; ledger bytes unchanged |
-| RL6 | a new tool call completed since the last import (today's behavior) | `ToolLinksRecorded == 1`, `ToolLinksRelinked == 0` |
+| `routed` | `Trivial(10)` with every `ListCostUsd = 0.0347m` (0.95 × 0.0347 = 0.032965 ≥ 0.0312) | `none` |
+| `one routed of ten` | `Trivial(10)`, the span whose ID ends in `5` with `ListCostUsd = 0.0347m` | `none` (9 left) |
+| `one routed of eleven` | `Trivial(11)`, the span whose ID ends in `5` with `ListCostUsd = 0.0347m` | `At` (10 left; impact 10 × 0.0273 = 0.273) |
+| `list equals charge` | `Trivial(10)` with `ListCostUsd = 0.0312m` | `At` |
+| `list within 5%` | `Trivial(10)` with `ListCostUsd = 0.0328m` (0.95 × 0.0328 = 0.03116 < 0.0312) | `At` |
+| `boundary skipped` | `Trivial(10)` with `CostUsd = 0.0285m, AiCredits = 2.85m, ListCostUsd = 0.0300m` (0.95 × 0.0300 = 0.0285) | `none` |
+| `boundary kept` | `Trivial(10)` with `CostUsd = 0.0286m, AiCredits = 2.86m, ListCostUsd = 0.0300m` | `At` |
+| `zero list` | `Trivial(10)` with `CostUsd = 0m, AiCredits = 0m, ListCostUsd = 0m` | `At` |
 
-**Acceptance:** RL1–RL6 pass; every existing tool-link and snapshot test passes; nothing outside `span_links` changes.
+If `Trivial(11)`'s span IDs make more than one end in `5`, select by `SpanId == AuditFixtures.Span(5, …).SpanId` instead. If `one routed of eleven`'s impact isn't exactly `0.273`, stop and report it.
 
----
+**CLI test `AC10_RoutedRequests_LeaveThePremiumRule` (`AuditCommandTests`):**
 
-## Task 12 specification: Upgrade Guidance and Reference Consistency
+1. `AuditSeeds.CreateAsync(temp.Path)`, then the harness.
+2. Run `audit --json --rule premium_model_trivial_turn` (P0) and `audit --json --rule failed_tool_retry --rule cache_miss_streak --rule context_bloat` (O0).
+3. `LedgerSql.ExecuteAsync(db, "UPDATE spans SET list_cost_usd_pico = cost_usd_pico WHERE billing_channel = 'github_ai_credits'")`, then run P1.
+4. `LedgerSql.ExecuteAsync(db, "UPDATE spans SET list_cost_usd_pico = cost_usd_pico * 10 / 9 WHERE billing_channel = 'github_ai_credits' AND cost_usd_pico > 0")`, then run P2 and O2.
 
-**Files**
+Here `db` is `Path.Combine(temp.Path, "data", "ledger.db")`, as AC9 uses.
 
-- `docs/cli.md` (the **Ledger format** paragraph's format number and one sentence; the import section's "Repairs" subsection)
-- `docs/guide.md` (the upgrade section)
-- `docs/configuration.md` (cross-reference only)
-- `tests/CopilotLedger.Tests/Docs/UpgradeDocsTests.cs` (new test)
+Expected:
 
-**Docs (exact wording to add):**
+- P0 and P1: `findingsTotal` 1.
+- P2: `findingsTotal` 0 and exit 0.
+- O2's `findings` array serializes identically to O0's (compare `GetRawText()` of `findings`).
 
-1. `docs/cli.md`, "**Ledger format.**": "This version upgrades the ledger to format 6" → "This version upgrades the ledger to format 7", and append after that sentence: "Format 7 keeps each request's list price beside the amount it was charged. After upgrading, run `gh ledger import --all` once so that requests imported before, and live requests whose session logs report their charge, are repaired (see [Repairs](#repairs))." Change nothing else in that paragraph or section.
-2. `docs/cli.md`, new subsection `### Repairs` after "Overlap with live spans":
-   - "An import after upgrading reads every session log again once, even one it imported completely before, and repairs what it recorded from it in place:"
-   - "- **Charges.** A request imported before is priced again with the rates in use now; when anything about its price changed, such as the charge its log reports, its row is rewritten (`Repriced`). Its list price is kept beside the charge."
-   - "- **Live requests.** A live request that the daemon recorded at the rate card, with a service request ID, gets the charge its session log reports, when the log reports a valid one (`Live repriced`). Its list price is kept. Live requests without a service request ID, such as those an earlier gh-ledger recorded, and those whose logs are gone or unsupported, keep the rate card's price."
-   - "- **Tool calls.** An imported tool call that an earlier import attached to the wrong request moves to the request that asked for it (`Tool links relinked`); one whose request has no imported row, such as a request that a live span recorded, is removed (`toolLinksRemoved` in `--json`). Tool calls older than 7 days aren't kept, so they aren't repaired."
-   - "- **Compactions.** Logs whose BYOK or failed compactions earlier versions couldn't read are read completely now."
-   - "A dry run reports the same counts and changes nothing. Repairs never change which request counts: the rules of [Overlap with live spans](#overlap-with-live-spans) still decide that. Budgets, the circuit breaker, receipts, reports, export, and audit use the repaired charges from then on; circuit-breaker trips recorded before aren't re-evaluated."
-3. `docs/guide.md` upgrade section: after the `gh extension upgrade ledger` step and the daemon restart, add a step "Repair what earlier versions imported:" with a `shell` block `gh ledger import --all` and the sentence "It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs)." Don't add a `<!-- sample -->` marker.
-4. `docs/configuration.md`, "Charged amount and list price": append "Upgrading from 0.5.0 or earlier keeps the rows you have; [Repairs](cli.md#repairs) says how an import corrects them."
+**Docs (`docs/cli.md`, "The rules"):**
 
-**Tests**
+- Replace the `premium_model_trivial_turn` row's "Finds" cell with: `GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day, leaving out requests charged at least 5% below their list price`. The other cells are unchanged.
+- Add this bullet right after the **Tool calls.** bullet:
 
-- **UD3** (`UpgradeDocsTests`): `docs/cli.md`'s "**Ledger format.**" line contains `format 7` and not `format 6`; `docs/guide.md`'s upgrade section contains `gh ledger import --all` after `gh extension upgrade ledger`; `docs/cli.md` contains `### Repairs`.
-- **UD4**: the latest migration's version (`LedgerMigrations.Migrations[^1].Version`) is 7 and `docs/cli.md` names `format {that version}` (ties the docs to the DDL).
+  `- **Routed requests.** With Auto or Copilot Fusion, GitHub picks the model for each request and charges less than its list price: 10% less for Auto on paid plans, and 30% less for Fusion through November 30, 2026. gh-ledger knows a request's list price when Copilot reported its charge, so \`premium_model_trivial_turn\` leaves out requests charged at least 5% below their list price: you didn't choose their model. A routed request without a reported charge, or one charged at the list price, counts like any other.`
 
-**Acceptance:** UD1–UD4 pass; `GuideSamplesTests` passes; no other section of the install, daemon, export, or audit docs changes.
+- The guide's audit samples don't change: the seeds' `list_cost_usd_pico` is NULL. `GuideSamplesTests` and `SprintThirteenDocsTests.DC1` must pass unchanged. If either fails, stop and report it.
 
----
+**Acceptance:** all AR7 cases, AC1–AC10, AD1–AD3, and the guide sample tests pass, and no other audit test changes.
 
-## Task 13 specification: Final Verification
+## Task 5: Version 0.6.0
 
-**Prerequisite:** Task 14 is checked. If it isn't, stop and implement Task 14 first.
+Follow `docs/releasing.md` step 1 **exactly**, with `0.6.0`. Skip step 2: `rates.json` is unchanged, and so is its `ratesVersion`.
 
-**Merged tree (ledger-architect, 2026-11-24, at `b3f7201`).** Sprint 13 (`5d3bfbf`) is merged into this branch, so checks 2, 4, and 6 read as follows; these values supersede the ones below:
+**Places to change, at `0f96a83`:**
 
-- Check 2: **1,921** passed (1,879 from Sprint 12 + 42 from Sprint 13; +181 over the 1,740 baseline).
-- Check 4: run it against `5d3bfbf`, not `69ae671`, and add `src/CopilotLedger.Cli/Daemon src/CopilotLedger.Cli/Alerts src/CopilotLedger.Otlp/Breaker src/CopilotLedger.Storage/LedgerExportSnapshot.cs` → empty. Against `69ae671` it lists Sprint 13's own four files (`WindowsDetachedProcess.cs`, `ContextBloatRule.cs`, `ToolLoopRule.cs`, `SqliteLedgerStore.Export.cs`); that's expected.
-- Check 5: the same six hits as before the merge (`OtlpValueKind.Double`, its comment, and `DoubleAsNanoAiu`); Sprint 13 adds none.
-- Check 6: exactly one hit, `Process.Start(stopInfo)` in `tests/CopilotLedger.Tests/TestSupport/WindowsJobHarness.cs`, Sprint 13's sanctioned DJ7 exception (`.github/plans/archive/sprint-13.md`, D4). The same command against `5d3bfbf` instead of `69ae671` → no hits.
+- `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj` (`<Version>`, line 7)
+- `src/CopilotLedger.Cli/GhLedgerCli.cs` (the comment, line 18; the fallback after `??`, line 23)
+- `.github/workflows/ci.yml` (the smoke-test comparison, line 46)
+- Tests: `DaemonCommandTests.DM1` (line 24), `ReportCommandTests.StatusText` (line 648), `ExportCommandTests.EC5` (line 118), `ExportBundleTests.EB2` (line 56)
+- `docs/guide.md`: the `status-first` (line 53), `status` (line 169), and receipt (lines 536 and 547) samples
+- `docs/cli.md`: the `"toolVersion"` manifest sample (line 398)
+- `docs/releasing.md`: `git tag v0.6.0` and `git push origin v0.6.0` in step 4 (lines 26–27)
 
-No product change. Run and record each result in the task commit's body (the commit changes only this plan's checkbox).
+**Leave:**
 
-1. `dotnet build CopilotLedger.slnx` → 0 warnings, 0 errors.
-2. `dotnet test CopilotLedger.slnx` → 0 failed, 0 skipped; record the total and the increase over the baseline.
-3. `git --no-pager diff --stat 69ae671 -- src/CopilotLedger.Cli/CopilotLedger.Cli.csproj src/CopilotLedger.Core/Pricing/rates.json Directory.Build.props global.json` → empty (no version, rates, or SDK change).
-4. `git --no-pager diff --stat 69ae671 -- src/CopilotLedger.Core/Audit src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs src/CopilotLedger.Storage/SqliteLedgerStore.Audit.cs` and any `WindowsDetachedProcess.cs` → empty (Sprint 13's files).
-5. `git --no-pager diff 69ae671 -- src | Select-String -Pattern '^\+.*\b(double|float|Double|Single|REAL)\b'` → no money code; any hit must be a comment or the OTLP `Kind = Double` enum name, and is listed in the commit body with its reason.
-6. `git --no-pager diff 69ae671 -- tests | Select-String -Pattern 'Environment\.GetFolderPath|UserProfile|\.copilot-ledger|Process\.Start|HttpClient|docker'` → no new hits outside existing harness helpers.
-7. `docs/cli.md`'s allowlist lists `spans.list_cost_usd_pico`, `spans.charge_source`, and `import_sessions.import_revision`, and its "Read, never stored" list names every new path: `data.usage.copilotUsage.totalNanoAiu`, `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, `data.compactionAttemptId`, `data.usage.apiCallId`, `assistant.message`'s `id`, `parentId`, `data.apiCallId`, and the tool events' `id` and `parentId` (`ImportPrivacyTests` enforces the stored columns; check the read list by eye).
-8. `docs/configuration.md` describes the charged amount, the list price, rejected charges, and #79's rule as Tasks 2, 5, and 12 implemented them.
+- the mentions that step 1 and `VersionPlacesTests.Places` list: `which gh-ledger 0.5.0 builds in` (cli.md), `Upgrading from 0.5.0 or earlier keeps the rows you have` (configuration.md), `and gh-ledger 0.5.0 builds it in` (guide.md), and `` such as `v0.5.0-rc.1` `` (releasing.md);
+- the comments in `GuideSamplesTests`, `ModelResolutionTests`, and `RatesUpdateTests`;
+- the earlier daemon's `daemon.json` in `ImportCommandTests`;
+- `docs/test-reports/` and `.github/plans/`.
 
-**Acceptance:** all eight checks hold. Then stop; the orchestrator opens the pull request.
+Don't touch `VersionPlacesTests.cs` unless VR1–VR3 fail. If they do, stop and report it.
 
----
+**Acceptance:**
 
-## Review findings (ledger-architect, 2026-11-24, at `c1d2769`)
+- `git grep -n -E "(^|[^0-9.])0\.5\.0([^0-9]|$)" -- README.md docs/*.md .github/workflows src tests` lists only the "Leave" mentions.
+- `git grep -n -E "(^|[^0-9.])0\.6\.0([^0-9]|$)" -- README.md docs/*.md .github/workflows src tests` lists exactly the "Places to change".
+- `VersionPlacesTests`, `GuideSamplesTests`, and the four named tests pass.
+- `git diff 0f96a83 -- src/CopilotLedger.Core/Pricing/rates.json global.json` is empty.
 
-Reviewed the full diff `3b362d2..c1d2769` (57 files) against Tasks 1–12 and issues #76, #82, #85, #79, #75. `dotnet build CopilotLedger.slnx`: 0 warnings, 0 errors. `dotnet test CopilotLedger.slnx`: 1,878 passed, 0 failed, 0 skipped. Task 13's checks 3–6 already hold (no version, rates, or SDK change; no Sprint 13 file touched; the only `Double` hits are the `OtlpValueKind.Double` enum name and its comment; no new home-directory, process, network, or Docker use in tests).
+## Task 6: Release Provenance Attestations
 
-| # | Severity | Finding | Disposition |
-|---|---|---|---|
-| R1 | Medium (blocks Task 13 check 7) | `docs/cli.md` "Read, never stored" doesn't name `data.usage.copilotUsage.totalNanoAiu` or `data.compactionTokensUsed.copilotUsage.totalNanoAiu`, which `CopilotSessionLogSource` reads (`UsagePaths`, `CompactionPaths`). Its Task 7 sentence "`data.compactionAttemptId`, stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `copilotUsage` are present." has no verb. | Task 14, edit 1 and IP5 |
-| R2 | Medium (docs don't match pricing) | `docs/configuration.md` "Imported requests", first bullet, says every Copilot compaction is priced as a GitHub request; since Task 7 a BYOK compaction is `BillingSource.Provider` and priced by its provider. Line 102's paragraph begins with a stray space. | Task 14, edit 2 |
-| R3 | Medium (wrong instructions) | `docs/guide.md`: Task 12 put "Repair what earlier versions imported" between the `daemon-start` sample and "If it says instead that the daemon did not start, …", so "it" now refers to the import, and the guide asks you to import before checking that the daemon started. | Task 14, edit 3 |
-| R4 | Low | `CopilotSessionLogSource.Usage` applies 1.0.115's missing-field rules when the version is `>= MaximumVersion`, not `>= 1.0.115`. Correct today (both are 1.0.115); raising `MaximumVersion` would make 1.0.115 logs fail closed, which `Copilot115Tests.V115_1` would catch. | Deferred (S12-11) |
-| R5 | Low | The store counts surplus imported links with one span ID in one conversation as removed (`ExtraOwnedLinksAsync`); `LedgerSnapshot` doesn't, so a dry run could under-count `toolLinksRemoved`. Earlier imports aren't expected to leave that state (the fallback owner of a tool call is fixed by its log), and no test or observed ledger has it. | Deferred (S12-12) |
+**Files:**
 
-No finding in money handling (decimal and integer only; `NanoAiu` decodes IEEE-754 bits with integer arithmetic), migration 7 (DDL exactly as specified; NULL list price for format-6 writers), privacy (only allowlisted paths; `IP_AM1`, `CC9`, and `V115_8` scan the ledger files and output), Sprint 13 boundaries, or the five issues' acceptance criteria.
+- `.github/workflows/release.yml`
+- `docs/releasing.md`
+- `docs/cli.md`
+- New `tests/CopilotLedger.Tests/Docs/ReleaseWorkflowTests.cs`
 
----
+**Workflow (`release.yml`).** Change only the `release` job:
 
-## Task 14 specification: Review Fix: Import and Upgrade Docs Match the Code
+```yaml
+  release:
+    needs: [build, rates]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      # checkout, download-artifact, and "Add the rates and checksums" unchanged
+      - name: Attest the binaries and rates
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/gh-ledger-windows-amd64.exe
+            dist/gh-ledger-windows-arm64.exe
+            dist/gh-ledger-linux-amd64
+            dist/gh-ledger-linux-arm64
+            dist/gh-ledger-darwin-amd64
+            dist/gh-ledger-darwin-arm64
+            dist/rates.json
+            dist/rates.v2.json
+      # "Create the release" unchanged
+```
 
-No product change. Docs and one test.
+Top-level `permissions: contents: read`, `on:` (including `workflow_dispatch:`), `concurrency`, and the `build` and `rates` jobs are unchanged. The new step goes after "Add the rates and checksums" and before "Create the release", so a failed attestation stops before any release exists.
 
-**Files**
+**Docs (`docs/releasing.md`):**
 
-- `docs/cli.md` (the "**Read, never stored:**" bullet of the import section only)
-- `docs/configuration.md` ("Imported requests" only)
-- `docs/guide.md` (the "Upgrade or uninstall" section only: move one block)
-- `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs` (one new test)
+- Step 3: replace "It never creates a release, even when it's started from a tag." with: `It never creates a release or an attestation, even when it's started from a tag: only the release job, which runs for a pushed tag, has the \`id-token: write\` and \`attestations: write\` permissions that attesting needs.`
+- In the paragraph after step 4, change "and creates the release with these assets:" to: `attests the six binaries, \`rates.json\`, and \`rates.v2.json\` with \`actions/attest-build-provenance\`, and creates the release with these assets:`
+- New section `## Verify a release`, before `## Update the pinned actions`:
 
-**Edits (exact)**
+  ````markdown
+  ## Verify a release
 
-1. `docs/cli.md`, the line that starts `- **Read, never stored:**`: replace exactly this sentence
+  Each release's binaries, `rates.json`, and `rates.v2.json` have a build provenance attestation: a signed statement, stored by GitHub and recorded in Sigstore's public log, that the Release workflow of this repository built the file with that SHA-256 digest from the tagged commit. gh-ledger 0.5.0 and earlier have none. To check a release's assets:
 
-   > `` `data.compactionAttemptId`, stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `copilotUsage` are present. ``
+  ```shell
+  gh release download <tag> --repo swigerb/gh-ledger --dir gh-ledger-<tag>
+  gh attestation verify gh-ledger-<tag>/gh-ledger-linux-amd64 --repo swigerb/gh-ledger --signer-workflow swigerb/gh-ledger/.github/workflows/release.yml --source-ref refs/tags/<tag>
+  ```
 
-   with exactly these two sentences
+  Repeat the second command for each asset. `gh-ledger-checksums.txt` isn't attested: it's computed from the attested files. The Windows binaries aren't signed with Authenticode.
+  ````
 
-   > `` `data.usage.copilotUsage.totalNanoAiu` of usage records and `data.compactionTokensUsed.copilotUsage.totalNanoAiu` of compactions, the charge Copilot reports for the request, are kept only as that charge in `spans.cost_usd_pico` and as `spans.charge_source`. `data.compactionAttemptId` of compactions is stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `data.compactionTokensUsed.copilotUsage` are present decides how a compaction is read. ``
+**Docs (`docs/cli.md`, "Get gh-ledger").** After the paragraph that ends "keep working.", add:
 
-   Change nothing else on that line or in `docs/cli.md`.
-2. `docs/configuration.md`, "Imported requests":
-   1. First bullet: `- A Copilot request that GitHub billed, and a Copilot compaction, are priced` → `- A Copilot request that GitHub billed, and a Copilot compaction that GitHub billed, are priced` (rest of the bullet unchanged).
-   2. The paragraph that begins ` A compaction that Copilot billed is recorded even when it failed;` loses its one leading space. Its text is otherwise unchanged.
-3. `docs/guide.md`, "Upgrade or uninstall": cut these seven lines (today right after the `daemon-start` sample's `<!-- /sample -->`, with the blank line after them)
-
-   ````markdown
-   Repair what earlier versions imported:
-
-   ```shell
-   gh ledger import --all
-   ```
-
-   It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs).
-   ````
-
-   and paste them, followed by one blank line, immediately before the line `To remove gh-ledger, undo `install`:` (after the paragraph that ends `See [Which model prices a request](configuration.md#which-model-prices-a-request).`). Change the first pasted line to exactly `Once the daemon is running, repair what earlier versions imported:`. So `If it says instead that the daemon did not start, check your rates overlay:` follows the `daemon-start` sample again. Don't add a `<!-- sample -->` marker; touch no other line of the section.
-
-**Test** (`ImportPrivacyTests`, reading `docs/cli.md` with the class's existing `RepositoryFile` helper):
-
-- **IP5** `IP5_TheReadNeverStoredListNamesEverySprint12Path`: exactly one line of `docs/cli.md` starts with `- **Read, never stored:**`; it contains (ordinal) each of these eight strings: `` `data.usage.copilotUsage.totalNanoAiu` ``, `` `data.compactionTokensUsed.copilotUsage.totalNanoAiu` ``, `` `data.compactionAttemptId` ``, `` `data.usage.apiCallId` ``, `` `data.apiCallId` of `assistant.message` ``, `` `id` and `parentId` of `assistant.message`, `tool.execution_start`, and `tool.execution_complete` ``, `` `data.compactionTokensUsed.provider` ``, and `` `data.compactionTokensUsed.copilotUsage` are present ``; and it doesn't contain `` and `copilotUsage` are present ``.
-
-**Verification**
+````markdown
+**Verify the binary.** Releases have a build provenance attestation for each binary, which shows that this repository's Release workflow built it. To check the one gh installed, run, with the path above for your platform:
 
 ```shell
-dotnet build CopilotLedger.slnx
-dotnet test CopilotLedger.slnx
+gh attestation verify "<path to gh-ledger>" --repo swigerb/gh-ledger --signer-workflow swigerb/gh-ledger/.github/workflows/release.yml
 ```
+
+It exits with 0 when an attestation matches the file's SHA-256 digest, and fails otherwise. gh-ledger 0.5.0 and earlier have no attestations, and the Windows binaries aren't signed with Authenticode. See [Verify a release](releasing.md#verify-a-release).
+````
+
+**Tests (`ReleaseWorkflowTests`, text only, no YAML package).** Reuse the `RepositoryFile` helper pattern from the other docs tests.
+
+| ID | Name | Assertion |
+|---|---|---|
+| RW1 | `RW1_EveryActionIsPinnedToACommit` | For every `.github/workflows/*.yml`, every line whose trimmed text starts with `uses:` or `- uses:` matches `^\s*(- )?uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$`, and at least 9 such lines exist in total. |
+| RW2 | `RW2_TheReleaseJobAttestsTheBinariesAndRates_BeforeItReleases` | `release.yml`'s lines, trimmed: exactly one is `uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2`. Its index is greater than that of `- name: Add the rates and checksums` and less than that of `- name: Create the release`. The eight lines after `subject-path: \|` are exactly the eight paths above, in order. |
+| RW3 | `RW3_OnlyTheTagReleaseJobMayAttest` | Across all workflows, `id-token: write` and `attestations: write` each occur exactly once, in `release.yml`, in the block that follows `    permissions:` after `  release:`, whose three lines are exactly `      contents: write`, `      id-token: write`, `      attestations: write`. `release.yml`'s first `permissions:` block is `permissions:\n  contents: read\n`. It contains the line `    if: github.event_name == 'push' && github.ref_type == 'tag'` and the line `  workflow_dispatch:`. |
+| RW4 | `RW4_TheDocsShowHowToVerify` | `docs/cli.md` and `docs/releasing.md` each contain `gh attestation verify ` and `--repo swigerb/gh-ledger --signer-workflow swigerb/gh-ledger/.github/workflows/release.yml`. `docs/releasing.md` contains `## Verify a release` and `--source-ref refs/tags/<tag>`. Both say `Authenticode`. |
+
+**Acceptance:**
+
+- RW1–RW4 pass.
+- `git diff 0f96a83 -- .github/workflows/ci.yml .github/workflows/receipt.yml` shows only Task 5's version line.
+- The new docs name `0.5.0` and never `0.6.0` (VR3 passes).
+- Don't run the workflow; no push or tag.
+
+## Task 7: 0.5.0 → 0.6.0 Upgrade Docs
+
+**Files:** `docs/cli.md`, `docs/guide.md`, `tests/CopilotLedger.Tests/Docs/UpgradeDocsTests.cs`.
+
+**Docs (`docs/cli.md`).** Insert this paragraph right after the `**Ledger format.**` paragraph and before "To upgrade, close the Copilot sessions…". It must come before the first fenced block (UD2), and the Ledger format line itself is unchanged except for Task 2's sentence (UD3):
+
+`**Upgrading from 0.5.0.** gh-ledger 0.5.0 uses ledger format 6, and this version upgrades it to format 7 the first time it opens it, and 0.5.0 can't open it after that. Follow the steps below in order: close the Copilot sessions and apps that use the MCP server and stop the daemon, copy your data directory, upgrade, start the daemon, and run \`gh ledger import --all\` once. To go back, stop the daemon, run \`gh extension remove ledger\` and \`gh extension install swigerb/gh-ledger --pin v0.5.0\`, put the copy in place of your data directory, and start the daemon.`
+
+After the existing `gh extension upgrade ledger` / `gh ledger daemon start` block, and before the overlay troubleshooting paragraph, add: `Then run \`gh ledger import --all\` once; see [Repairs](#repairs).` The sentence has no fenced block, so UD1's order still holds.
+
+**Docs (`docs/guide.md`).** After the paragraph that follows the `gh ledger import --all` block ("It reads each session log again once…"), and before "To remove gh-ledger, undo `install`:", add:
+
+`If you upgraded from gh-ledger 0.5.0 and need to go back, stop the daemon, run \`gh extension remove ledger\` and then \`gh extension install swigerb/gh-ledger --pin v0.5.0\`, put the copy you made in place of your data directory, and start the daemon. 0.5.0 can't open the ledger this version upgraded, and the copy doesn't have what gh-ledger recorded after you made it.`
+
+**Test (`UpgradeDocsTests`):**
+
+`UD5_TheUpgradeFrom050_CanBeRolledBackWithThePinAndTheCopy`:
+
+1. Take the cli.md steps (`**Upgrading or removing the extension.**` … `## The daemon`):
+   - exactly one line starts with `**Upgrading from 0.5.0.**`, and its index is greater than the `**Ledger format.**` line's and less than the first fenced line's;
+   - that line contains `format 6`, `format 7`, `gh ledger daemon stop` *or* `stop the daemon`, `copy your data directory`, `gh ledger import --all`, and `gh extension install swigerb/gh-ledger --pin v0.5.0`.
+2. In the guide steps (`## Upgrade or uninstall` … `To remove gh-ledger, undo \`install\`:`), a line containing `gh extension install swigerb/gh-ledger --pin v0.5.0` comes after the line `gh ledger import --all`.
+3. Neither added text contains `0.6.0`.
+
+**Acceptance:**
+
+- UD1–UD5, VR1–VR3, `GuideSamplesTests`, and `ProductNameTests` pass.
+- In `docs/cli.md`, the steps still read in this order: stop → copy → upgrade → start → import.
+
+## Task 8: Import Benchmark Report
+
+**Files:** new `docs/test-reports/<yyyy-MM-dd>-import-benchmark.md`, using the date the after-run is measured. `docs/test-reports/` is outside VR3's and PN2's scan, but write "gh-ledger" for the product all the same.
+
+**Procedure:**
 
 ```powershell
-Select-String -Path docs/configuration.md,docs/cli.md,docs/guide.md -Pattern '^ [^ ]'          # no output
-Select-String -Path docs/guide.md -Pattern 'daemon did not start|repair what earlier|^To remove gh-ledger' | ForEach-Object LineNumber
-                                                                                              # three ascending numbers, in that order
-git --no-pager diff --stat HEAD~1 -- src                                                      # empty (run after committing)
+dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r win-x64 -o "$env:TEMP\gh-ledger-bench-after"
+pwsh -NoProfile -File tests/benchmarks/Measure-ImportSpeed.ps1 -Binary "$env:TEMP\gh-ledger-bench-after\gh-ledger.exe"
 ```
 
-**Acceptance:** 0 warnings and 0 errors; 1,879 tests pass (1,878 + IP5), 0 failed, 0 skipped; `UD1`–`UD4`, `GuideSamplesTests`, and `VersionPlacesTests` pass unchanged; the diff touches only the four files above, and in each only the lines named. Commit as `Sprint 12 Task 14: Review Fix: Import and Upgrade Docs Match the Code` with `Tests: 1879 passed` and the `Co-authored-by` trailer, check the Task 14 line, and stop (Task 13 is next).
+Use the same machine as Task 1 if possible, and say in the report whether it is.
 
----
+**Report contents, in this order:**
 
-## Test specifications (summary)
+1. Title `# Import speed benchmark`.
+2. What was measured: the generated session (Records, the two 9 MiB lines of types import never reads, after record Records/2, Copilot 1.0.114 shape), and that only generated data was read, with temporary `COPILOT_HOME` and `COPILOT_LEDGER_HOME`.
+3. Environment: OS, processors, .NET SDK (`dotnet --version`), and the before and after commits (`0f96a83` with Task 1's script, and this task's parent commit).
+4. The command lines above.
+5. The before table (from Task 1's commit body, verbatim) and the after table (verbatim), then a three-row comparison table `| Run | Before (s) | After (s) | Change |`.
+6. Results against these targets, each marked met or not met:
+   - after run 1: exit 0, recorded = Records, malformed lines 0, skipped events 2, and seconds ≤ 20% of before run 1;
+   - after run 2: skipped unchanged 1, recorded 0, duplicate 0, exit 0;
+   - after run 3: duplicate = Records, recorded 0, malformed lines 0, exit 0, seconds ≤ 10.
 
-| Task | New tests | Changed tests |
+Record a missed target as not met. Don't tune code in this task. If a target is missed, report it in the commit body, and the architect will add a task.
+
+**Acceptance:** the report exists with every section, and its after numbers come from one script run whose full output is also pasted into the commit body. No code changes.
+
+## Task 9: Final Verification (no product change)
+
+Run, in a clean tree:
+
+1. `dotnet build CopilotLedger.slnx` must report 0 warnings and 0 errors. `dotnet test CopilotLedger.slnx` must report 0 failed and 0 skipped, with a passed count above 1,921. Record the count.
+2. `dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r win-x64 -o "$env:TEMP\gh-ledger-final"`, then `& "$env:TEMP\gh-ledger-final\gh-ledger.exe" --version` must print exactly `0.6.0`. Use the matching RID on another OS. Then run `rates validate` with `COPILOT_LEDGER_HOME` set to a new temporary directory; it must exit 0.
+3. Money: `git diff 0f96a83 -- src | Select-String -Pattern '\b(double|float)\b|REAL|Math\.Round'` finds no added line about money. The benchmark script is outside `src`.
+4. Privacy:
+   - `git diff 0f96a83 -- src` adds no column, no table, and no stored field;
+   - Task 3 keeps nothing from a prefix;
+   - CS18–CS27 and OV1 assert that the canary never appears.
+5. Boundaries:
+   - `git diff 0f96a83 --stat -- global.json src/CopilotLedger.Core/Pricing/rates.json` is empty;
+   - `git diff 0f96a83 -- src/CopilotLedger.Storage/LedgerMigrations.cs` adds only `Indexes`;
+   - no `.csproj` gains a `PackageReference`;
+   - the `UsageAuthority.cs` diff is empty.
+6. Contracts: the only public or internal contract changes are those in the global rules (compare `git diff 0f96a83 -- src`).
+7. Docs:
+   - `docs/configuration.md` is unchanged (no pricing configuration changed);
+   - `docs/cli.md` describes the index, the dry-run note, the oversized rule, the routed rule, the verification command, and the 0.5.0 upgrade;
+   - `docs/releasing.md` describes attestations and the manual-run rule;
+   - no release notes file was added.
+8. Check off this task, and commit with the results in the body.
+
+## Review after Task 9 (2026-11-24, `ledger-architect`)
+
+Reviewed `0f96a83..81d6bf9` (13 commits, 38 files) against this plan, issues #82, #80, and #77, and `.github/copilot-instructions.md`.
+
+- `dotnet build CopilotLedger.slnx`: 0 warnings, 0 errors.
+- `dotnet test CopilotLedger.slnx`: 1,960 passed, 0 failed, 0 skipped. That's 1,921 plus the 39 this sprint adds: LX 6, CS 17 (theory rows included), CX18, OV1, AR7 8, AC10, RW 4, UD5.
+- A `win-x64` Release publish prints `0.6.0`, and `rates validate` exits 0 against an empty `COPILOT_LEDGER_HOME`.
+- Re-checked:
+  - F1: `v4.2.2` is still the latest release and still points to `4d10147…`. Its `create-storage-record` input applies only with `push-to-registry`, so the job needs no `artifact-metadata` permission.
+  - F6 and F7: the Auto 10% and Fusion 30% (through November 30, 2026) text is unchanged on docs.github.com.
+- No money `double`, `float`, `REAL`, or `Math.Round` was added. There's no new column, table, package, or `global.json` or `rates.json` change, and `UsageAuthority.cs` and `docs/configuration.md` are unchanged.
+- The version places match VR3, and the benchmark report's numbers and percentages match the Task 1 and Task 8 commit bodies.
+- Not a defect: `AuditQueryTests` gained `ListCostUsd = 0.0272m` in its expected record. Live rows store their list price, so the record's new property has to be in the expected value. That's not a weakened assertion.
+- Not a defect: `JsonlLineReader`'s copy branch (`lineLength < PrefixBytes`) only runs when `maxLineBytes` is under 64 KiB, so no product path reaches it. With 8 MiB, the prefix is always already in `line`.
+
+Findings that need a fix:
+
+- **R1 (minor, test gap).** LX6 writes `Usage("u-1", "r-1")` and `Usage("u-2", "r-2")`. `UsageIdentity.NormalizeServiceRequestId` rejects those IDs (PA2), so both dry runs report `unsupportedUsageShapes` 2 and never call `UsageAuthority.GatherAsync`. "Decides the same" is therefore never tested, and that's the claim behind D3 and the `--dry-run` docs sentence ("its results are the same"). The planning probe (a scratch copy outside the repository, deleted afterward) found that with `R1` and `R2`, both runs exit 2 with `recordsParsed` 2, `unsupportedUsageShapes` 0, `ambiguousOverlap` 2, `recorded` 0, and one `ambiguousOverlap` diagnostic with count 2, and their stdout is identical. `ambiguousOverlap` comes from the indexed `canonical_usage_id IS NULL` live-span subquery. Fixed by Task 10.
+- **R2 (minor, docs mismatch).** In `docs/cli.md`, the report table's Malformed lines row and the `skippedEvents` JSON note give the 64 KiB rule for every source. Codex's `OnOversized` ignores the prefix (CX18), so a Codex line longer than 8 MiB is always malformed. The plan's own Task 3 text caused this. Fixed by Task 11.
+
+## Task 10: LX6 Reaches the Live-Span Lookups
+
+**Files:** `tests/CopilotLedger.Tests/Storage/ConversationLiveIndexTests.cs` only. No product, docs, or other test change.
+
+**Changes:**
+
+1. Add `using System.Text.Json;`.
+2. Add these private constants to `ConversationLiveIndexTests`, the same values as Task 3's:
+
+   ```csharp
+   private const string R1 = "11111111-1111-4111-8111-111111111111";
+   private const string R2 = "22222222-2222-4222-8222-222222222222";
+   ```
+
+3. In `LX6_ADryRun_NeverCreatesTheIndex_AndDecidesTheSame`, change `.Usage("u-1", "r-1")` to `.Usage("u-1", R1)` and `.Usage("u-2", "r-2")` to `.Usage("u-2", R2)`. Keep the name, the setup, and every existing assertion: the index count is 0 after A and 1 after B, and exit codes and stdout are equal.
+4. After the existing assertions, assert for **each** of `first` and `second`. A private static local function or helper, such as `AssertDeferred(CliRun run)`, is fine:
+   - `run.ExitCode` is 2;
+   - parse `run.Out` with `JsonDocument`, and take `sources[0]`:
+     - `source` is `"copilot"`;
+     - `recordsParsed` is 2;
+     - `unsupportedUsageShapes` is 0;
+     - `ambiguousOverlap` is 2;
+     - `recorded` is 0;
+   - root `diagnostics` has exactly one element, with `code` `"ambiguousOverlap"` and `count` 2.
+
+If any of these values differs, stop and report it. Don't change the setup to make it pass.
+
+**Acceptance:**
+
+- LX6 passes with the new assertions. The test count stays 1,960.
+- `git grep -n '"r-1"\|"r-2"' -- tests/CopilotLedger.Tests/Storage/ConversationLiveIndexTests.cs` finds nothing.
+- `git diff HEAD~1 --stat` lists only `ConversationLiveIndexTests.cs` and this plan file. The plan file changes only to check off this task.
+
+**Verification:** `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors), then `dotnet test CopilotLedger.slnx` (0 failed, 0 skipped). Record `Tests: <n> passed` in the commit body.
+
+## Task 11: The Oversized Rule Is Copilot's
+
+**Files:** `docs/cli.md` only.
+
+**Changes:**
+
+1. Replace the report table's Malformed lines row with exactly:
+
+   `| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete. A longer Copilot line counts as a skipped event instead when its first 64 KiB show a top-level \`type\` that isn't one of the events import reads, the same rule as for shorter lines. A longer Codex line is always malformed |`
+
+2. In the JSON field list, replace `` `skippedEvents` (events of other types, including those longer than 8 MiB whose type shows in their first 64 KiB) `` with `` `skippedEvents` (events of other types, including Copilot events longer than 8 MiB whose type shows in their first 64 KiB) ``.
+
+No other text changes. The new text names no version, and the product is written "gh-ledger" wherever it's named.
+
+**Acceptance:**
+
+- `Select-String -Path docs/cli.md -SimpleMatch 'A longer Copilot line counts as a skipped event'` and `… -SimpleMatch 'including Copilot events longer than 8 MiB'` each find one line.
+- `Select-String -Path docs/cli.md -SimpleMatch 'A longer line counts as a skipped event'` finds nothing.
+- `git diff HEAD~1 --stat` lists only `docs/cli.md` and this plan file.
+- Every docs test passes unchanged: `VersionPlacesTests`, `ProductNameTests`, `UpgradeDocsTests`, `GuideSamplesTests`, and `ReleaseWorkflowTests`.
+- The test count stays 1,960.
+
+**Verification:** `dotnet build CopilotLedger.slnx`, then `dotnet test CopilotLedger.slnx`. Record `Tests: <n> passed` in the commit body. After this task, hand back to `ledger-architect` for review mode.
+
+## Tests added this sprint
+
+| Task | File | Tests |
 |---|---|---|
-| 1 | NA1–NA9 | — |
-| 2 | RCP1–RCP10 | BI8 (`openai` row) |
-| 3 | NO1–NO10 | — |
-| 4 | SV7-1–SV7-7 | tests asserting the latest `user_version` (6 → 7) and "supported version 6" |
-| 5 | RI1–RI7 | `LedgerIngestorTests` helper calculators, if needed |
-| 6 | IRC1–IRC7 | `ImportCommandTests` table and JSON; guide samples; compaction amount assertions (fixture default charge) |
-| 7 | CC1–CC9 | `CopilotCompactionTests` cases that expected failed or ID-less compactions to be unsupported |
-| 8 | TL1–TL9, IP-AM1 | — |
-| 9 | V115-1–V115-8 | gate row 1.0.115; "1.0.103 to 1.0.114" texts |
-| 10 | RR1–RR11 | — |
-| 11 | RL1–RL6 | tool-link store tests whose assertions name `InsertOwnedLinkAsync` behavior, if any |
-| 12 | UD3, UD4 | — |
-| 14 | IP5 | — |
+| 2 | `Storage/ConversationLiveIndexTests.cs` | LX1–LX6 |
+| 3 | `Import/CopilotSessionGateTests.cs` | CS18–CS27 |
+| 3 | `Import/CodexRolloutTests.cs` | CX18 |
+| 3 | `Cli/ImportOversizedTests.cs` | OV1 |
+| 4 | `Audit/VelocityRuleTests.cs` | AR7: 8 new cases |
+| 4 | `Cli/AuditCommandTests.cs` | AC10 |
+| 6 | `Docs/ReleaseWorkflowTests.cs` | RW1–RW4 |
+| 7 | `Docs/UpgradeDocsTests.cs` | UD5 |
 
-Exact values used across tasks:
+Changed, with assertions unchanged:
 
-| Value | What |
-|---|---|
-| 47,388,600 nano AIU | 0.0473886 AI credits = $0.000473886 = 473,886,000 pico-USD |
-| 11,855,545,000 nano AIU | the fixture compaction's charge: 11.855545 AI credits = $0.11855545 = 118,555,450,000 pico-USD |
-| 9,007,199,254,740,992 | 2^53, `NanoAiu.MaxExact`: $90,071.99254740992 |
-| `0x418698BDC0000000` | 47388600.0 as IEEE-754 bits (wire bytes `00 00 00 C0 BD 98 86 41`) |
-| 1 | `LedgerImporter.CurrentImportRevision` |
-| 7 | the ledger format |
-| 1.0.115 | `CopilotSessionLogSource.MaximumVersion` |
+- the format-downgrade fixtures (Task 2);
+- the four version tests (Task 5).
 
-## Final step: the pull request (orchestrator, not a builder task)
+Changed assertions:
 
-After Task 13, the orchestrator pushes `swigerb-sprint-12-billing-import-fidelity` and opens one pull request titled "Sprint 12: Billing & import fidelity" with `Closes #76`, `Closes #82`, `Closes #85`, `Closes #79`, and `Closes #75`, and sections `## Changes` (the plan commit and each task commit), `## Verification` (build, test totals per task, Task 13's checks), `## Upgrade` (format 7, run `gh ledger import --all` once), and `## Risks` (A1–A3; a 0.5.0 daemon left running after the upgrade writes `list_cost_usd_pico` NULL, which reads as the rate card; circuit-breaker trips aren't re-evaluated after repricing). It then asks `ledger-architect` to review. Nobody bumps the version, tags, or releases in this sprint.
+- `CS5_ALineLongerThan8MiBIsDiscardedUnread` (Task 3, PA2): an oversized `user.message` is now a skipped event.
+- `LX6_ADryRun_NeverCreatesTheIndex_AndDecidesTheSame` (Task 10, R1): valid service request IDs, and assertions on what both dry runs decided. Nothing is loosened.
+
+## After Task 11 (orchestrator)
+
+Hand back to `ledger-architect` for review mode. Release notes for 0.6.0 aren't committed to the repository: the coordinator's final report drafts them from this plan and the Task 8 report. Don't push, tag, open a PR, or create a release from a builder run.
 
 ## Deferred to later sprints
 
-- **Billing:** using a reported charge for `unknown_model` and `no_rate_for_date` GitHub requests (S12-1); showing list price and discount (Auto, Fusion) in reports, receipts, and MCP (S12-2); a `status` line for rejected charges, and logging them in the daemon's log (S12-3); re-evaluating breaker trips after repricing (S12-4); repricing live rows from `invoke_agent` totals (never; F1).
-- **Import:** 1.0.115 BYOK usage, compaction, and `tool.execution_complete` shapes once observed (S12-5, A2); a parent chain that passes through `hook.*` or `assistant.turn_*` events (S12-6, L2); a stale imported link whose correct owner is out of scope or out of range in this run (S12-7); automatic acceptance of new Copilot versions (S12-8: a documented gate-update procedure stays manual); profiling the duplicate path on large stores (S12-9); live custom-provider spans of the GitHub Copilot app (S12-10); pinning 1.0.115's missing-field rules to a fixed `ProducerVersion(1, 0, 115)` instead of `MaximumVersion` before the next gate bump (S12-11, review R4); counting surplus imported links as removed in the dry run as the store does (S12-12, review R5).
+- **S14-1.** `--dry-run` on a ledger without the index stays slow (D3). Making `LedgerSnapshot` use an in-memory temporary index, or the importer cache conversation facts in dry runs, is deferred.
+- **S14-2.** Showing routed (Auto/Fusion) requests and their discount in reports, receipts, and MCP extends S12-2. So does telling a Fusion request from a chosen model after the Fusion discount ends (A3).
+- **S14-3.** Moving from `actions/attest-build-provenance` to `actions/attest` (F2), and attesting `gh-ledger-checksums.txt` or an SBOM.
+- **S14-4.** Authenticode signing of the Windows binaries (#77, out of scope; D8).
+- **S14-5.** Confirming against a real 1.0.115 log, with consent, which event types grow past 8 MiB (A1), and widening the prefix if `type` is ever later than 64 KiB (A2).
+- **Carried from Sprint 12** (see `.github/plans/archive/sprint-12.md`):
+  - S12-1 to S12-8, and S12-10 to S12-12, unchanged;
+  - S12-9 (profiling the duplicate path on large stores) is done by Tasks 1, 2, and 8.
 - Everything Sprint 11 deferred, unchanged (see `.github/plans/archive/sprint-11.md`, "Deferred to later sprints").

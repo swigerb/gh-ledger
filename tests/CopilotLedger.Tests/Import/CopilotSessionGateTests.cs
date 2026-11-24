@@ -9,6 +9,7 @@ namespace CopilotLedger.Tests.Import;
 public sealed class CopilotSessionGateTests
 {
     private const string SessionId = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    private const string R1 = "11111111-1111-4111-8111-111111111111";
 
     private static readonly CopilotSessionLogSource Source = new();
 
@@ -154,11 +155,9 @@ public sealed class CopilotSessionGateTests
         SessionLogReadResult result = await ReadAsync(temp.Path);
 
         Assert.Equal(ImportLimits.MaxLineBytes + 1, Encoding.UTF8.GetByteCount(oversized));
-        Assert.Equal(1, result.MalformedLines);
-        Assert.Equal(1, result.SkippedEvents);
-        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
-        Assert.Equal(ImportDiagnosticCode.OversizedLine, diagnostic.Code);
-        Assert.Equal(2, diagnostic.FirstLine);
+        Assert.Equal(0, result.MalformedLines);
+        Assert.Equal(2, result.SkippedEvents);
+        Assert.Empty(result.Diagnostics);
         AssertNoCanary(result);
     }
 
@@ -357,6 +356,203 @@ public sealed class CopilotSessionGateTests
         Assert.Equal(enforced ? 1 : 0, discovery.UnreadableEntries);
     }
 
+    [Fact]
+    public async Task CS18_AnOversizedMessagesSnapshot_IsSkipped()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId)
+            .Raw(O("{\"type\":\"model.messages_snapshot\",\"data\":{\"messages\":\"" + CopilotSessionLogs.Canary))
+            .UserMessage()
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(0, result.MalformedLines);
+        Assert.Equal(2, result.SkippedEvents);
+        Assert.Empty(result.Diagnostics);
+        AssertNoCanary(result);
+    }
+
+    [Fact]
+    public async Task CS19_AnOversizedModelCallSuccess_IsSkipped_WhereverItsTypeIs()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId)
+            .Raw(O(
+                "{\"id\":\"00000000-0000-4000-8000-000000000002\",\"data\":{\"model\":\"m\",\"nested\":[1,{\"a\":true},null]},"
+                + "\"type\":\"model.model_call_success\",\"response\":\"" + CopilotSessionLogs.Canary))
+            .Usage("u-1", R1)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(0, result.MalformedLines);
+        Assert.Equal(1, result.SkippedEvents);
+        Assert.Single(result.Records);
+        Assert.Empty(result.Diagnostics);
+        AssertNoCanary(result);
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"session.usage_record\",\"data\":{\"usage\":{\"model\":\"" + CopilotSessionLogs.Canary)]
+    [InlineData("{\"type\":\"session.usage\\u005frecord\",\"data\":{\"usage\":{\"model\":\"" + CopilotSessionLogs.Canary)]
+    public async Task CS20_AnOversizedEventThatImportReads_StaysMalformed(string head)
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId).Raw(O(head)).Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(1, result.MalformedLines);
+        Assert.Equal(0, result.SkippedEvents);
+        Assert.Empty(result.Records);
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(ImportDiagnosticCode.OversizedLine, diagnostic.Code);
+        Assert.Equal(2, diagnostic.FirstLine);
+        AssertNoCanary(result);
+    }
+
+    public static TheoryData<string> UnreadableOversizedTypes => new()
+    {
+        "{\"pad\":\"" + new string('y', 65_508)
+            + "\",\"type\":\"model.messages_snapshot\",\"x\":\"",
+        "{\"data\":{\"messages\":\"" + new string('y', 70_000)
+            + "\"},\"type\":\"model.messages_snapshot\",\"x\":\"",
+        "{\"x\":\"",
+        "{\"type\":7,\"x\":\"",
+        "{\"type\":null,\"x\":\"",
+        "[{\"type\":\"model.messages_snapshot\",\"x\":\"",
+        "{type:\"model.messages_snapshot\",\"x\":\"",
+    };
+
+    [Theory]
+    [MemberData(nameof(UnreadableOversizedTypes))]
+    public async Task CS21_ATypeBeyondThePrefixOrUnreadable_StaysMalformed(string head)
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId).Raw(O(head)).Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(1, result.MalformedLines);
+        Assert.Equal(0, result.SkippedEvents);
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(ImportDiagnosticCode.OversizedLine, diagnostic.Code);
+        Assert.Equal(2, diagnostic.FirstLine);
+        AssertNoCanary(result);
+    }
+
+    [Fact]
+    public async Task CS22_AnEscapedUnreadType_IsSkipped()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId)
+            .Raw(O("{\"type\":\"model.messages\\u005fsnapshot\",\"x\":\""))
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(0, result.MalformedLines);
+        Assert.Equal(1, result.SkippedEvents);
+        Assert.Empty(result.Diagnostics);
+        AssertNoCanary(result);
+    }
+
+    [Fact]
+    public async Task CS23_AnOversizedUnterminatedLastLine_StaysMalformed()
+    {
+        using TempDirectory temp = new();
+        await WriteAsync(
+            temp.Path,
+            new CopilotSessionLogs(SessionId).Text()
+            + O("{\"type\":\"model.messages_snapshot\",\"x\":\""));
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(1, result.MalformedLines);
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(ImportDiagnosticCode.OversizedLine, diagnostic.Code);
+        Assert.Equal(2, diagnostic.FirstLine);
+        AssertNoCanary(result);
+    }
+
+    [Fact]
+    public async Task CS24_AnOversizedUnreadLineBeforeSessionStart_StaysMalformed()
+    {
+        using TempDirectory temp = new();
+        await WriteAsync(
+            temp.Path,
+            O("{\"type\":\"model.messages_snapshot\",\"x\":\"") + "\n"
+            + new CopilotSessionLogs(SessionId).Text());
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(1, result.MalformedLines);
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(ImportDiagnosticCode.OversizedLine, diagnostic.Code);
+        Assert.Equal(1, diagnostic.FirstLine);
+        AssertNoCanary(result);
+    }
+
+    [Fact]
+    public async Task CS25_AnOversizedBinaryAsset_IsSkipped()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId)
+            .Raw(O("{\"type\":\"session.binary_asset\",\"data\":{\"bytes\":\"" + CopilotSessionLogs.Canary))
+            .Usage("u-1", R1)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(0, result.MalformedLines);
+        Assert.Equal(1, result.SkippedEvents);
+        Assert.Single(result.Records);
+        Assert.Empty(result.Diagnostics);
+        AssertNoCanary(result);
+    }
+
+    [Fact]
+    public async Task CS26_AnOversizedLineOfAnUnknownFutureType_IsSkipped()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId)
+            .Raw(O("{\"type\":\"future.unknown_event\",\"data\":{\"blob\":\"" + CopilotSessionLogs.Canary))
+            .Usage("u-1", R1)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(0, result.MalformedLines);
+        Assert.Equal(1, result.SkippedEvents);
+        Assert.Single(result.Records);
+        Assert.Empty(result.Diagnostics);
+        AssertNoCanary(result);
+    }
+
+    [Fact]
+    public async Task CS27_AnOversizedAssistantMessage_StaysMalformed()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs(SessionId)
+            .Raw(O("{\"type\":\"assistant.message\",\"data\":{\"content\":\"" + CopilotSessionLogs.Canary))
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(1, result.MalformedLines);
+        Assert.Equal(0, result.SkippedEvents);
+        ImportDiagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(ImportDiagnosticCode.OversizedLine, diagnostic.Code);
+        Assert.Equal(2, diagnostic.FirstLine);
+        AssertNoCanary(result);
+    }
+
     private static async Task<SessionLogReadResult> ReadAsync(string home) =>
         await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
 
@@ -369,4 +565,7 @@ public sealed class CopilotSessionGateTests
 
     private static void AssertNoCanary(SessionLogReadResult result) =>
         Assert.DoesNotContain(CopilotSessionLogs.Canary, JsonSerializer.Serialize(result), StringComparison.Ordinal);
+
+    private static string O(string head) =>
+        head + new string('x', ImportLimits.MaxLineBytes + 1 - head.Length - 3) + "\"}}";
 }

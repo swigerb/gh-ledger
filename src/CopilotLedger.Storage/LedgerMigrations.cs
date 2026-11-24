@@ -2,6 +2,16 @@ namespace CopilotLedger.Storage;
 
 internal static class LedgerMigrations
 {
+    // Indexes that every ledger of the latest format has. Opening the ledger adds one that's missing, without changing
+    // user_version: SQLite keeps an index current for every writer, including an earlier build of the same format.
+    // ix_spans_conversation_live: the importer's per-record live-span lookups (UsageAuthority), which name 'otlp' literally
+    // so that SQLite can use this partial index.
+    public static IReadOnlyList<(string Name, string Sql)> Indexes { get; } =
+    [
+        ("ix_spans_conversation_live",
+         "CREATE INDEX IF NOT EXISTS ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp';"),
+    ];
+
     public static IReadOnlyList<(int Version, string Sql)> Migrations { get; } =
     [
         (1, """

@@ -203,6 +203,49 @@ public sealed class AuditCommandTests
         Assert.Equal((agentName, toolName), (scope.GetProperty("agent").GetString(), scope.GetProperty("tool").GetString()));
     }
 
+    [Fact]
+    public async Task AC10_RoutedRequests_LeaveThePremiumRule()
+    {
+        using TempDirectory temp = new();
+        await AuditSeeds.CreateAsync(temp.Path);
+        await using CliHarness harness = Harness(temp.Path);
+        string db = Path.Combine(temp.Path, "data", "ledger.db");
+
+        CliRun p0 = await harness.RunAsync("audit", "--json", "--rule", "premium_model_trivial_turn");
+        CliRun o0 = await harness.RunAsync(
+            "audit", "--json", "--rule", "failed_tool_retry", "--rule", "cache_miss_streak", "--rule", "context_bloat");
+        await LedgerSql.ExecuteAsync(
+            db,
+            "UPDATE spans SET list_cost_usd_pico = cost_usd_pico WHERE billing_channel = 'github_ai_credits'");
+        CliRun p1 = await harness.RunAsync("audit", "--json", "--rule", "premium_model_trivial_turn");
+        await LedgerSql.ExecuteAsync(
+            db,
+            "UPDATE spans SET list_cost_usd_pico = cost_usd_pico * 10 / 9 " +
+            "WHERE billing_channel = 'github_ai_credits' AND cost_usd_pico > 0");
+        CliRun p2 = await harness.RunAsync("audit", "--json", "--rule", "premium_model_trivial_turn");
+        CliRun o2 = await harness.RunAsync(
+            "audit", "--json", "--rule", "failed_tool_retry", "--rule", "cache_miss_streak", "--rule", "context_bloat");
+
+        Assert.Equal(1, FindingsTotal(p0));
+        Assert.Equal(1, FindingsTotal(p1));
+        Assert.Equal((0, 0), (p2.ExitCode, FindingsTotal(p2)));
+        Assert.Equal(Findings(o0), Findings(o2));
+
+        static int FindingsTotal(CliRun run)
+        {
+            Assert.Equal(0, run.ExitCode);
+            using JsonDocument document = JsonDocument.Parse(run.Out);
+            return document.RootElement.GetProperty("findingsTotal").GetInt32();
+        }
+
+        static string Findings(CliRun run)
+        {
+            Assert.Equal(0, run.ExitCode);
+            using JsonDocument document = JsonDocument.Parse(run.Out);
+            return document.RootElement.GetProperty("findings").GetRawText();
+        }
+    }
+
     private static CliHarness Harness(string root) =>
         new(root, new FakeCliPlatform(), new ManualTimeProvider(AuditSeeds.GeneratedAt, ManualTimeProvider.UtcMinus5));
 
