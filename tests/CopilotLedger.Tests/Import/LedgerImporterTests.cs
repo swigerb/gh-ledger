@@ -16,6 +16,7 @@ public sealed class LedgerImporterTests
     private const string S3 = "33333333-3333-4333-8333-333333333333";
     private const string S4 = "44444444-4444-4444-8444-444444444444";
     private const string Thread = "019a1b2c-3d4e-7f50-8a6b-7c8d9e0f1a2b";
+    private const string Fork = "019a1b2c-3d4e-7f50-8a6b-7c8d9e0f1a2c";
 
     private static readonly DateTimeOffset Now = new(2026, 11, 23, 12, 0, 0, TimeSpan.Zero);
 
@@ -130,13 +131,20 @@ public sealed class LedgerImporterTests
     public async Task IR5_RepoImportsOnlyThatRepositorysRecords()
     {
         using TempDirectory temp = new();
-        string root = Path.Combine(temp.Path, "webapp");
+        string root = GitFixture.Create(temp.Path);
+        string nested = GitFixture.Create(Path.Combine(root, "vendor"));
         string other = Path.Combine(temp.Path, "other");
         new CopilotSessionLogs("s-root", context: CopilotSessionLogs.Context(root, root, "main", "contoso/webapp"))
             .Usage("u1", S1)
             .Write(CopilotHome(temp));
         new CopilotSessionLogs("s-cwd", context: CopilotSessionLogs.Context(Path.Combine(root, "src")))
             .Usage("u2", S2)
+            .Write(CopilotHome(temp));
+        new CopilotSessionLogs("s-nested", context: CopilotSessionLogs.Context(Path.Combine(nested, "src")))
+            .Usage("u6", "66666666-6666-4666-8666-666666666666")
+            .Write(CopilotHome(temp));
+        new CopilotSessionLogs("s-gone", context: CopilotSessionLogs.Context(Path.Combine(root, "gone")))
+            .Usage("u7", "77777777-7777-4777-8777-777777777777")
             .Write(CopilotHome(temp));
         new CopilotSessionLogs("s-other", context: CopilotSessionLogs.Context(other, other, "main", "contoso/other"))
             .Usage("u3", S3)
@@ -146,13 +154,26 @@ public sealed class LedgerImporterTests
             .Resume(CopilotSessionLogs.Context(other, other, "main", "contoso/other"))
             .Usage("u5", "55555555-5555-4555-8555-555555555555")
             .Write(CopilotHome(temp));
+        new CodexRollouts(Thread, cwd: Path.Combine(root, "src"))
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_1", "turn-1")
+            .Write(CodexHome(temp));
+        new CodexRollouts(Fork, cwd: Path.Combine(nested, "src"))
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_2", "turn-1")
+            .Write(CodexHome(temp));
 
-        ImportSourceReport report = Copilot(await RunAsync(temp, request => request with { RepositoryRoot = root }));
+        ImportReport report = await RunAsync(temp, request => request with { RepositoryRoot = root });
 
-        Assert.Equal((5, 2, 3), (report.RecordsParsed, report.RecordsOutOfScope, report.Recorded));
+        ImportSourceReport copilot = Copilot(report);
+        ImportSourceReport codex = Assert.Single(report.Sources, source => source.Source == ImportSourceKind.Codex);
+        Assert.Equal((7, 4, 3), (copilot.RecordsParsed, copilot.RecordsOutOfScope, copilot.Recorded));
+        Assert.Equal((2, 1, 1), (codex.RecordsParsed, codex.RecordsOutOfScope, codex.Recorded));
         Assert.Equal(
             ["null", "contoso/webapp", "contoso/webapp"],
-            await LedgerSql.RowsAsync(Database(temp), "SELECT COALESCE(repo_slug, 'null') FROM spans ORDER BY id;"));
+            await LedgerSql.RowsAsync(
+                Database(temp),
+                "SELECT COALESCE(repo_slug, 'null') FROM spans WHERE ingest_source = 'import:copilot' ORDER BY id;"));
     }
 
     [Fact]
@@ -459,6 +480,90 @@ public sealed class LedgerImporterTests
                 Count = 1,
             },
             Assert.Single(report.Diagnostics));
+    }
+
+    // A tool still running when its request was imported gets its link from the run that reads its completion; a dry run
+    // counts it the same way. Another session's copy of the request adds no link to the request's row.
+    [Fact]
+    public async Task IR18_AToolThatEndsAfterItsRequestWasImportedGetsItsLink()
+    {
+        using TempDirectory temp = new();
+        CopilotSessionLogs log = new CopilotSessionLogs("s-a").Usage("u1", S1, numToolCalls: 1).ToolStart("toolu-1", "bash");
+        log.Write(CopilotHome(temp), active: true);
+        ImportSourceReport first = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
+        log.ToolComplete("toolu-1", false, exitCode: 3).Write(CopilotHome(temp), active: true);
+
+        ImportSourceReport dry = Copilot(await RunAsync(temp, request => request with { IncludeActive = true, DryRun = true }));
+        ImportSourceReport second = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
+        ImportSourceReport third = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
+        new CopilotSessionLogs("s-copy")
+            .Usage("u1", S1, numToolCalls: 1)
+            .ToolStart("toolu-1", "bash")
+            .ToolComplete("toolu-1", false, exitCode: 3)
+            .Write(CopilotHome(temp));
+        ImportSourceReport copy = Copilot(await RunAsync(temp, request => request with { IncludeActive = true }));
+
+        Assert.Equal((1, 0), (first.Recorded, first.ToolLinksRecorded));
+        Assert.Equal((0, 1, 1), (second.Recorded, second.Duplicates, second.ToolLinksRecorded));
+        Assert.Equal(second, dry);
+        Assert.Equal((1, 0), (third.SessionsSkippedUnchanged, third.ToolLinksRecorded));
+        Assert.Equal((1, 0), (copy.Duplicates, copy.ToolLinksRecorded));
+        Assert.True(second.Complete);
+        Assert.Equal(
+            ["1|bash|3|2"],
+            await LedgerSql.RowsAsync(
+                Database(temp),
+                "SELECT owner_span_row_id, tool_name, tool_exit_code, status_code FROM span_links;"));
+    }
+
+    // Imported rows that a live span superseded without sharing their service request ID limit coverage on every run whose
+    // scope holds them, and a dry run reports them the same way. Rows superseded by their own call's live span don't.
+    [Fact]
+    public async Task IR19_RowsSupersededWithoutAMatchAreReported()
+    {
+        using TempDirectory temp = new();
+        string root = Path.Combine(temp.Path, "webapp");
+        new CopilotSessionLogs("s-a", context: CopilotSessionLogs.Context(root, root, "main", "contoso/webapp"))
+            .Usage("u1", S1)
+            .Usage("u2", S2)
+            .Write(CopilotHome(temp));
+        new CopilotSessionLogs("s-b").Usage("u3", S3).Write(CopilotHome(temp));
+        await RunAsync(temp);
+        SqliteLedgerStore store = await StoreAsync(temp);
+        await store.RecordAsync([ImportEntries.Live("s-a", null), ImportEntries.Live("s-b", S3)]);
+
+        ImportReport report = await RunAsync(temp);
+        ImportReport dry = await RunAsync(temp, request => request with { DryRun = true });
+        ImportReport repo = await RunAsync(temp, request => request with { RepositoryRoot = root });
+        ImportReport otherRepo = await RunAsync(
+            temp,
+            request => request with { RepositoryRoot = Path.Combine(temp.Path, "other") });
+        ImportReport since = await RunAsync(
+            temp,
+            request => request with { Since = new DateTimeOffset(2026, 11, 21, 0, 0, 0, TimeSpan.Zero) });
+
+        ImportSourceReport copilot = Copilot(report);
+        Assert.Equal((2, 2), (copilot.SessionsSkippedUnchanged, copilot.SupersededUnmatched));
+        Assert.False(copilot.Complete);
+        Assert.Equal(
+            new ImportDiagnostic
+            {
+                Source = ImportSourceKind.Copilot,
+                LogId = "s-a",
+                Code = ImportDiagnosticCode.SupersededUnmatched,
+                Count = 2,
+            },
+            Assert.Single(report.Diagnostics));
+        Assert.Equal(report.Sources, dry.Sources);
+        Assert.Equal(report.Diagnostics, dry.Diagnostics);
+        Assert.Equal(2, Copilot(repo).SupersededUnmatched);
+        Assert.Equal((0, true), (Copilot(otherRepo).SupersededUnmatched, Copilot(otherRepo).Complete));
+        Assert.Equal((0, true), (Copilot(since).SupersededUnmatched, Copilot(since).Complete));
+        Assert.Equal(
+            ["s-a|superseded", "s-a|superseded", "s-b|superseded"],
+            await LedgerSql.RowsAsync(
+                Database(temp),
+                "SELECT conversation_id, accounting_state FROM spans WHERE ingest_source = 'import:copilot' ORDER BY id;"));
     }
 
     private static string CopilotHome(TempDirectory temp) => Path.Combine(temp.Path, "copilot");

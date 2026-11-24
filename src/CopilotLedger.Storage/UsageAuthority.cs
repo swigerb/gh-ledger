@@ -29,6 +29,14 @@ internal static class UsageAuthority
         bool ConversationHasLive,
         bool ConversationHasUnidentifiedLive);
 
+    // Imported rows of one conversation, with the Git context they recorded, that live rows superseded without sharing
+    // their canonical ID: I2 and I3 retire them whether or not the live spans cover the same calls.
+    internal readonly record struct UnmatchedSupersession(
+        string ConversationId,
+        string? RepositoryRoot,
+        string? RepositorySlug,
+        long Count);
+
     // The first rule that matches decides.
     internal static ImportResolution Decide(ImportFacts facts)
     {
@@ -164,6 +172,70 @@ internal static class UsageAuthority
         command.Parameters.AddWithValue("@resolution", resolution);
         command.Parameters.AddWithValue("@now", recordedAtUnixMs);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    // The row that recorded this very record of this log (a 'recorded' alias, and the same trace and span IDs), when it
+    // still counts; null otherwise, such as for another session's copy of the record.
+    internal static async Task<long?> RecordedRowAsync(
+        SqliteTransaction transaction,
+        string source,
+        ImportedLedgerEntry entry,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = transaction.Connection!.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT s.id
+              FROM import_record_aliases AS a
+              JOIN spans AS s ON s.id = a.span_row_id
+             WHERE a.source = @source AND a.record_key_sha256 = @key AND a.resolution = 'recorded'
+               AND s.accounting_state = 'effective' AND s.trace_id = @trace AND s.span_id = @span;
+            """;
+        command.Parameters.AddWithValue("@source", source);
+        command.Parameters.AddWithValue("@key", entry.RecordKeySha256);
+        command.Parameters.AddWithValue("@trace", entry.Span.TraceId);
+        command.Parameters.AddWithValue("@span", entry.Span.SpanId);
+        return await command.ExecuteScalarAsync(cancellationToken) is long id ? id : null;
+    }
+
+    // The source's imported rows that live rows superseded without sharing their canonical ID, from since on (all when it's
+    // null), by conversation and recorded Git context. A row superseded by the live span of its own call isn't one of them.
+    internal static async Task<IReadOnlyList<UnmatchedSupersession>> ReadUnmatchedSupersessionsAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        ImportSourceKind source,
+        DateTimeOffset? since,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT s.conversation_id, s.repo_root, s.repo_slug, COUNT(*)
+              FROM spans AS s
+             WHERE s.ingest_source = @ingest_source
+               AND s.accounting_state = 'superseded'
+               AND (@since IS NULL OR s.start_time_unix_ms >= @since)
+               AND NOT EXISTS (SELECT 1 FROM spans AS l
+                                WHERE l.id = s.superseded_by AND l.canonical_usage_id = s.canonical_usage_id)
+             GROUP BY s.conversation_id, s.repo_root, s.repo_slug
+             ORDER BY s.conversation_id, s.repo_root, s.repo_slug;
+            """;
+        command.Parameters.AddWithValue("@ingest_source", "import:" + ImportIds.SourceName(source));
+        command.Parameters.AddWithValue(
+            "@since",
+            since is DateTimeOffset from ? (object)from.ToUnixTimeMilliseconds() : DBNull.Value);
+        List<UnmatchedSupersession> rows = [];
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new UnmatchedSupersession(
+                reader.GetString(0),
+                reader.IsDBNull(1) ? null : reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.GetInt64(3)));
+        }
+
+        return rows;
     }
 
     internal static async Task UpsertCheckpointAsync(

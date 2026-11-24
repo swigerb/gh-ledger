@@ -99,6 +99,7 @@ Recorded                         5
 Duplicate                        0
 Overlap-skipped                  0
 Ambiguous-overlap                0
+Superseded, unmatched            0
 Malformed lines                  0
 Unsupported usage shapes         0
 Cost out of range                0
@@ -132,6 +133,7 @@ Recorded                         5
 Duplicate                        0
 Overlap-skipped                  0
 Ambiguous-overlap                0
+Superseded, unmatched            0
 Malformed lines                  0
 Unsupported usage shapes         0
 Cost out of range                0

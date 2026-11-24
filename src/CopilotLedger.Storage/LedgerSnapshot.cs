@@ -18,6 +18,7 @@ public sealed class LedgerSnapshot : IAsyncDisposable
     private readonly SqliteTransaction? _transaction;
     private readonly HashSet<(string Source, string Key)> _aliases = [];
     private readonly HashSet<string> _recordedCanonicalIds = new(StringComparer.Ordinal);
+    private readonly HashSet<(string TraceId, string SpanId)> _links = [];
 
     private LedgerSnapshot(SqliteConnection? connection, SqliteTransaction? transaction, int schemaVersion)
     {
@@ -113,6 +114,7 @@ public sealed class LedgerSnapshot : IAsyncDisposable
                 canonical,
                 entry.Span.ConversationId!,
                 cancellationToken);
+            bool aliasInLedger = facts.AliasExists;
             if (_aliases.Contains((source, entry.RecordKeySha256)))
             {
                 facts = facts with { AliasExists = true };
@@ -134,9 +136,27 @@ public sealed class LedgerSnapshot : IAsyncDisposable
             if (resolution == ImportResolution.Recorded)
             {
                 links += entry.ToolLinks.Count;
+                foreach (GenAiSpanLink link in entry.ToolLinks)
+                {
+                    _links.Add((link.TraceId, link.SpanId));
+                }
+
                 if (canonical is not null)
                 {
                     _recordedCanonicalIds.Add(canonical);
+                }
+            }
+            else if (resolution == ImportResolution.Duplicate &&
+                     aliasInLedger &&
+                     entry.ToolLinks.Count > 0 &&
+                     await UsageAuthority.RecordedRowAsync(_transaction!, source, entry, cancellationToken) is not null)
+            {
+                foreach (GenAiSpanLink link in entry.ToolLinks)
+                {
+                    if (_links.Add((link.TraceId, link.SpanId)) && !await LinkExistsAsync(link, cancellationToken))
+                    {
+                        links++;
+                    }
                 }
             }
 
@@ -157,6 +177,15 @@ public sealed class LedgerSnapshot : IAsyncDisposable
             ? null
             : await UsageAuthority.ReadCheckpointAsync(_connection!, _transaction, source, logId, cancellationToken);
     }
+
+    // As SqliteLedgerStore.GetUnmatchedSupersessionsAsync; none before schema version 6.
+    internal async Task<IReadOnlyList<UsageAuthority.UnmatchedSupersession>> GetUnmatchedSupersessionsAsync(
+        ImportSourceKind source,
+        DateTimeOffset? since,
+        CancellationToken cancellationToken) =>
+        SchemaVersion < 6
+            ? []
+            : await UsageAuthority.ReadUnmatchedSupersessionsAsync(_connection!, _transaction, source, since, cancellationToken);
 
     public async ValueTask DisposeAsync()
     {
@@ -207,6 +236,16 @@ public sealed class LedgerSnapshot : IAsyncDisposable
             null,
             live,
             live);
+    }
+
+    private async Task<bool> LinkExistsAsync(GenAiSpanLink link, CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = _connection!.CreateCommand();
+        command.Transaction = _transaction;
+        command.CommandText = "SELECT EXISTS (SELECT 1 FROM span_links WHERE trace_id = @trace AND span_id = @span);";
+        command.Parameters.AddWithValue("@trace", link.TraceId);
+        command.Parameters.AddWithValue("@span", link.SpanId);
+        return (long)(await command.ExecuteScalarAsync(cancellationToken))! == 1;
     }
 
     // file:///C:/…/ledger.db?immutable=1 (file:///home/… elsewhere), every byte but [A-Za-z0-9-._~/:] percent-encoded.

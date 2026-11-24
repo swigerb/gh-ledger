@@ -8,9 +8,10 @@ namespace CopilotLedger.Storage;
 public sealed partial class SqliteLedgerStore
 {
     // Resolves each entry by the authority rules under one BEGIN IMMEDIATE transaction: inserts the Recorded ones with an
-    // alias and the tool links they own, aliases the others that a row accounts for, and writes checkpoint (when it isn't
-    // null) in the same transaction. Validates every entry and the checkpoint first (ArgumentException, nothing written).
-    // An exception, cancellation included, rolls the whole call back.
+    // alias and the tool links they own, aliases the others that a row accounts for, adds the new tool links of a record read
+    // again whose own row still counts, and writes checkpoint (when it isn't null) in the same transaction. Validates every
+    // entry and the checkpoint first (ArgumentException, nothing written). An exception, cancellation included, rolls the
+    // whole call back.
     public async Task<ImportRecordResult> RecordImportedAsync(
         IReadOnlyList<ImportedLedgerEntry> entries,
         ImportSessionCheckpoint? checkpoint,
@@ -93,6 +94,16 @@ public sealed partial class SqliteLedgerStore
                     now,
                     cancellationToken);
             }
+            else if (resolution == ImportResolution.Duplicate &&
+                     entry.ToolLinks.Count > 0 &&
+                     await UsageAuthority.RecordedRowAsync(transaction, source, entry, cancellationToken) is long ownRowId)
+            {
+                // The record's own effective row, read again from its log: tool calls that completed since then get links.
+                foreach (GenAiSpanLink link in entry.ToolLinks)
+                {
+                    links += await InsertOwnedLinkAsync(transaction, link, ownRowId, now, cancellationToken);
+                }
+            }
 
             resolutions.Add(resolution);
         }
@@ -116,6 +127,18 @@ public sealed partial class SqliteLedgerStore
         EnsureInitialized();
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
         return await UsageAuthority.ReadCheckpointAsync(connection, null, source, logId, cancellationToken);
+    }
+
+    // The source's imported rows that started at or after since (all when it's null) and that live rows superseded without
+    // sharing their canonical ID (UsageAuthority.ReadUnmatchedSupersessionsAsync).
+    internal async Task<IReadOnlyList<UsageAuthority.UnmatchedSupersession>> GetUnmatchedSupersessionsAsync(
+        ImportSourceKind source,
+        DateTimeOffset? since,
+        CancellationToken cancellationToken)
+    {
+        EnsureInitialized();
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        return await UsageAuthority.ReadUnmatchedSupersessionsAsync(connection, null, source, since, cancellationToken);
     }
 
     private static RowProvenance ImportProvenance(ImportedLedgerEntry entry, string? canonicalUsageId) =>

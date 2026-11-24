@@ -28,6 +28,7 @@ public sealed record ImportSourceReport
     public required long Duplicates { get; init; }
     public required long OverlapSkipped { get; init; }
     public required long AmbiguousOverlap { get; init; }
+    public required long SupersededUnmatched { get; init; }         // imported rows in scope that unmatched live rows superseded
     public required long MalformedLines { get; init; }
     public required long UnsupportedUsageShapes { get; init; }
     public required long CostOutOfRange { get; init; }
@@ -49,6 +50,7 @@ public sealed record ImportSourceReport
         MalformedLines == 0 &&
         UnsupportedUsageShapes == 0 &&
         AmbiguousOverlap == 0 &&
+        SupersededUnmatched == 0 &&
         CostOutOfRange == 0 &&
         JournalPredecessors == 0;
 }

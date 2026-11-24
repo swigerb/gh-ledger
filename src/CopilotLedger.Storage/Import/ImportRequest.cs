@@ -9,6 +9,7 @@ public sealed record ImportRequest
     public required string DatabasePath { get; init; }
     public required IReadOnlyList<ImportSourceRequest> Sources { get; init; }   // at most one per kind, never Claude
     public string? RepositoryRoot { get; init; }     // --repo: a fully qualified working-tree root
+    public string? RepositorySlug { get; init; }     // with RepositoryRoot: its owner/repo slug, for rows without a root
     public DateTimeOffset? Since { get; init; }      // --since; null for all time
     public bool DryRun { get; init; }
     public bool IncludeActive { get; init; }

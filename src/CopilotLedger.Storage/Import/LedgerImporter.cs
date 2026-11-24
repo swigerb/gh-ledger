@@ -1,3 +1,4 @@
+using CopilotLedger.Core.Git;
 using CopilotLedger.Core.Import;
 using CopilotLedger.Core.Pricing;
 using CopilotLedger.Core.Telemetry;
@@ -12,14 +13,24 @@ public sealed class LedgerImporter
     // The daemon prunes span_links older than this; older tool calls aren't imported.
     public static readonly TimeSpan ToolLinkRetention = TimeSpan.FromDays(7);
 
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     private readonly ICreditCalculator _calculator;
     private readonly TimeProvider _timeProvider;
+    private readonly IGitContextResolver _gitResolver;
 
-    public LedgerImporter(ICreditCalculator calculator, TimeProvider? timeProvider = null)
+    // gitResolver finds the repository of a record that recorded only its working directory, for RepositoryRoot; it
+    // defaults to FileSystemGitContextResolver. Only the repository's root is used, never its current branch.
+    public LedgerImporter(
+        ICreditCalculator calculator,
+        TimeProvider? timeProvider = null,
+        IGitContextResolver? gitResolver = null)
     {
         ArgumentNullException.ThrowIfNull(calculator);
         _calculator = calculator;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _gitResolver = gitResolver ?? new FileSystemGitContextResolver();
     }
 
     // Throws ArgumentException for an invalid request, InvalidOperationException for a ledger newer than this gh-ledger,
@@ -45,6 +56,7 @@ public sealed class LedgerImporter
         {
             List<ImportSourceReport> reports = [];
             List<ImportDiagnostic> diagnostics = [];
+            Dictionary<string, string?> roots = new(StringComparer.Ordinal);
             foreach (ImportSourceRequest source in request.Sources.OrderBy(source => source.Source.Kind))
             {
                 Tally tally = new(source.Source.Kind);
@@ -64,7 +76,28 @@ public sealed class LedgerImporter
                 foreach (SessionLogLocation log in discovery.Logs)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    await ImportLogAsync(request, source.Source, log, store, snapshot, linkCutoff, tally, diagnostics, cancellationToken);
+                    await ImportLogAsync(
+                        request, source.Source, log, store, snapshot, linkCutoff, tally, diagnostics, roots, cancellationToken);
+                }
+
+                // Imported rows that live spans superseded without matching them may hold requests the live spans don't
+                // cover, so they limit coverage on every run whose scope holds them. They're never made effective again.
+                IReadOnlyList<UsageAuthority.UnmatchedSupersession> superseded = store is not null
+                    ? await store.GetUnmatchedSupersessionsAsync(source.Source.Kind, request.Since, cancellationToken)
+                    : await snapshot!.GetUnmatchedSupersessionsAsync(source.Source.Kind, request.Since, cancellationToken);
+                foreach (IGrouping<string, UsageAuthority.UnmatchedSupersession> conversation in superseded
+                             .Where(row => IsInRepository(row, request))
+                             .GroupBy(row => row.ConversationId, StringComparer.Ordinal))
+                {
+                    long count = conversation.Sum(row => row.Count);
+                    tally.SupersededUnmatched += count;
+                    diagnostics.Add(new ImportDiagnostic
+                    {
+                        Source = source.Source.Kind,
+                        LogId = conversation.Key,
+                        Code = ImportDiagnosticCode.SupersededUnmatched,
+                        Count = count,
+                    });
                 }
 
                 reports.Add(tally.ToReport());
@@ -90,6 +123,7 @@ public sealed class LedgerImporter
         DateTimeOffset linkCutoff,
         Tally tally,
         List<ImportDiagnostic> diagnostics,
+        Dictionary<string, string?> roots,
         CancellationToken cancellationToken)
     {
         tally.SessionsScanned++;
@@ -146,7 +180,7 @@ public sealed class LedgerImporter
         long costOutOfRange = 0;
         foreach (ImportedUsageRecord record in result.Records)
         {
-            if (IsOutOfScope(record, request))
+            if (IsOutOfScope(record, request, roots))
             {
                 outOfScope++;
                 continue;
@@ -273,8 +307,9 @@ public sealed class LedgerImporter
     }
 
     // Out of scope: started before Since, or, with RepositoryRoot, recorded in another repository: by its Git root when the
-    // log recorded one, else by its working directory (the root or below it).
-    private static bool IsOutOfScope(ImportedUsageRecord record, ImportRequest request)
+    // log recorded one, else by the Git root of its working directory, found now (roots caches them). A working directory
+    // whose repository can't be found is out of scope, and so is one in a repository nested inside RepositoryRoot.
+    private bool IsOutOfScope(ImportedUsageRecord record, ImportRequest request, Dictionary<string, string?> roots)
     {
         if (request.Since is DateTimeOffset since && record.StartTime < since)
         {
@@ -286,17 +321,43 @@ public sealed class LedgerImporter
             return false;
         }
 
-        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (record.Git?.RepositoryRoot is string recorded)
         {
-            return !string.Equals(recorded, root, comparison);
+            return !string.Equals(recorded, root, PathComparison);
         }
 
         string? directory = record.Git?.WorkingDirectory;
-        return directory is null ||
-               !(string.Equals(directory, root, comparison) ||
-                 directory.StartsWith(root + Path.DirectorySeparatorChar, comparison));
+        if (directory is null ||
+            !(string.Equals(directory, root, PathComparison) ||
+              directory.StartsWith(root + Path.DirectorySeparatorChar, PathComparison)))
+        {
+            return true;
+        }
+
+        if (!roots.TryGetValue(directory, out string? resolved))
+        {
+            try
+            {
+                resolved = _gitResolver.Resolve(directory)?.RepositoryRoot;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                resolved = null;
+            }
+
+            roots[directory] = resolved;
+        }
+
+        return !string.Equals(resolved, root, PathComparison);
     }
+
+    // With RepositoryRoot, a superseded row is in scope when it recorded that root, or, without a root, that repository's slug.
+    private static bool IsInRepository(UsageAuthority.UnmatchedSupersession row, ImportRequest request) =>
+        request.RepositoryRoot is not string root ||
+        (row.RepositoryRoot is string recorded
+            ? string.Equals(recorded, root, PathComparison)
+            : row.RepositorySlug is not null &&
+              string.Equals(row.RepositorySlug, request.RepositorySlug, StringComparison.OrdinalIgnoreCase));
 
     private static void Validate(ImportRequest request)
     {
@@ -339,6 +400,7 @@ public sealed class LedgerImporter
         public long Duplicates { get; set; }
         public long OverlapSkipped { get; set; }
         public long AmbiguousOverlap { get; set; }
+        public long SupersededUnmatched { get; set; }
         public long MalformedLines { get; set; }
         public long UnsupportedUsageShapes { get; set; }
         public long CostOutOfRange { get; set; }
@@ -396,6 +458,7 @@ public sealed class LedgerImporter
             Duplicates = Duplicates,
             OverlapSkipped = OverlapSkipped,
             AmbiguousOverlap = AmbiguousOverlap,
+            SupersededUnmatched = SupersededUnmatched,
             MalformedLines = MalformedLines,
             UnsupportedUsageShapes = UnsupportedUsageShapes,
             CostOutOfRange = CostOutOfRange,

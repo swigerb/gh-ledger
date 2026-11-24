@@ -46,6 +46,7 @@ internal static class ImportCommands
         ("Duplicate", report => report.Duplicates),
         ("Overlap-skipped", report => report.OverlapSkipped),
         ("Ambiguous-overlap", report => report.AmbiguousOverlap),
+        ("Superseded, unmatched", report => report.SupersededUnmatched),
         ("Malformed lines", report => report.MalformedLines),
         ("Unsupported usage shapes", report => report.UnsupportedUsageShapes),
         ("Cost out of range", report => report.CostOutOfRange),
@@ -217,6 +218,7 @@ internal static class ImportCommands
                     : new ImportSourceRequest(new CodexSessionLogSource(), context.CodexHome)),
             ],
             RepositoryRoot = git?.RepositoryRoot,
+            RepositorySlug = git?.RepositorySlug,
             Since = period.From,
             DryRun = dryRun,
             IncludeActive = includeActive,
@@ -336,6 +338,7 @@ internal static class ImportCommands
         source.MalformedLines == 0 &&
         source.UnsupportedUsageShapes == 0 &&
         source.AmbiguousOverlap == 0 &&
+        source.SupersededUnmatched == 0 &&
         source.CostOutOfRange == 0 &&
         source.JournalPredecessors == 0;
 
@@ -369,6 +372,7 @@ internal static class ImportCommands
             writer.WriteNumber("duplicate", source.Duplicates);
             writer.WriteNumber("overlapSkipped", source.OverlapSkipped);
             writer.WriteNumber("ambiguousOverlap", source.AmbiguousOverlap);
+            writer.WriteNumber("supersededUnmatched", source.SupersededUnmatched);
             writer.WriteNumber("malformedLines", source.MalformedLines);
             writer.WriteNumber("unsupportedUsageShapes", source.UnsupportedUsageShapes);
             writer.WriteNumber("costOutOfRange", source.CostOutOfRange);
@@ -424,13 +428,18 @@ internal static class ImportCommands
             totals.ApiEquivalentEstimatedSpans);
     }
 
-    // "<source> <session|rollout> <log ID>[, line <n> (byte <offset>)]: <message>", or "<source> session logs: <message>"
-    // for the store itself.
+    // "<source> <session|rollout> <log ID>[, line <n> (byte <offset>)]: <message>", "<source> session <conversation ID>:
+    // <message>" for superseded rows, or "<source> session logs: <message>" for the store itself.
     private static string Describe(ImportDiagnostic diagnostic)
     {
         if (diagnostic.Code == ImportDiagnosticCode.UnreadableStore)
         {
             return $"{Name(diagnostic.Source)} session logs: {Message(diagnostic)}";
+        }
+
+        if (diagnostic.Code == ImportDiagnosticCode.SupersededUnmatched)
+        {
+            return $"{Name(diagnostic.Source)} session {diagnostic.LogId}: {Message(diagnostic)}";
         }
 
         string log = diagnostic.Source == ImportSourceKind.Codex ? "Codex rollout" : "Copilot session";
@@ -478,6 +487,8 @@ internal static class ImportCommands
             ImportDiagnosticCode.UnreadableStore => count == 1
                 ? "1 folder or file couldn't be listed; any logs there weren't imported"
                 : $"{LedgerFormat.Count(count)} folders or files couldn't be listed; any logs there weren't imported",
+            ImportDiagnosticCode.SupersededUnmatched =>
+                $"{Plural(count, "imported request")} superseded by live spans that can't be matched to {(count == 1 ? "it" : "them")}; requests the daemon missed may not count",
             _ => throw new ArgumentOutOfRangeException(nameof(diagnostic), diagnostic.Code, null),
         };
     }

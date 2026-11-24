@@ -109,6 +109,7 @@ public sealed class ImportCommandTests
             Duplicate                        0
             Overlap-skipped                  0
             Ambiguous-overlap                0
+            Superseded, unmatched            0
             Malformed lines                  0
             Unsupported usage shapes         0
             Cost out of range                0
@@ -178,6 +179,7 @@ public sealed class ImportCommandTests
                   "duplicate": 0,
                   "overlapSkipped": 0,
                   "ambiguousOverlap": 0,
+                  "supersededUnmatched": 0,
                   "malformedLines": 0,
                   "unsupportedUsageShapes": 0,
                   "costOutOfRange": 0,
@@ -209,6 +211,7 @@ public sealed class ImportCommandTests
                   "duplicate": 0,
                   "overlapSkipped": 0,
                   "ambiguousOverlap": 0,
+                  "supersededUnmatched": 0,
                   "malformedLines": 0,
                   "unsupportedUsageShapes": 0,
                   "costOutOfRange": 0,
@@ -330,6 +333,7 @@ public sealed class ImportCommandTests
             Duplicate                        0
             Overlap-skipped                  1
             Ambiguous-overlap                0
+            Superseded, unmatched            0
             Malformed lines                  0
             Unsupported usage shapes         0
             Cost out of range                0
@@ -538,6 +542,34 @@ public sealed class ImportCommandTests
         Assert.Equal(1, document.RootElement.GetProperty("sources")[0].GetProperty("unreadableStoreEntries").GetInt64());
         Assert.Equal(
             """{"source":"copilot","log":"","code":"unreadableStore","event":"unknown","field":null,"version":null,"count":1,"line":null,"byteOffset":null}""",
+            JsonSerializer.Serialize(Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray())));
+    }
+
+    [Fact]
+    public async Task IC14_RequestsSupersededWithoutAMatchAreAWarning()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        new CopilotSessionLogs("s-a").Usage("u1", S1).Usage("u2", S2).Write(harness.Context.CopilotHome);
+        await harness.RunAsync("import", "--all");
+        SqliteLedgerStore store = new(harness.Context.DatabasePath, harness.TimeProvider);
+        await store.InitializeAsync();
+        await store.RecordAsync([ImportEntries.Live("s-a", null)]);
+
+        CliRun text = await harness.RunAsync("import", "--all");
+        CliRun json = await harness.RunAsync("import", "--all", "--json");
+
+        Assert.Equal(2, text.ExitCode);
+        Assert.Contains("Superseded, unmatched              2\n", text.Out);
+        Assert.EndsWith("\nNothing new to record.\nCoverage is incomplete; see the warnings.\n", text.Out);
+        Assert.Equal(
+            "Warning: Copilot session s-a: 2 imported requests superseded by live spans that can't be matched to them; requests the daemon missed may not count\n",
+            text.Error);
+        Assert.Equal(2, json.ExitCode);
+        using JsonDocument document = JsonDocument.Parse(json.Out);
+        Assert.Equal(2, document.RootElement.GetProperty("sources")[0].GetProperty("supersededUnmatched").GetInt64());
+        Assert.Equal(
+            """{"source":"copilot","log":"s-a","code":"supersededUnmatched","event":"unknown","field":null,"version":null,"count":2,"line":null,"byteOffset":null}""",
             JsonSerializer.Serialize(Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray())));
     }
 
