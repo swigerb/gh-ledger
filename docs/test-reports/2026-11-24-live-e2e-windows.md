@@ -9,6 +9,8 @@ On 2026-11-24, gh-ledger 0.5.0 was installed as a GitHub CLI extension on a work
 
 This report records what was run, what was measured, and the gaps found. Each gap was filed as an issue.
 
+**Update:** gh-ledger 0.6.0 fixes all of them; see the [0.6.0 test](2026-11-24-live-e2e-0.6.0-windows.md).
+
 The machine owner's own history appears only as counts and percentages, and the only repository named is this one. The live test's own spend is shown in full: 22.44 AI credits ($0.22).
 
 ## Results
