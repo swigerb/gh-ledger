@@ -11,7 +11,7 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–23 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–24 are sequential, and each builds on the ones before it.
 
 This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-8.md`, then each task as its own commit, `Sprint 9 Task N: <Title>`, on branch `swigerb-sprint-9-ledger-export-html-report`, and opens one pull request titled exactly "Sprint 9: `gh ledger export`: self-contained offline HTML report & metadata-only bundle", with `Closes #64`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
@@ -53,6 +53,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 21: The Coverage Query Counts Each Request's Tool Links Once (CopilotLedger.Storage & tests). Review finding D2: a grouped join replaces a subquery that scanned all of `span_links` for each imported request, so the coverage query takes 0.13 s instead of 179 s for 30,000 imported requests.
 - [x] Task 22: A Range That Ends in a Repeated Hour Keeps Its Ticks (CopilotLedger.Cli & tests). Review finding N5: ticks are found over whole local days around the range, so a range that ends inside the hour that fall-back repeats keeps the ticks of the hour's first pass, and `minWidth` never exceeds the axis.
 - [x] Task 23: Imported Requests Without Tool Data Leave Tool History Incomplete (CopilotLedger.Storage, CopilotLedger.Cli, docs & tests). Review finding E1: the selected imported requests whose logs record no tool calls (every Codex request) are counted as `coverage.toolHistory.importedRequestsWithoutToolData`, and while there are any, tool history isn't complete; Copilot requests, compactions included, and live spans keep their coverage.
+- [ ] Task 24: A Missing Tool-Call Count Always Means Unknown (CopilotLedger.Core, CopilotLedger.Storage, CopilotLedger.Cli, docs & tests). Review finding F1: Copilot's reader records a compaction's tool-call count as 0, so a request without a count is always one whose tool calls are unknown, and `importedRequestsWithoutToolData` counts every selected imported request without one, Copilot's included.
 
 ## Starting point
 
@@ -230,7 +231,7 @@ Export reads only the ledger. By default no absolute path appears anywhere: repo
 | `docs/cli.md` and `docs/guide.md` updated; `GuideSamplesTests` passes | 11, 12 | EL1–EL3, GS1, GS2 |
 | Build and tests green with warnings as errors; hermetic | all | Every task |
 | #63: every export query leaves out superseded rows | 2, 3 | XR1, XR3, XR4 |
-| #63: export reports coverage limitations, with retained tool coverage marked separately and a truncated timeline never called complete | 3, 4, 6, 9, 15, 20, 21, 23 | XR4, XR10, XR11, XR14, EC8, EC11, EC13, EC18, EC19, EC20, TL2, TL10, EB5; D9 |
+| #63: export reports coverage limitations, with retained tool coverage marked separately and a truncated timeline never called complete | 3, 4, 6, 9, 15, 20, 21, 23, 24 | XR4, XR10, XR11, XR14, EC8, EC11, EC13, EC18, EC19, EC20, EC21, TL2, TL10, EB5; D9 |
 
 ### Review fixes (Tasks 13–17)
 
@@ -261,9 +262,11 @@ Measured on 2026-11-23 for Task 16, on SQLite 3.53.3 (Microsoft.Data.Sqlite 10.0
 
 Through the public snapshot after Task 17, the same ledger's requests page in 0.97 s and its tool calls in 0.45 s, and `export --all-repos --since all --bundle --max-timeline-spans 0` takes 9.2 s. Assumption A5, measured after Task 17: 25,000 requests and 25,000 tool calls over 25 days make a 6,067,672-byte report and a 1,716,559-byte ZIP at the default cap.
 
-### Review fixes, rounds 2 and 3 (Tasks 18–23)
+### Review fixes, rounds 2 to 4 (Tasks 18–24)
 
 A second round of reviews, of Tasks 13–17 as committed at `ecc91f6`, found the problems below: the independent reviewer's N1–N5, and the coordinator's D1 and D2 (D2 is also the architect's own finding from the same round). A third round, of Tasks 18–22 as built in the scratch repository, found that EC15 didn't guard N2's fix (the independent reviewer's N6). With it, the architect found that no test made a report appear during an export (A4), and the coordinator added E1, which Sprint 10's session found. Tasks 18–23 fix them on top of Task 17; N6 and A4 are fixed in Task 19, where EC15 is written. Each fix has tests that fail without it, except Task 21's, which changes only how fast the coverage query runs (XR14 pins counts that the old query gave too). Where these tasks and the earlier ones differ, these win. They were built like Tasks 13–17, in the scratch repository, whose Task 17 tree is the same as `ecc91f6`'s apart from the plans, and applied by script, in order, to `git archive ecc91f6` with Windows line endings, with a build and the whole suite after each task: 1403, 1409, 1410, 1411, 1412, and 1414 tests, and, line endings aside, the same files.
+
+A fourth round, the independent reviewer's last pass on Task 23 as committed at `8eff8dd`, found F1. Task 24 fixes it. It was built the same way and applied by script to `git archive 8eff8dd`: 1416 tests, and, line endings aside, the same files. A compaction that an earlier build imported keeps its NULL count, so it now counts as a request without a tool-call count. That's conservative, and only ledgers that unreleased builds imported into have one, since no release has `gh ledger import` yet.
 
 | Finding | Problem | Fix | Task |
 |---|---|---|---|
@@ -276,9 +279,10 @@ A second round of reviews, of Tasks 13–17 as committed at `ecc91f6`, found the
 | N5 | A range that ended inside the hour that fall-back repeats lost the ticks of the hour's first pass, because the loop stopped at the end's local time, and `minWidth` could exceed the axis | The tick loop walks whole local days around the range and keeps the instants inside it; `minWidth` is at most the axis, in C# and in the script | 22 |
 | N6 | EC15 wrote the other program's ZIP just before the export moved its own ZIP into place, after the decision to move a ZIP aside, so it passed even when that decision ignored `--force`; no platform call came between the checks and that decision | Export writes its report's temporary file through `ICliPlatform.WriteFileAsync`, after the checks and before that decision, and EC15 writes the other program's file there | 19 |
 | A4 | No test made a report appear during an export without `--force`, so a report move that overwrote would have passed | EC15's second case writes the report there | 19 |
-| E1 | A Codex rollout records no tool calls, so a Codex request owns no link and has no count, and an export of recent Codex imports said "Tool calls: complete for this window." | `coverage.toolHistory.importedRequestsWithoutToolData` counts the selected imported requests, other than Copilot's, without a tool-call count; above 0, tool history isn't complete, with the warning `imported-requests-without-tool-data` and a note | 23 |
+| E1 | A Codex rollout records no tool calls, so a Codex request owns no link and has no count, and an export of recent Codex imports said "Tool calls: complete for this window." | `coverage.toolHistory.importedRequestsWithoutToolData` counts the selected imported requests without a tool-call count (Task 23 left Copilot's out; Task 24 counts them); above 0, tool history isn't complete, with the warning `imported-requests-without-tool-data` and a note | 23 |
+| F1 | Task 23 left every Copilot row out of the figure, as if only a compaction could lack a count, but the reader also stores none for a usage record whose `numToolCalls` is missing or invalid, so such a request counted as complete | Copilot's reader records 0 for a compaction, so a missing count always means an unknown one, and the figure counts every imported request without a count | 24 |
 
-E1's figure leaves Copilot rows out. Copilot logs count each usage record's tool calls, and Copilot's importer records a compaction, which makes no tool calls, without a count; nothing stored tells the two apart, so a Copilot row without a count is taken for a compaction. Counting every imported row without a count would have called every export with a compaction incomplete.
+Task 23 left Copilot rows out of E1's figure: Copilot's importer recorded a compaction, which makes no tool calls, without a count, and nothing stored tells a compaction from a usage record. That relied on every Copilot usage record carrying a valid `numToolCalls`, which the reader doesn't require (F1). Task 24 has the reader record 0 for a compaction, so a missing count always means an unknown one, and the figure counts every imported request without a count, Copilot's included.
 
 After Task 19, one rule set moves the two files into place:
 
@@ -13964,9 +13968,11 @@ dotnet test CopilotLedger.slnx
 
 ## Task 23 specification: Imported Requests Without Tool Data Leave Tool History Incomplete
 
+Task 24 (review finding F1) replaces this task's Copilot exemption, its note's wording, and EC20: Copilot's reader records 0 for a compaction, so the figure counts every imported request without a count, Copilot's included. Where the two differ, Task 24 wins.
+
 Review finding E1, which the coordinator added after Sprint 10's session found it. A Codex rollout records no tool calls, so a request imported from one owns no `span_links` row, and its `imported_tool_call_count` is NULL. `importedToolCallsWithoutDetail` sums only the deficits of requests whose count is above 0, so a Codex request added nothing to it, and an export of recent Codex imports said "Tool calls: complete for this window." (`toolHistory.complete: true`). That breaks #64's rule never to call incomplete data complete, and #63's requirement that export label missing tool coverage.
 
-The figure can't count every imported row without a count. Copilot's importer records a compaction (`session.compaction_complete`) without a count and never gives it links: a compaction is the billed call that summarizes the conversation, and it makes no tool calls. Nothing stored tells a compaction from a usage record: both are `chat` spans, and `import_record_aliases` keeps only a hash of the record's kind. Copilot logs count each usage record's tool calls (`data.usage.numToolCalls`, on every usage record of Copilot 1.0.103–1.0.114 in Sprint 8's census), and store a reported 0 as 0. So a Copilot row without a count is a compaction, and Copilot rows keep their coverage. Counting every imported row without a count would have called every export with a Copilot compaction incomplete, and ExportSeeds' I1 too.
+The figure can't count every imported row without a count. Until Task 24, Copilot's importer recorded a compaction (`session.compaction_complete`) without a count, and it never gives a compaction links: a compaction is the billed call that summarizes the conversation, and it makes no tool calls. Nothing stored tells a compaction from a usage record: both are `chat` spans, and `import_record_aliases` keeps only a hash of the record's kind. Copilot logs count each usage record's tool calls (`data.usage.numToolCalls`, on every usage record of Copilot 1.0.103–1.0.114 in Sprint 8's census), and store a reported 0 as 0. So Task 23 took a Copilot row without a count for a compaction, and left Copilot rows out. Counting every imported row without a count would have called every export with a Copilot compaction incomplete, and ExportSeeds' I1 too.
 
 ### Files
 
@@ -14346,7 +14352,7 @@ with:
 ### Tests
 
 - **EC19** ExportSeeds plus one Codex request imported at 2026-11-20 12:00 UTC (`ImportEntries.Copilot("k7", "conv-codex", null) with { Source = ImportSourceKind.Codex }`), exported with `--all-repos --bundle`. In `ledger-data`, `manifest.json`, and `telemetry/summary.json`, `coverage.toolHistory` has `complete` false, `importedRequestsWithoutToolData` 1, `spansBeforeRetention` 0, and `importedToolCallsWithoutDetail` 0, and `coverage.warnings` holds `imported-requests-without-tool-data`. The page says `Tool calls: partial; see the notes.` and has the note `1 imported request has no tool-call data in its session log, so its tool calls are unknown.`
-- **EC20** ExportSeeds plus two Copilot requests of `conv-zero`: a usage record that reported 0 tool calls (`ToolCallCount = 0`), and a compaction, which has no count (`ImportedRecordKind.Compaction`, service request ID `33333333-3333-4333-8333-333333333333`). Both are effective; `complete` is true, `importedRequestsWithoutToolData` is 0, and the page says `Tool calls: complete for this window.`
+- **EC20** ExportSeeds plus two Copilot requests of `conv-zero`: a usage record that reported 0 tool calls (`ToolCallCount = 0`), and a compaction, which had no count until Task 24 (`ImportedRecordKind.Compaction`, service request ID `33333333-3333-4333-8333-333333333333`). Both are effective; `complete` is true, `importedRequestsWithoutToolData` is 0, and the page says `Tool calls: complete for this window.`
 
 Both fail without the fix, because `importedRequestsWithoutToolData` is missing. With the figure but the old `ToolHistoryComplete`, EC19 fails (`complete` true). With a figure that counts every imported row without a count, EC20 fails (2: the compaction and ExportSeeds' I1, a Copilot usage record that the test helper gives no count), and so does EC19 (2).
 
@@ -14355,6 +14361,507 @@ Both fail without the fix, because `importedRequestsWithoutToolData` is missing.
 - An export whose requests include Codex imports says, in the page, the manifest, and the summary, that tool calls are partial, and why.
 - Live spans and Copilot imports, compactions included, keep their coverage.
 - `dotnet test CopilotLedger.slnx` passes **1414** tests (1412 + 2).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 24 specification: A Missing Tool-Call Count Always Means Unknown
+
+Review finding F1, from the independent reviewer's last pass on Task 23. Task 23 left every Copilot row out of `importedRequestsWithoutToolData`, because a Copilot row without a count was taken for a compaction. But Copilot's reader stores `ToolCallCount = Count(fields.Integer("data.usage.numToolCalls"))`, so it also accepts a usage record whose `numToolCalls` is missing or invalid (negative, or not an integer) and stores no count for it. Such a request counted as having complete tool history. Telling the two apart needs no schema change: the reader knows which records are compactions, and a compaction makes no tool calls.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` | A compaction's `ToolCallCount` is 0 |
+| `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs` | `importedRequestsWithoutToolData` counts every imported request without a count; the comment |
+| `src/CopilotLedger.Storage/ExportCoverageRow.cs`, `src/CopilotLedger.Cli/Export/ExportReportModel.cs` | Comments |
+| `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs` | The note's wording |
+| `docs/cli.md` | The import allowlist's `spans.imported_tool_call_count` row, and the coverage bullet |
+| `tests/CopilotLedger.Tests/Import/CopilotCompactionTests.cs` | CC1: a compaction's count is 0 |
+| `tests/CopilotLedger.Tests/TestSupport/ExportSeeds.cs` | I1 and I2 report their one tool call, as Copilot's usage records do |
+| `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs` | EC19's note; EC20 through the real reader; new: EC21 (2 cases) |
+
+### Rules
+
+1. `CopilotSessionLogSource` records a compaction's `ToolCallCount` as 0. A usage record keeps `numToolCalls` when it's an integer from 0 to `ImportLimits.MaxTokenCount`, and gets no count otherwise, as before. So, for every source, no count means an unknown one.
+2. `importedRequestsWithoutToolData` counts the selected effective requests whose `ingest_source` isn't `otlp` and whose `imported_tool_call_count` is NULL: every Codex request, and every Copilot usage record whose `numToolCalls` is missing or invalid. Copilot rows are no longer left out.
+3. The note reads `1 imported request has no tool-call count in its session log, so it may be missing its tool calls.`, or `<N> imported requests have no tool-call count in their session logs, so they may be missing their tool calls.`, because a Copilot request without a count may still own the links of some tool calls. The JSON field, the warning, and `complete` stay as Task 23 made them.
+4. A compaction that an earlier build imported keeps its NULL count, because an import never rewrites a recorded request (it's a duplicate, which can only gain tool links), so it counts. That's conservative, and only ledgers that unreleased builds imported into have one: no release has `gh ledger import` yet.
+5. ExportSeeds' I1 and I2 report one tool call each (`ToolCallCount = 1`), matching the one link each owns, as a real Copilot usage record reports its tool calls. Without the count, I1 would count, and the base fixture's tool history would be incomplete.
+
+### Code (copy exactly)
+
+Edit 1 of 2 in `docs/cli.md`, replace:
+
+```markdown
+| `spans.branch_name`, `spans.head_commit_sha` | `data.context.branch` and `data.context.headCommit` | `payload.git.branch` and `payload.git.commit_hash` |
+| `spans.canonical_usage_id` | SHA-256 of `data.usage.serviceRequestId`, or of a compaction's `data.serviceRequestId`; none for BYOK | — |
+| `spans.imported_tool_call_count` | `data.usage.numToolCalls` | — |
+| `spans.model_id`, `spans.rate_card_model_id`, `spans.tier_name`, `spans.billing_channel`, `spans.pricing_status`, `spans.rates_version`, `spans.cost_usd_pico`, `spans.saved_usd_pico`, `spans.api_equivalent_usd_pico`, `spans.api_equivalent_status`, `spans.api_rate_card_model_id`, `spans.api_rates_version`, `spans.api_rate_card_sha256` | Priced from the fields above, as for live spans | Priced from the fields above, as for live spans |
+| `spans.id`, `spans.recorded_at_unix_ms`, `spans.accounting_state`, `spans.superseded_by` | Kept by the ledger | Kept by the ledger |
+```
+
+with:
+
+```markdown
+| `spans.branch_name`, `spans.head_commit_sha` | `data.context.branch` and `data.context.headCommit` | `payload.git.branch` and `payload.git.commit_hash` |
+| `spans.canonical_usage_id` | SHA-256 of `data.usage.serviceRequestId`, or of a compaction's `data.serviceRequestId`; none for BYOK | — |
+| `spans.imported_tool_call_count` | `data.usage.numToolCalls`, or none when it's missing or invalid; 0 for a compaction, which makes no tool calls | — |
+| `spans.model_id`, `spans.rate_card_model_id`, `spans.tier_name`, `spans.billing_channel`, `spans.pricing_status`, `spans.rates_version`, `spans.cost_usd_pico`, `spans.saved_usd_pico`, `spans.api_equivalent_usd_pico`, `spans.api_equivalent_status`, `spans.api_rate_card_model_id`, `spans.api_rates_version`, `spans.api_rate_card_sha256` | Priced from the fields above, as for live spans | Priced from the fields above, as for live spans |
+| `spans.id`, `spans.recorded_at_unix_ms`, `spans.accounting_state`, `spans.superseded_by` | Kept by the ledger | Kept by the ledger |
+```
+
+Edit 2 of 2 in `docs/cli.md`, replace:
+
+```markdown
+### What the report shows
+
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, imported requests whose session logs hold no tool-call data (Codex rollouts hold none; Copilot logs count each request's tool calls, and a compaction makes none), unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete; imported requests without tool-call data make the tool calls incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call or agent link the ledger keeps, because the daemon deletes older ones by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. A ledger that keeps none has no tool history: every request may be missing its tool calls, and `retainedFromUtc` is the generation time. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Hold Ctrl or Command and scroll, or pinch, to zoom, as far as the axis can still label two times; drag sideways to pan; or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+```
+
+with:
+
+```markdown
+### What the report shows
+
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, imported requests whose session logs give no tool-call count (every Codex request, because rollouts record no tool calls, and a Copilot request whose `numToolCalls` is missing or invalid; a compaction makes no tool calls, so its count is 0), unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete; imported requests without a tool-call count make the tool calls incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call or agent link the ledger keeps, because the daemon deletes older ones by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. A ledger that keeps none has no tool history: every request may be missing its tool calls, and `retainedFromUtc` is the generation time. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Hold Ctrl or Command and scroll, or pinch, to zoom, as far as the axis can still label two times; drag sideways to pan; or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/ExportReportModel.cs`, replace:
+
+```csharp
+    public required long SpansBeforeToolHistory { get; init; }
+    public required long ImportedToolCallsWithoutDetail { get; init; }
+    public required long ImportedRequestsWithoutToolData { get; init; } // imported requests whose logs record no tool calls, as Codex's
+    public required long ToolCalls { get; init; }                       // CountToolCallsAsync
+    public required int MaxTimelineSpans { get; init; }
+```
+
+with:
+
+```csharp
+    public required long SpansBeforeToolHistory { get; init; }
+    public required long ImportedToolCallsWithoutDetail { get; init; }
+    public required long ImportedRequestsWithoutToolData { get; init; } // imported requests whose logs give no tool-call count
+    public required long ToolCalls { get; init; }                       // CountToolCallsAsync
+    public required int MaxTimelineSpans { get; init; }
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs`, replace:
+
+```csharp
+        {
+            yield return withoutToolData == 1
+                ? "1 imported request has no tool-call data in its session log, so its tool calls are unknown."
+                : $"{LedgerFormat.Count(withoutToolData)} imported requests have no tool-call data in their session logs, so their tool calls are unknown.";
+        }
+
+        long unpriced = coverage.UnpricedSpans;
+```
+
+with:
+
+```csharp
+        {
+            yield return withoutToolData == 1
+                ? "1 imported request has no tool-call count in its session log, so it may be missing its tool calls."
+                : $"{LedgerFormat.Count(withoutToolData)} imported requests have no tool-call count in their session logs, so they may be missing their tool calls.";
+        }
+
+        long unpriced = coverage.UnpricedSpans;
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+                CacheReadState = CacheCounterState.Reported,
+                CacheWriteState = CacheCounterState.Reported,
+                Git = _context,
+                LineNumber = number,
+```
+
+with:
+
+```csharp
+                CacheReadState = CacheCounterState.Reported,
+                CacheWriteState = CacheCounterState.Reported,
+                ToolCallCount = 0, // a compaction makes no tool calls, so a missing count always means an unknown one
+                Git = _context,
+                LineNumber = number,
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/ExportCoverageRow.cs`, replace:
+
+```csharp
+    public required long SpansBeforeToolHistory { get; init; }       // selected spans that start before toolHistoryFrom
+    public required long ImportedToolCallsWithoutDetail { get; init; } // tool calls of imported requests beyond the links they own
+    public required long ImportedRequestsWithoutToolData { get; init; } // selected imported requests, other than Copilot's, without a tool-call count
+    public required long CacheReportedSpans { get; init; }
+    public required long CacheAbsentSpans { get; init; }
+```
+
+with:
+
+```csharp
+    public required long SpansBeforeToolHistory { get; init; }       // selected spans that start before toolHistoryFrom
+    public required long ImportedToolCallsWithoutDetail { get; init; } // tool calls of imported requests beyond the links they own
+    public required long ImportedRequestsWithoutToolData { get; init; } // selected imported requests without a tool-call count
+    public required long CacheReportedSpans { get; init; }
+    public required long CacheAbsentSpans { get; init; }
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+    // the links of only the tool calls that started within the retention, and that completed. Each owner's links are counted
+    // once, in a grouped join, because owner_span_row_id has no index to look them up by. An imported request whose log gives
+    // no tool-call count has no tool data at all, as every Codex request (a rollout records no tool calls); a known 0 is data.
+    // Copilot rows are left out: Copilot logs count each usage record's tool calls, so a Copilot row without a count is a
+    // compaction, which makes none. import_sessions has no repository, so its two counts are the whole ledger's.
+    internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
+        SqliteTransaction snapshot,
+```
+
+with:
+
+```csharp
+    // the links of only the tool calls that started within the retention, and that completed. Each owner's links are counted
+    // once, in a grouped join, because owner_span_row_id has no index to look them up by. An imported request whose log gives
+    // no tool-call count may be missing tool calls without a trace: every Codex request (a rollout records no tool calls), and
+    // a Copilot usage record whose numToolCalls is missing or invalid. A known count, 0 included, is data; Copilot's reader
+    // records 0 for a compaction, which makes no tool calls, so a compaction that an earlier build imported without a count
+    // counts too. import_sessions has no repository, so its two counts are the whole ledger's.
+    internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
+        SqliteTransaction snapshot,
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+                                     THEN MAX(imported_tool_call_count - COALESCE(owned.links, 0), 0)
+                                     ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN ingest_source NOT IN ('otlp', 'import:copilot') AND imported_tool_call_count IS NULL
+                                     THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN NOT {ReportedSql}
+```
+
+with:
+
+```csharp
+                                     THEN MAX(imported_tool_call_count - COALESCE(owned.links, 0), 0)
+                                     ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN ingest_source <> 'otlp' AND imported_tool_call_count IS NULL THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN NOT {ReportedSql}
+```
+
+Edit 1 of 5 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+using System.Globalization;
+using System.Text.Json;
+using System.Xml.Linq;
+using CopilotLedger.Core.Import;
+```
+
+with:
+
+```csharp
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Xml.Linq;
+using CopilotLedger.Core.Import;
+```
+
+Edit 2 of 5 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Storage;
+using CopilotLedger.Tests.TestSupport;
+
+namespace CopilotLedger.Tests.Cli;
+```
+
+with:
+
+```csharp
+using CopilotLedger.Core.Telemetry;
+using CopilotLedger.Storage;
+using CopilotLedger.Storage.Import;
+using CopilotLedger.Tests.TestSupport;
+
+namespace CopilotLedger.Tests.Cli;
+```
+
+Edit 3 of 5 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+{
+    private const string Report = "copilot-ledger-report.html";
+
+    [Theory]
+```
+
+with:
+
+```csharp
+{
+    private const string Report = "copilot-ledger-report.html";
+    private const string CountedSession = "c0c0c0c0-0000-4000-8000-000000000020";
+    private const string UncountedSession = "c0c0c0c0-0000-4000-8000-000000000021";
+
+    // A Copilot session that starts within the tool history of ExportSeeds' ledger: after its earliest link, 11-20 12:00.
+    private static readonly DateTimeOffset RecentImport = new(2026, 11, 21, 10, 0, 0, TimeSpan.Zero);
+
+    [Theory]
+```
+
+Edit 4 of 5 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+        }
+
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains("1 imported request has no tool-call data in its session log, so its tool calls are unknown.", Notes(page));
+    }
+
+    // A Copilot import that reported 0 tool calls has tool data, and a Copilot compaction, whose row has no count, makes no
+    // tool calls, so tool history stays complete.
+    [Fact]
+    public async Task EC20_CopilotImportsKeepToolHistoryComplete()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        const string compaction = "33333333-3333-4333-8333-333333333333";
+        await store.RecordImportedAsync(
+        [
+            ImportEntries.Copilot("k8", "conv-zero", null) with { ToolCallCount = 0 },
+            ImportEntries.Copilot(compaction, "conv-zero", compaction, ImportedRecordKind.Compaction),
+        ],
+            null);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement history = data.RootElement.GetProperty("coverage").GetProperty("toolHistory");
+        Assert.Equal((true, 0), (history.GetProperty("complete").GetBoolean(), history.GetProperty("importedRequestsWithoutToolData").GetInt32()));
+        Assert.Equal("Tool calls: complete for this window.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Equal(
+            2L,
+            await LedgerSql.ScalarAsync(
+                Path.Combine(temp.Path, "data", "ledger.db"),
+                "SELECT COUNT(*) FROM spans WHERE conversation_id = 'conv-zero' AND accounting_state = 'effective';"));
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+```
+
+with:
+
+```csharp
+        }
+
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains("1 imported request has no tool-call count in its session log, so it may be missing its tool calls.", Notes(page));
+    }
+
+    // Copilot imports through the real reader keep tool history complete: a usage record that reported 0 tool calls, and a
+    // compaction, which makes none, both store a count of 0.
+    [Fact]
+    public async Task EC20_CopilotImportsKeepToolHistoryComplete()
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        await ImportCopilotAsync(
+            temp.Path,
+            new CopilotSessionLogs(CountedSession, start: RecentImport)
+                .Usage("msg_zero", "55555555-5555-4555-8555-555555555555", numToolCalls: 0)
+                .Compaction("66666666-6666-4666-8666-666666666666"),
+            recorded: 2);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        Assert.Equal(["0", "0"], await StoredToolCallCountsAsync(temp.Path, CountedSession));
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement history = data.RootElement.GetProperty("coverage").GetProperty("toolHistory");
+        Assert.Equal((true, 0), (history.GetProperty("complete").GetBoolean(), history.GetProperty("importedRequestsWithoutToolData").GetInt32()));
+        Assert.Equal("Tool calls: complete for this window.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+    }
+
+    // A Copilot usage record whose numToolCalls is missing or invalid has no tool-call count, so it may be missing tool
+    // calls: the real reader imports it without one, and the export counts it.
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("negative")]
+    public async Task EC21_ACopilotRequestWithoutAToolCallCountLeavesToolHistoryIncomplete(string count)
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        Action<JsonObject> change = count == "missing"
+            ? usage => usage.Remove("numToolCalls")
+            : usage => usage["numToolCalls"] = -1;
+        await ImportCopilotAsync(
+            temp.Path,
+            new CopilotSessionLogs(UncountedSession, start: RecentImport)
+                .Usage("msg_unknown", "44444444-4444-4444-8444-444444444444", change: change),
+            recorded: 1);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        Assert.Equal(["null"], await StoredToolCallCountsAsync(temp.Path, UncountedSession));
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement coverage = data.RootElement.GetProperty("coverage");
+        JsonElement history = coverage.GetProperty("toolHistory");
+        Assert.Equal(
+            (false, 1, 0, 0),
+            (history.GetProperty("complete").GetBoolean(),
+             history.GetProperty("importedRequestsWithoutToolData").GetInt32(),
+             history.GetProperty("spansBeforeRetention").GetInt32(),
+             history.GetProperty("importedToolCallsWithoutDetail").GetInt32()));
+        Assert.Contains(
+            "imported-requests-without-tool-data",
+            coverage.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()));
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains("1 imported request has no tool-call count in its session log, so it may be missing its tool calls.", Notes(page));
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+```
+
+Edit 5 of 5 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+    private static IReadOnlyList<string> Notes(XDocument page) =>
+        ExportFiles.ById(page, "coverage-notes").Elements("li").Select(item => item.Value).ToArray();
+
+    // A mai-code-2 request without cache counters at start, which has no API-equivalent price.
+```
+
+with:
+
+```csharp
+    private static IReadOnlyList<string> Notes(XDocument page) =>
+        ExportFiles.ById(page, "coverage-notes").Elements("li").Select(item => item.Value).ToArray();
+
+    // Imports a Copilot session log through the real reader, as gh ledger import does at ExportSeeds.GeneratedAt, into the
+    // ledger at <root>/data/ledger.db, which must record the given number of requests.
+    private static async Task ImportCopilotAsync(string root, CopilotSessionLogs log, long recorded)
+    {
+        string home = Path.Combine(root, "copilot");
+        log.Write(home);
+        ImportReport report = await new LedgerImporter(
+            JsonRateCardCalculator.LoadEmbedded(),
+            new ManualTimeProvider(ExportSeeds.GeneratedAt)).RunAsync(new ImportRequest
+            {
+                DatabasePath = Path.Combine(root, "data", "ledger.db"),
+                Sources = [new ImportSourceRequest(new CopilotSessionLogSource(), home)],
+            });
+        ImportSourceReport copilot = Assert.Single(report.Sources);
+        Assert.Equal((true, recorded), (copilot.Complete, copilot.Recorded));
+    }
+
+    // The imported_tool_call_count of a session's requests, by start time; NULL as "null".
+    private static Task<IReadOnlyList<string>> StoredToolCallCountsAsync(string root, string session) =>
+        LedgerSql.RowsAsync(
+            Path.Combine(root, "data", "ledger.db"),
+            "SELECT imported_tool_call_count FROM spans WHERE conversation_id = @p0 ORDER BY start_time_unix_ms;",
+            session);
+
+    // A mai-code-2 request without cache counters at start, which has no API-equivalent price.
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Import/CopilotCompactionTests.cs`, replace:
+
+```csharp
+        Assert.Equal(CacheCounterState.Reported, record.CacheReadState);
+        Assert.Equal(CacheCounterState.Reported, record.CacheWriteState);
+        Assert.Null(record.ToolCallCount);
+        Assert.Equal(3, record.LineNumber);
+    }
+```
+
+with:
+
+```csharp
+        Assert.Equal(CacheCounterState.Reported, record.CacheReadState);
+        Assert.Equal(CacheCounterState.Reported, record.CacheWriteState);
+        Assert.Equal(0L, record.ToolCallCount);
+        Assert.Equal(3, record.LineNumber);
+    }
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/TestSupport/ExportSeeds.cs`, replace:
+
+```csharp
+// C1, C2  trace C, conv-c, main: a local qwen3.8-27b request at 16:00 and an unpriced gpt-unknown one at 16:05.
+// D1      trace D, conv-d: claude-opus-5.5 at 17:00 in LocalRoot(root), a repository without a remote, on main.
+// I1      an imported Copilot record (conv-i, 11-20 12:00) whose bash call exited 0.
+// I2, J1  an imported record (conv-j, 11-20 12:00) whose bash call exited 1, superseded by J1, its live twin (trace J).
+// SupersedeUnmatchedAsync adds U: an imported record that a live span of its session replaces without matching it.
+// Links: execute_tool T1 and T2 (trace A, bash, exit 0 at 14:00:30, exit 1 at 14:00:40), T3 (trace B, view, status 2 at
+```
+
+with:
+
+```csharp
+// C1, C2  trace C, conv-c, main: a local qwen3.8-27b request at 16:00 and an unpriced gpt-unknown one at 16:05.
+// D1      trace D, conv-d: claude-opus-5.5 at 17:00 in LocalRoot(root), a repository without a remote, on main.
+// I1      an imported Copilot record (conv-i, 11-20 12:00) that reported its one tool call, bash, which exited 0.
+// I2, J1  an imported record (conv-j, 11-20 12:00) that reported its one tool call, bash, which exited 1, superseded by J1, its
+//         live twin (trace J).
+// SupersedeUnmatchedAsync adds U: an imported record that a live span of its session replaces without matching it.
+// Links: execute_tool T1 and T2 (trace A, bash, exit 0 at 14:00:30, exit 1 at 14:00:40), T3 (trace B, view, status 2 at
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/TestSupport/ExportSeeds.cs`, replace:
+
+```csharp
+        await store.RecordImportedAsync(
+        [
+            i1 with { ToolLinks = [ImportEntries.ToolLink(i1, "call-1", 0)] },
+            i2 with { ToolLinks = [ImportEntries.ToolLink(i2, "call-2", 1)] },
+        ],
+            null);
+```
+
+with:
+
+```csharp
+        await store.RecordImportedAsync(
+        [
+            i1 with { ToolCallCount = 1, ToolLinks = [ImportEntries.ToolLink(i1, "call-1", 0)] },
+            i2 with { ToolCallCount = 1, ToolLinks = [ImportEntries.ToolLink(i2, "call-2", 1)] },
+        ],
+            null);
+```
+
+### Tests
+
+- **CC1** A compaction read by `CopilotSessionLogSource` has `ToolCallCount` 0.
+- **EC19** The note is `1 imported request has no tool-call count in its session log, so it may be missing its tool calls.`
+- **EC20** (now through the real reader) ExportSeeds plus a Copilot session log (`c0c0c0c0-0000-4000-8000-000000000020`, from 2026-11-21 10:00 UTC) holding a usage record that reported 0 tool calls and a compaction. `LedgerImporter` imports it with `CopilotSessionLogSource` at ExportSeeds' generation time: 2 recorded, complete. Both requests store `imported_tool_call_count` 0; `complete` is true, `importedRequestsWithoutToolData` is 0, and the page says `Tool calls: complete for this window.`
+- **EC21** (2 cases) ExportSeeds plus a Copilot session log (`c0c0c0c0-0000-4000-8000-000000000021`, from 2026-11-21 10:00 UTC) whose usage record's `numToolCalls` is missing, or is -1, imported the same way: 1 recorded. The request stores no count. `complete` is false, `importedRequestsWithoutToolData` 1, `spansBeforeRetention` 0, and `importedToolCallsWithoutDetail` 0; the warnings hold `imported-requests-without-tool-data`; and the page says `Tool calls: partial; see the notes.` and has the note above.
+
+Without the reader's 0, CC1 and EC20 fail. With Task 23's Copilot exemption, both EC21 cases fail. Without I1's count, eight tests fail (EC8, EC11, EC19, EC20, EC21's two cases, TL5, and TL10), because I1 would count.
+
+### Acceptance criteria
+
+- No imported request without a tool-call count is called complete, whatever its source. Copilot's compactions, and Copilot requests that reported 0 tool calls, keep tool history complete.
+- `dotnet test CopilotLedger.slnx` passes **1416** tests (1414 + 2).
 
 ### Verify
 
@@ -14393,6 +14900,7 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 21 | XR14 | — | 1,411 |
 | 22 | TL14 | — | 1,412 |
 | 23 | EC19, EC20 | — | 1,414 |
+| 24 | EC21 (2) | CC1 (a compaction's count is 0), EC19 (its note), EC20 (through the real reader), ExportSeeds (I1 and I2 report their one tool call) | 1,416 |
 
 Exact values used across tasks:
 
@@ -14413,11 +14921,11 @@ Exact values used across tasks:
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 23, the orchestrator:
+After Task 24, the orchestrator:
 
-1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1414 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-8.md`, and the files the tasks list.
+1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1416 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-8.md`, and the files the tasks list.
 2. Exports a report from a temporary `COPILOT_LEDGER_HOME` with a few recorded spans and opens it in a browser with and without JavaScript: zoom (Ctrl or Command with the wheel, and a pinch), pan, a plain scroll over the timeline, the overview's range selection, reset, the lens switch, sorting, keyboard focus, the dark scheme, and reduced motion. The browser's console shows no Content Security Policy violation. Never point it at a real home directory.
-3. Pushes `swigerb-sprint-9-ledger-export-html-report` and opens one pull request titled exactly "Sprint 9: `gh ledger export`: self-contained offline HTML report & metadata-only bundle", whose body says `Closes #64`, lists the twenty-three task commits, and has `## Changes`, `## Deviations` (D1–D19 and P1–P15 from "Design decisions", each with a one-line rationale), `## Review fixes` (the findings of both "Review fixes" sections, each with its task), and `## Verification`.
+3. Pushes `swigerb-sprint-9-ledger-export-html-report` and opens one pull request titled exactly "Sprint 9: `gh ledger export`: self-contained offline HTML report & metadata-only bundle", whose body says `Closes #64`, lists the twenty-four task commits, and has `## Changes`, `## Deviations` (D1–D19 and P1–P15 from "Design decisions", each with a one-line rationale), `## Review fixes` (the findings of both "Review fixes" sections, each with its task), and `## Verification`.
 4. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary's export.
 5. Asks `ledger-architect` to review the branch.
 
@@ -14438,4 +14946,3 @@ This sprint doesn't bump the version, tag, or release. When the sprint closes, `
 - **Axis lines at every zoom**: the axis draws lines only down to the level it labels unzoomed, so the finer labels the script shows when zoomed in have no line under them.
 - **A crash between moving the replaced ZIP aside and moving the new one in** leaves only `<zip>.<process ID>.bak`; copying the old ZIP aside, rather than moving it, would close that window at the cost of a copy.
 - **Requests at the very ends of the axis**: a request without a duration at either end shows only half of its 1-pixel stroke; a little padding around the range would show all of it.
-- **A Copilot usage record without `numToolCalls`** would be taken for a compaction, and its tool calls for complete. No observed Copilot version writes one (Sprint 8's census); telling the two apart needs the record's kind stored, which is a schema change.
