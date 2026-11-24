@@ -11,11 +11,11 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–16 are sequential, and each builds on the ones before it. Tasks 13–16 fix what an independent review of Tasks 1–12 found; see "Review fixes (Tasks 13–16)".
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–19 are sequential, and each builds on the ones before it. Tasks 13–16 fix what an independent review of Tasks 1–12 found; see "Review fixes (Tasks 13–16)".
 
 This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-7.md`, then each task as its own commit, `Sprint 8 Task N: <Title>`, on branch `swigerb-sprint-8-ledger-import-backfill`, and opens one pull request titled exactly "Sprint 8: `gh ledger import`: retroactive backfill from local session stores (Copilot, Claude, Codex)", with `Closes #63`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
-All of this plan's code, tests, and docs are **copy exactly**. The architect built every task in a scratch repository made from `git archive 385da81`, outside this repository's worktree. Each task compiled with `TreatWarningsAsErrors` and passed the whole suite: 1052, 1059, 1083, 1097, 1126, 1162, 1188, 1197, 1215, 1231, 1234, and 1236 tests after Tasks 1–12, then 1251, 1260, 1263, and 1264 after Tasks 13–16. The architect then applied this plan's blocks with a script, task by task and in order, to a fresh `git archive 385da81` with Windows line endings (as a `core.autocrlf=true` checkout has them), built and tested after each task, and got the same counts and, line endings aside, the same files. Copy each block character for character, including every comment line, `using` directive, blank line, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs.
+All of this plan's code, tests, and docs are **copy exactly**. The architect built every task in a scratch repository made from `git archive 385da81`, outside this repository's worktree. Each task compiled with `TreatWarningsAsErrors` and passed the whole suite: 1052, 1059, 1083, 1097, 1126, 1162, 1188, 1197, 1215, 1231, 1234, and 1236 tests after Tasks 1–12, then 1251, 1260, 1263, and 1264 after Tasks 13–16, and 1267, 1269, and 1269 after Tasks 17–19. The architect then applied this plan's blocks with a script, task by task and in order, to a fresh `git archive 385da81` with Windows line endings (as a `core.autocrlf=true` checkout has them), built and tested after each task, and got the same counts and, line endings aside, the same files. Copy each block character for character, including every comment line, `using` directive, blank line, and line of Markdown. Don't add argument checks (`ThrowIfNull` and the like), cancellation tokens, `ConfigureAwait`, logging, caching, or fast paths that the code doesn't show, and don't tidy code or reword docs.
 
 Each task's specification lists its files, summarizes its contracts and algorithms for review, and then gives its code under "Code (copy exactly)". The summaries aren't code to write; the code section is. It has two kinds of blocks:
 
@@ -46,6 +46,9 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 14: Unchanged-Log Hashes, Unreadable Stores, and Dry-Run Companions (CopilotLedger.Core, Storage, Cli, docs & tests). Review findings 3, 8, and 9: `import_sessions.log_sha256`, so a log is skipped only when its size, last-write time, and SHA-256 all match; store folders that can't be listed are reported and make coverage incomplete; a dry run refuses a ledger that has only one of `-wal` and `-shm`.
 - [x] Task 15: Late Tool Links, Unmatched Supersession, and Nested Repositories (CopilotLedger.Core, Storage, Cli, docs & tests). Review findings 4, 5, and 6: a tool that ends after its request was imported gets its link; imported rows that live spans superseded without matching them are reported as `Superseded, unmatched`; `--repo` resolves a working directory's repository, so nested repositories stay out.
 - [x] Task 16: Daemon Import Rules and Failure-Log Privacy (CopilotLedger.Cli, docs & tests). Review findings 1 and 13: the daemon writes `importRules` to `daemon.json`, and `import` stops while a daemon without it runs; `IngestFailureLog` keeps only SQLite's messages; the privacy tests scan the daemon's log.
+- [ ] Task 17: Escaped Lone Surrogates Never Stop an Import (CopilotLedger.Core & tests). Review finding R1: `Utf8JsonReader.ValueTextEquals` throws `InvalidOperationException` when it unescapes a lone surrogate, and `JsonFields` caught only `JsonException`, so one line such as `{"\uDC00":1,"type":"user.message"}` in any Copilot or Codex log stopped every import and dry run with exit code 1 and printed the exception's message. A name or type that holds one now equals none of the parser's, so its line is skipped, or its property ignored, like any other unknown one.
+- [ ] Task 18: Session Folders That Can't Be Entered (CopilotLedger.Core & tests). Review finding R2: discovery tested `events.jsonl` with `FileInfo.Exists`, which is also false when the file can't be examined, so a Copilot session folder this user can't enter passed for one without a log, and the import reported complete coverage and exited with 0. Discovery now reads `Length`: only a missing `events.jsonl` means no log, and any other error is an unreadable entry, with a warning, incomplete coverage, and exit code 2.
+- [ ] Task 19: What Import Keeps, Stated Exactly (docs). Review finding R3: the README's privacy paragraph now names everything import keeps, including session IDs, providers, the repository root, tool outcomes and counts, and each log's size, time, and hash; `docs/cli.md` names the three fields the parsers read that it didn't list.
 
 ## Starting point
 
@@ -16230,6 +16233,773 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 17 specification: Escaped Lone Surrogates Never Stop an Import
+
+Review finding R1. Tasks 17 and 19 fix what the architect's review of Tasks 1–16 (at `2f086d6`) found, and Task 18 what the coordinator's review of Tasks 13–16 found; each code fix comes with tests that fail without it. They were built like Tasks 1–16: in a scratch clone of this worktree at `2f086d6`, with each task's blocks generated from its commit there, then applied by script, in order, to a copy of this worktree at `2f086d6` (Windows line endings), with a build and the whole suite after each task: 1267, 1269, and 1269 tests, and, line endings aside, the same files. The sprint now ends with Task 19.
+
+The review reproduced the problem with the CLI built at `2f086d6` (SDK 10.0.115). A Copilot session log with the line `{"\uDC00":1,"type":"user.message"}` made `gh ledger import --all`, and `--dry-run`, exit with 1 and print `Cannot read invalid UTF-16 JSON text as string. Invalid surrogate value: '0xDC00'.` to standard error, and no later log was read. So did a type such as `"\uDC00\uDC00\uDC00"`, a name with one inside `data.usage` of a usage record, and the same lines in a Codex rollout. `Utf8JsonReader.ValueTextEquals` unescapes an escaped name or string before it compares it, and a lone surrogate makes it throw `InvalidOperationException` (from `ThrowHelper.ThrowInvalidOperationException_ReadInvalidUTF16`), not `JsonException`; `JsonFields.ReadType` and `JsonFields.Read` caught only `JsonException`. That broke #63's criterion that malformed lines and unknown types are counted without echoing exception messages, and the contract of `ISessionLogSource.ReadAsync`, which throws only `ArgumentException` and `OperationCanceledException`. Copilot and Codex don't write such names or types, but a damaged or edited log can.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Import/JsonFields.cs` | `TextEquals`, through which every name and type is compared: a token that `ValueTextEquals` can't unescape equals nothing |
+| `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs` | New: CS16 |
+| `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs` | New: CX17 |
+| `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs` | New: IC15 |
+
+### Rules
+
+1. `JsonFields.TextEquals(ref Utf8JsonReader reader, string text)` returns `reader.ValueTextEquals(text)`, or `false` when that throws `InvalidOperationException`. That's exact, not a fallback: a token with an escaped lone surrogate doesn't unescape to valid UTF-16, so it never equals one of the parser's names or types, which are all ASCII.
+2. `ReadType` compares each top-level name with `type`, and the type with each known type, through `TextEquals`, and `ReadObject` compares each name with the allowlisted names through it. So a name that holds one is skipped unread, like any other unknown name, and a type that holds one is an unknown type: a skipped event, without a diagnostic.
+3. Nothing else changes. `ReadValue` already reads a string it can't decode as no value, and a line that isn't JSON is still malformed.
+
+### Code (copy exactly)
+
+Edit 1 of 4 in `src/CopilotLedger.Core/Import/JsonFields.cs`, replace:
+
+```csharp
+            while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                bool isType = reader.ValueTextEquals("type"u8);
+                reader.Read();
+                if (!isType)
+```
+
+with:
+
+```csharp
+            while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                bool isType = TextEquals(ref reader, "type");
+                reader.Read();
+                if (!isType)
+```
+
+Edit 2 of 4 in `src/CopilotLedger.Core/Import/JsonFields.cs`, replace:
+
+```csharp
+                for (int index = 0; index < types.Count; index++)
+                {
+                    if (reader.ValueTextEquals(types[index]))
+                    {
+                        found = index;
+```
+
+with:
+
+```csharp
+                for (int index = 0; index < types.Count; index++)
+                {
+                    if (TextEquals(ref reader, types[index]))
+                    {
+                        found = index;
+```
+
+Edit 3 of 4 in `src/CopilotLedger.Core/Import/JsonFields.cs`, replace:
+
+```csharp
+            foreach (PathTree.Node candidate in node.Children)
+            {
+                if (reader.ValueTextEquals(candidate.Name))
+                {
+                    child = candidate;
+```
+
+with:
+
+```csharp
+            foreach (PathTree.Node candidate in node.Children)
+            {
+                if (TextEquals(ref reader, candidate.Name))
+                {
+                    child = candidate;
+```
+
+Edit 4 of 4 in `src/CopilotLedger.Core/Import/JsonFields.cs`, replace:
+
+```csharp
+    }
+
+    private readonly record struct Value(JsonTokenType Token, string? Text, long? Integer);
+}
+```
+
+with:
+
+```csharp
+    }
+
+    // Whether the property name or string at the reader is text. ValueTextEquals throws InvalidOperationException for an
+    // escaped lone surrogate, which it can't unescape; a name or string that holds one is never one of the parser's ASCII
+    // names or types.
+    private static bool TextEquals(ref Utf8JsonReader reader, string text)
+    {
+        try
+        {
+            return reader.ValueTextEquals(text);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private readonly record struct Value(JsonTokenType Token, string? Text, long? Integer);
+}
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+```
+
+with:
+
+```csharp
+    }
+
+    // A line whose name or type holds an escaped lone surrogate is skipped like any other unknown event: the import completes,
+    // and no exception message reaches the output.
+    [Fact]
+    public async Task IC15_AnEscapedLoneSurrogateNeverStopsAnImport()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        new CopilotSessionLogs("s-a")
+            .Raw("{\"\\uDC00\\uDC00\":1,\"type\":\"user.message\"}")
+            .Raw("{\"type\":\"\\uDC00\\uDC00\\uDC00\"}")
+            .Usage("u1", S1)
+            .Write(harness.Context.CopilotHome);
+        new CodexRollouts(Thread)
+            .Raw("{\"\\uDC00\\uDC00\":1,\"type\":\"event_msg\",\"payload\":{}}")
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_1", "turn-1")
+            .Write(harness.Context.CodexHome);
+
+        CliRun dryRun = await harness.RunAsync("import", "--all", "--source", "copilot", "--source", "codex", "--dry-run");
+        CliRun run = await harness.RunAsync("import", "--all", "--source", "copilot", "--source", "codex");
+
+        Assert.Equal((0, "", 0, ""), (dryRun.ExitCode, dryRun.Error, run.ExitCode, run.Error));
+        Assert.Equal(
+            Normalize("""
+            Import from local session logs (all time, dry run)
+
+                                       Copilot     Codex
+            Sessions scanned                 1         1
+            Skipped, unchanged               0         0
+            Skipped, active                  0         0
+            Skipped, out of scope            0         0
+            Unsupported sessions             0         0
+            Records parsed                   1         1
+            Out of scope                     0         0
+            Recorded                         1         1
+            Duplicate                        0         0
+            Overlap-skipped                  0         0
+            Ambiguous-overlap                0         0
+            Superseded, unmatched            0         0
+            Malformed lines                  0         0
+            Unsupported usage shapes         0         0
+            Cost out of range                0         0
+            Unpriced                         0         1
+            Coverage                  complete  complete
+
+            Importing would record 2 requests: 0.15 AI credits ($0.00), API equivalent $0.00.
+            Dry run: nothing was written.
+
+            """),
+            dryRun.Out);
+        Assert.Equal(
+            Normalize("""
+            Import from local session logs (all time)
+
+                                       Copilot     Codex
+            Sessions scanned                 1         1
+            Skipped, unchanged               0         0
+            Skipped, active                  0         0
+            Skipped, out of scope            0         0
+            Unsupported sessions             0         0
+            Records parsed                   1         1
+            Out of scope                     0         0
+            Recorded                         1         1
+            Duplicate                        0         0
+            Overlap-skipped                  0         0
+            Ambiguous-overlap                0         0
+            Superseded, unmatched            0         0
+            Malformed lines                  0         0
+            Unsupported usage shapes         0         0
+            Cost out of range                0         0
+            Unpriced                         0         1
+            Coverage                  complete  complete
+
+            Recorded 2 requests: 0.15 AI credits ($0.00), API equivalent $0.00.
+
+            """),
+            run.Out);
+    }
+
+    private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs`, replace:
+
+```csharp
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
+```
+
+with:
+
+```csharp
+    }
+
+    // As CS16: a name or type that holds an escaped lone surrogate is none of the parser's, and the rollout is read on.
+    [Fact]
+    public async Task CX17_AnEscapedLoneSurrogateInANameOrATypeIsNeverOneOfTheParsers()
+    {
+        using TempDirectory temp = new();
+        string path = new CodexRollouts(Thread)
+            .Raw("{\"\\uDC00\\uDC00\":\"" + CopilotSessionLogs.Canary + "\",\"type\":\"event_msg\",\"payload\":{}}")
+            .Raw("{\"type\":\"\\uDC00\\uDC00\\uDC00\",\"payload\":{\"message\":\"" + CopilotSessionLogs.Canary + "\"}}")
+            .TurnContext("turn-1", "gpt-6.1-sol")
+            .Usage("resp_1", "turn-1")
+            .Write(temp.Path);
+        await File.WriteAllTextAsync(
+            path,
+            (await File.ReadAllTextAsync(path)).Replace(
+                "\"usage\":{\"input_tokens\":",
+                "\"usage\":{\"\\uDC00\\uDC00\":1,\"input_tokens\":",
+                StringComparison.Ordinal));
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(
+            (1L, 0L, 0L, 2L),
+            (result.RecordsParsed, result.UnsupportedUsageShapes, result.MalformedLines, result.SkippedEvents));
+        Assert.Equal("resp_1", Assert.Single(result.Records).RecordKey);
+        Assert.Empty(result.Diagnostics);
+        AssertNoCanary(result);
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`, replace:
+
+```csharp
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
+```
+
+with:
+
+```csharp
+    }
+
+    // ValueTextEquals can't unescape a lone surrogate, so a name or type that holds one is none of the parser's: its line is
+    // skipped, or its property ignored, like any other unknown one, and the log is read on.
+    [Fact]
+    public async Task CS16_AnEscapedLoneSurrogateInANameOrATypeIsNeverOneOfTheParsers()
+    {
+        using TempDirectory temp = new();
+        string usage = new CopilotSessionLogs(SessionId)
+            .Usage("u1", "1f0e9c2a-7b3d-4e5f-8a9b-0c1d2e3f4a5b")
+            .Lines[1]
+            .Replace("\"usage\":{\"model\":", "\"usage\":{\"\\uDC00\\uDC00\":1,\"model\":", StringComparison.Ordinal);
+        new CopilotSessionLogs(SessionId)
+            .Raw("{\"\\uDC00\\uDC00\":\"" + CopilotSessionLogs.Canary + "\",\"type\":\"user.message\"}")
+            .Raw("{\"type\":\"\\uDC00\\uDC00\\uDC00\",\"data\":{\"content\":\"" + CopilotSessionLogs.Canary + "\"}}")
+            .Raw(usage)
+            .Write(temp.Path);
+
+        SessionLogReadResult result = await ReadAsync(temp.Path);
+
+        Assert.Equal(SessionLogStatus.Read, result.Status);
+        Assert.Equal(
+            (1L, 0L, 0L, 2L),
+            (result.RecordsParsed, result.UnsupportedUsageShapes, result.MalformedLines, result.SkippedEvents));
+        Assert.Equal("u1", Assert.Single(result.Records).RecordKey);
+        Assert.Empty(result.Diagnostics);
+        AssertNoCanary(result);
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
+```
+
+### Tests
+
+- **CS16**: a Copilot log whose second line has the name `\uDC00\uDC00` before `type` `user.message`, whose third has the type `\uDC00\uDC00\uDC00`, and whose usage record `u1` has the name `\uDC00\uDC00` first in `data.usage`, is read: 1 record parsed (`u1`), 0 unsupported, 0 malformed, 2 skipped events, no diagnostics, and no canary. Without the fix, `ReadAsync` throws `InvalidOperationException`.
+- **CX17**: the same for a Codex rollout: the name before `type` `event_msg`, the type, and the name first in `payload.usage` of the `token_usage_record` `resp_1`.
+- **IC15**: `import --all --source copilot --source codex`, as a dry run and then for real, on a Copilot session and a Codex rollout with such lines, exits with 0, writes nothing to standard error, and prints the exact tables: one request parsed and recorded per source, and complete coverage.
+
+Each of these lines alone stopped the import before the fix. The names are 12 bytes because `ValueTextEquals` unescapes only a token at least as long as the text it's compared with: `\uDC00` alone, 6 bytes, never reaches the unescaping against `payload.usage`'s shortest name, `input_tokens`.
+
+### Acceptance criteria
+
+- A name or type with an escaped lone surrogate never stops a read, an import, or a dry run, and no exception message reaches the output (CS16, CX17, IC15).
+- `dotnet test CopilotLedger.slnx` passes **1267** tests (1264 + 3).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 18 specification: Session Folders That Can't Be Entered
+
+Review finding R2, from the coordinator's review of Tasks 13–16. Discovery skipped a session folder when `FileInfo.Exists` said that its `events.jsonl` didn't exist, but `Exists` is also false when the file can't be examined: it "returns false if any error occurs while trying to determine if the specified file exists", including when "the caller does not have permission to read the file" ([`FileInfo.Exists`](https://learn.microsoft.com/dotnet/api/system.io.fileinfo.exists)), because it catches every exception (dotnet/runtime `release/10.0`, `FileInfo.cs`). So a session folder that this user can't enter, such as one with mode 000, a root-owned 0700 folder left by `sudo copilot`, or one whose ACL denies this user, passed for a folder without a log: `gh ledger import --all` reported `unreadableStoreEntries` 0 and complete coverage, exited with 0, printed no warning, and never imported the session. The review reproduced it on Windows, with deny ACEs and the CLI built at `2f086d6`. Task 14's handler counted only a folder that could be entered but not listed. Codex isn't affected: its discovery reads `Length`, which throws.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` | `Discover` reads `events.Length`; only a missing `events.jsonl`, or a session folder deleted meanwhile, means no log |
+| `tests/CopilotLedger.Tests/TestSupport/DeniedDirectory.cs` | New: keeps the process out of a folder until it's disposed |
+| `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs` | New: CS17 |
+| `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs` | New: IC16 |
+
+### Rules
+
+1. For each session folder, `Discover` builds the location from `events.Length`, `LastWriteTimeUtc`, and the `inuse.*.lock` listing, as before, but without the `Exists` test. `Length` throws `FileNotFoundException` when there's no `events.jsonl` (on Unix for `ENOENT` and `ENOTDIR`, which leave the attributes at -1; on Windows for "file not found" and "path not found"), and `UnauthorizedAccessException`, or another `IOException`, when the file can't be examined: on Unix the `stat` error is kept and thrown through `Interop.GetExceptionForIoErrno`, which turns `EACCES` into `UnauthorizedAccessException` (dotnet/runtime `release/10.0`: `FileInfo.cs`, `FileSystemInfo.Unix.cs`, `FileStatus.Unix.cs`, `Interop.IOErrors.cs`, retrieved 2026-11-23); on Windows, `ERROR_ACCESS_DENIED` (verified in the review's scratch build).
+2. A `FileNotFoundException`, or a `DirectoryNotFoundException` from listing a folder deleted meanwhile, means the folder has no log, as before. Every other `IOException`, and `UnauthorizedAccessException`, is an unreadable entry: the source's coverage is incomplete, and `import` warns `Copilot session logs: 1 folder or file couldn't be listed; any logs there weren't imported` and exits with 2.
+3. This is stricter than listing the folder first, which would miss a folder that can be listed but not searched (Unix mode `r--`). A log that can be examined but not read is still read as `Unreadable`, as before.
+
+### Code (copy exactly)
+
+Edit 1 of 3 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+    public ImportSourceKind Kind => ImportSourceKind.Copilot;
+
+    // Each <home>/session-state/<session ID>/events.jsonl whose directory name is a valid session ID. A session folder, or a
+    // session-state that exists but isn't a folder that can be listed, is an unreadable entry.
+    public SessionLogDiscovery Discover(string home)
+    {
+```
+
+with:
+
+```csharp
+    public ImportSourceKind Kind => ImportSourceKind.Copilot;
+
+    // Each <home>/session-state/<session ID>/events.jsonl whose directory name is a valid session ID. A session folder that
+    // can't be entered or listed, or a session-state that exists but isn't a folder that can be listed, is an unreadable entry;
+    // a session folder without events.jsonl has no log.
+    public SessionLogDiscovery Discover(string home)
+    {
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+                }
+
+                try
+                {
+                    FileInfo events = new(Path.Combine(directory, "events.jsonl"));
+                    if (!events.Exists)
+                    {
+                        continue;
+                    }
+
+                    logs.Add(new SessionLogLocation
+                    {
+```
+
+with:
+
+```csharp
+                }
+
+                // FileInfo.Exists is false for a file that can't be examined, too, so it can't tell a folder without a log from
+                // one this user can't enter. Length throws FileNotFoundException only when there's no events.jsonl.
+                try
+                {
+                    FileInfo events = new(Path.Combine(directory, "events.jsonl"));
+                    logs.Add(new SessionLogLocation
+                    {
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`, replace:
+
+```csharp
+                        IsActive = Directory.EnumerateFiles(directory, "inuse.*.lock").Any(),
+                    });
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+```
+
+with:
+
+```csharp
+                        IsActive = Directory.EnumerateFiles(directory, "inuse.*.lock").Any(),
+                    });
+                }
+                catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    // No events.jsonl, or the session folder is gone: no log.
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ImportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+```
+
+with:
+
+```csharp
+    }
+
+    // A Copilot session folder that this user can't enter makes coverage incomplete, with a warning, and the other sessions are
+    // imported. Before, discovery took it for a folder without a log, and the import reported complete coverage with exit code
+    // 0. Root on Unix can enter it, so there both sessions are imported.
+    [Fact]
+    public async Task IC16_ASessionFolderThatCantBeEnteredMakesCoverageIncomplete()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        new CopilotSessionLogs("s-a").Usage("u1", S1).Write(harness.Context.CopilotHome);
+        string folder = Path.GetDirectoryName(new CopilotSessionLogs("s-b").Usage("u2", S2).Write(harness.Context.CopilotHome))!;
+
+        CliRun text;
+        CliRun json;
+        bool enforced;
+        using (DeniedDirectory denied = new(folder))
+        {
+            enforced = denied.Enforced;
+            text = await harness.RunAsync("import", "--all");
+            json = await harness.RunAsync("import", "--all", "--json");
+        }
+
+        Assert.True(enforced || (!OperatingSystem.IsWindows() && Environment.IsPrivilegedProcess));
+        Assert.Equal(
+            enforced ? 1L : 2L,
+            await LedgerSql.ScalarAsync(harness.Context.DatabasePath, "SELECT COUNT(*) FROM spans;"));
+        if (!enforced)
+        {
+            Assert.Equal((0, "", 0, ""), (text.ExitCode, text.Error, json.ExitCode, json.Error));
+            return;
+        }
+
+        Assert.Equal(2, text.ExitCode);
+        Assert.Equal(
+            Normalize("""
+            Import from local session logs (all time)
+
+                                         Copilot
+            Sessions scanned                   1
+            Skipped, unchanged                 0
+            Skipped, active                    0
+            Skipped, out of scope              0
+            Unsupported sessions               0
+            Records parsed                     1
+            Out of scope                       0
+            Recorded                           1
+            Duplicate                          0
+            Overlap-skipped                    0
+            Ambiguous-overlap                  0
+            Superseded, unmatched              0
+            Malformed lines                    0
+            Unsupported usage shapes           0
+            Cost out of range                  0
+            Unpriced                           0
+            Coverage                  incomplete
+
+            Recorded 1 request: 0.15 AI credits ($0.00), API equivalent $0.00.
+            Coverage is incomplete; see the warnings.
+
+            """),
+            text.Out);
+        Assert.Equal(
+            "Warning: Copilot session logs: 1 folder or file couldn't be listed; any logs there weren't imported\n",
+            text.Error);
+        Assert.Equal((2, ""), (json.ExitCode, json.Error));
+        using JsonDocument document = JsonDocument.Parse(json.Out);
+        JsonElement copilot = document.RootElement.GetProperty("sources")[0];
+        Assert.Equal(
+            ("incomplete", 1L, 1L, 1L),
+            (document.RootElement.GetProperty("coverage").GetString(),
+                copilot.GetProperty("sessionsScanned").GetInt64(),
+                copilot.GetProperty("sessionsSkippedUnchanged").GetInt64(),
+                copilot.GetProperty("unreadableStoreEntries").GetInt64()));
+        Assert.Equal(
+            """{"source":"copilot","log":"","code":"unreadableStore","event":"unknown","field":null,"version":null,"count":1,"line":null,"byteOffset":null}""",
+            JsonSerializer.Serialize(Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray())));
+    }
+
+    private static CliHarness Harness(TempDirectory temp) => new(temp.Path, new FakeCliPlatform(), new ManualTimeProvider(Now));
+
+    private static string Normalize(string value) => value.Replace("\r\n", "\n");
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`, replace:
+
+```csharp
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
+```
+
+with:
+
+```csharp
+    }
+
+    // A session folder that this user can't enter is an unreadable entry, never a session without a log, and the others are
+    // still found; a folder without events.jsonl still has no log. FileInfo.Exists, which is false for a file it can't
+    // examine, hid such a folder before. Root on Unix can enter it, so there it's read.
+    [Fact]
+    public void CS17_ASessionFolderThatCantBeEnteredIsCounted()
+    {
+        using TempDirectory temp = new();
+        new CopilotSessionLogs("a-session").Write(temp.Path);
+        string folder = Path.GetDirectoryName(new CopilotSessionLogs("b-session").Write(temp.Path))!;
+        Directory.CreateDirectory(Path.Combine(temp.Path, "session-state", "c-without-events"));
+
+        SessionLogDiscovery discovery;
+        bool enforced;
+        using (DeniedDirectory denied = new(folder))
+        {
+            enforced = denied.Enforced;
+            discovery = Source.Discover(temp.Path);
+        }
+
+        Assert.True(enforced || (!OperatingSystem.IsWindows() && Environment.IsPrivilegedProcess));
+        string[] found = enforced ? ["a-session"] : ["a-session", "b-session"];
+        Assert.Equal(found, discovery.Logs.Select(log => log.LogId));
+        Assert.Equal(enforced ? 1 : 0, discovery.UnreadableEntries);
+    }
+
+    private static async Task<SessionLogReadResult> ReadAsync(string home) =>
+        await Source.ReadAsync(Assert.Single(Source.Discover(home).Logs), CancellationToken.None);
+```
+
+New file `tests/CopilotLedger.Tests/TestSupport/DeniedDirectory.cs`:
+
+```csharp
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
+
+namespace CopilotLedger.Tests.TestSupport;
+
+// Keeps this process out of a folder until it's disposed, with in-box APIs only: on Unix, mode 000; on Windows, ACEs that deny
+// this user listing the folder and reading its files' data and attributes. Enforced is false when the denial doesn't bind,
+// which happens only for root on Unix, whom permission bits don't restrict.
+public sealed class DeniedDirectory : IDisposable
+{
+    private readonly string _path;
+    private readonly string[] _files;
+    private readonly UnixFileMode _mode;
+
+    public DeniedDirectory(string path)
+    {
+        _path = path;
+        _files = Directory.GetFiles(path);
+        if (OperatingSystem.IsWindows())
+        {
+            Deny(path, _files);
+        }
+        else
+        {
+            _mode = File.GetUnixFileMode(path);
+            File.SetUnixFileMode(path, UnixFileMode.None);
+        }
+
+        try
+        {
+            _ = Directory.EnumerateFileSystemEntries(path).Any();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Enforced = true;
+        }
+    }
+
+    // Whether this process can no longer list the folder.
+    public bool Enforced { get; }
+
+    public void Dispose()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Allow(_path, _files);
+        }
+        else
+        {
+            File.SetUnixFileMode(_path, _mode);
+        }
+    }
+
+    // The files' deny rules first, then the folder's, which would keep the files out of reach.
+    [SupportedOSPlatform("windows")]
+    private static void Deny(string path, string[] files)
+    {
+        (FileSystemAccessRule folderRule, FileSystemAccessRule fileRule) = Rules();
+        foreach (string file in files)
+        {
+            FileInfo info = new(file);
+            FileSecurity security = info.GetAccessControl();
+            security.AddAccessRule(fileRule);
+            info.SetAccessControl(security);
+        }
+
+        DirectoryInfo folder = new(path);
+        DirectorySecurity folderSecurity = folder.GetAccessControl();
+        folderSecurity.AddAccessRule(folderRule);
+        folder.SetAccessControl(folderSecurity);
+    }
+
+    // The folder's rule first, then the files'. A security object persists only the rules changed in it, so the rules are
+    // removed from fresh copies, never undone by setting the old copies again.
+    [SupportedOSPlatform("windows")]
+    private static void Allow(string path, string[] files)
+    {
+        (FileSystemAccessRule folderRule, FileSystemAccessRule fileRule) = Rules();
+        DirectoryInfo folder = new(path);
+        DirectorySecurity folderSecurity = folder.GetAccessControl();
+        folderSecurity.RemoveAccessRule(folderRule);
+        folder.SetAccessControl(folderSecurity);
+        foreach (string file in files)
+        {
+            FileInfo info = new(file);
+            FileSecurity security = info.GetAccessControl();
+            security.RemoveAccessRule(fileRule);
+            info.SetAccessControl(security);
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static (FileSystemAccessRule Folder, FileSystemAccessRule File) Rules()
+    {
+        SecurityIdentifier user = WindowsIdentity.GetCurrent().User!;
+        return (
+            new FileSystemAccessRule(
+                user,
+                FileSystemRights.ListDirectory | FileSystemRights.ReadAttributes | FileSystemRights.ReadExtendedAttributes,
+                AccessControlType.Deny),
+            new FileSystemAccessRule(
+                user,
+                FileSystemRights.ReadData | FileSystemRights.ReadAttributes | FileSystemRights.ReadExtendedAttributes,
+                AccessControlType.Deny));
+    }
+}
+```
+
+### Tests
+
+`DeniedDirectory` uses in-box APIs only. On Unix, it sets the folder's mode to 000 with `File.SetUnixFileMode` and restores the old mode. On Windows, it adds ACEs that deny the current user (`WindowsIdentity.GetCurrent().User`) `ReadData`, `ReadAttributes`, and `ReadExtendedAttributes` on each file in the folder, then `ListDirectory`, `ReadAttributes`, and `ReadExtendedAttributes` on the folder, and removes them in the reverse order from fresh copies of the ACLs, because a `FileSystemSecurity` persists only the rules changed in it. The denied rights leave reading and changing permissions alone, so restoring always works, and deny ACEs bind an administrator too. `Enforced` is whether the folder can no longer be listed, which fails only where permission bits don't bind: root on Unix. Each test requires `Enforced`, except in a privileged process on Unix, where it expects both sessions to be read instead, so the count is the same everywhere, nothing is skipped, and both CI runners take the denying branch. (Assumption: `ubuntu-latest` runs tests as a user that isn't root. The review ran both branches' code on Windows only; the Unix branch follows the runtime behavior in Rule 1.)
+
+- **CS17**: with `b-session`'s folder denied, discovery lists `a-session` only, with 1 unreadable entry, and `c-without-events`, a folder without `events.jsonl`, is still no log. Without the fix: `a-session`, with 0 unreadable entries.
+- **IC16**: with `s-b`'s folder denied, `import --all` exits with 2 and prints the exact table (1 session scanned, 1 request recorded, coverage incomplete) and the warning; `--json` then exits with 2, with `coverage` `incomplete`, `sessionsScanned` 1, `sessionsSkippedUnchanged` 1, `unreadableStoreEntries` 1, and the `unreadableStore` diagnostic; the ledger has 1 span. Without the fix, `import --all` exits with 0.
+
+### Acceptance criteria
+
+- A Copilot session folder that can't be entered makes coverage incomplete, with a warning and exit code 2, and a folder without `events.jsonl` still has no log (CS17, IC16).
+- `dotnet test CopilotLedger.slnx` passes **1269** tests (1267 + 2), with none skipped, on Windows and on Linux.
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 19 specification: What Import Keeps, Stated Exactly
+
+Review finding R3, from the architect's review of Tasks 1–16. The README's "Privacy" paragraph lists what `gh ledger import` keeps as if the list were complete, but it leaves out kept fields that `docs/cli.md`'s allowlist documents, and that IP2 and IP3 check against the schema and against what import writes: session IDs (`spans.conversation_id`, `import_sessions.log_id`), providers (`spans.provider_name`), the repository root's path (`spans.repo_root`), tool outcomes (`span_links.status_code`), tool call counts (`spans.imported_tool_call_count`), hashes of tool call IDs (`span_links.span_id`), and each log's size, last-write time, and SHA-256 hash (`import_sessions`). And `docs/cli.md`'s "Read, never stored" left out three fields that the parsers' `PathTree`s read, so "Never read: every other field" was wrong about them: `data.toolCallId` of `subagent.started`, `payload.turn_id` of Codex's `turn_context`, and `payload.session_id` of `token_usage_record`. No code changes, and the allowlist table between the markers stays as it is.
+
+### Files
+
+| File | Change |
+|---|---|
+| `README.md` | The privacy paragraph names every kind of field import keeps |
+| `docs/cli.md` | "Read, never stored" names the three fields |
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `README.md`, replace:
+
+```markdown
+## Privacy
+
+The ledger stays on your machine, and CopilotLedger never stores prompt or response content. `gh ledger import` reads Copilot's and Codex's session logs in place and keeps only what pricing and attribution need: models, token counts, times, agent names, the branch, commit, and `owner/repo` slug that a session recorded, tool names and exit codes, and SHA-256 hashes of request IDs. It never reads prompts, responses, tool arguments or results, or compaction summaries, and it doesn't read Claude Code's logs. See [What import reads and keeps](docs/cli.md#what-import-reads-and-keeps).
+
+## Documentation
+```
+
+with:
+
+```markdown
+## Privacy
+
+The ledger stays on your machine, and CopilotLedger never stores prompt or response content. `gh ledger import` reads Copilot's and Codex's session logs in place and keeps only what pricing, attribution, and later imports need: session IDs; models and providers; token counts and times; agent names; the repository root, branch, commit, and `owner/repo` slug that a session recorded; tool names, outcomes, exit codes, and counts; SHA-256 hashes of request and tool call IDs; and each log's size, last-write time, and SHA-256 hash. It never reads prompts, responses, tool arguments or results, or compaction summaries, and it doesn't read Claude Code's logs. See [What import reads and keeps](docs/cli.md#what-import-reads-and-keeps).
+
+## Documentation
+```
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+```markdown
+Imported rows leave `parent_span_id`, `server_address`, `server_port`, `pull_request_number`, and `agent_span_id` of `spans` empty, and imported tool calls leave `parent_span_id`, `git_repository_slug`, `git_branch`, and `git_commit_sha` of `span_links` empty.
+
+- **Read, never stored:** each line's `type`. From Copilot logs: `data.producer`, `data.version`, and `data.copilotVersion` of `session.start`; the working directory, `data.context.cwd`, which only `--repo` uses; each event's `agentId`; `data.usage.isByok`, `data.usage.provider.kind`, `data.usage.initiator`, and `data.usage.parentToolCallId` of usage records; and `data.success`, `data.compactionTokensUsed.requestCount`, and `data.compactionTokensUsed.provider.kind` of compactions, which decide how a record is read. Usage IDs, service request IDs, and tool call IDs are stored only as the SHA-256 hashes above. From Codex rollouts: `payload.id` (the thread ID), `payload.cli_version`, and `payload.cwd` of `session_meta`, and `payload.thread_id`, `payload.turn_id`, and `payload.root_turn_id` of `token_usage_record`.
+- **Never read:** every other field and event, including user and assistant messages, reasoning, tool arguments and results, error messages, compaction summaries (`summaryContent`) and checkpoint paths, instructions, and attachments. Import skips a line as soon as its `type` shows it's none of the events above, and it counts a line that isn't valid JSON without echoing it. Logs are read in place, never copied.
+
+## Reports
+```
+
+with:
+
+```markdown
+Imported rows leave `parent_span_id`, `server_address`, `server_port`, `pull_request_number`, and `agent_span_id` of `spans` empty, and imported tool calls leave `parent_span_id`, `git_repository_slug`, `git_branch`, and `git_commit_sha` of `span_links` empty.
+
+- **Read, never stored:** each line's `type`. From Copilot logs: `data.producer`, `data.version`, and `data.copilotVersion` of `session.start`; the working directory, `data.context.cwd`, which only `--repo` uses; each event's `agentId`, and `data.toolCallId` of `subagent.started`, which tie a sub-agent's events to its name; `data.usage.isByok`, `data.usage.provider.kind`, `data.usage.initiator`, and `data.usage.parentToolCallId` of usage records; and `data.success`, `data.compactionTokensUsed.requestCount`, and `data.compactionTokensUsed.provider.kind` of compactions, which decide how a record is read. Usage IDs, service request IDs, and tool call IDs are stored only as the SHA-256 hashes above. From Codex rollouts: `payload.id` (the thread ID), `payload.cli_version`, and `payload.cwd` of `session_meta`; `payload.turn_id` of `turn_context`, which ties each turn's model to its records; and `payload.thread_id`, `payload.session_id`, `payload.turn_id`, and `payload.root_turn_id` of `token_usage_record`.
+- **Never read:** every other field and event, including user and assistant messages, reasoning, tool arguments and results, error messages, compaction summaries (`summaryContent`) and checkpoint paths, instructions, and attachments. Import skips a line as soon as its `type` shows it's none of the events above, and it counts a line that isn't valid JSON without echoing it. Logs are read in place, never copied.
+
+## Reports
+```
+
+### Tests
+
+None: no test reads these two sentences. IP2 and IP3 still compare the allowlist table, which this task leaves alone, with the schema and with what import writes.
+
+### Acceptance criteria
+
+- The README names every kind of field in the allowlist, and `docs/cli.md` names every field of `CopilotSessionLogSource`'s and `CodexSessionLogSource`'s `PathTree`s, as kept or as read and never stored.
+- `dotnet test CopilotLedger.slnx` passes **1269** tests (1269 + 0).
+- This is the sprint's last task. The final step's checks expect 1269 passed tests, not 1264, and the pull request lists nineteen task commits.
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
 Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` or fixed times, `FakeCliPlatform` and `CliHarness` (with `CopilotHome` and `CodexHome` under the temporary root) for the CLI, and `McpTestHarness` for MCP. Session logs are synthetic, written by `CopilotSessionLogs` and `CodexRollouts`. No test starts a process, runs `git`, uses the network or Docker, or reads `~/.copilot`, `~/.codex`, `~/.claude`, or `~/.copilot-ledger`. Money is `decimal` or integer pico-USD, never `double`, and expected text is compared exactly, normalizing only the expected literal.
@@ -16253,6 +17023,9 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 14 | CS15, CX15, CX16, IR16, IR17, SN7 (2), IC12, IC13 | CS1, CX1 (unreadable entries), SN6, UA12, UA13 (`LogSha256`), IC4 (`unreadableStoreEntries`) | 1,260 |
 | 15 | IR18, IR19, IC14 | IR5 (nested repositories), IC3, IC4, IC6, and GS2's import samples (`Superseded, unmatched`) | 1,263 |
 | 16 | IP4 | DM1 (`importRules`), IC9, IC10 (rewritten), IP1 (`daemon.log`) | 1,264 |
+| 17 | CS16, CX17, IC15 | — | 1,267 |
+| 18 | CS17, IC16 | — | 1,269 |
+| 19 | — (docs only) | — | 1,269 |
 
 Exact values used across tasks:
 
@@ -16270,10 +17043,10 @@ Exact values used across tasks:
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 16, the orchestrator:
+After Task 19, the orchestrator:
 
-1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1264 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-7.md`, and the files the tasks list.
-2. Pushes `swigerb-sprint-8-ledger-import-backfill` and opens one pull request titled exactly "Sprint 8: `gh ledger import`: retroactive backfill from local session stores (Copilot, Claude, Codex)", whose body says `Closes #63`, lists the sixteen task commits, and states the migration number (6), the deviations of "Deviations from issue #63", each with a one-line rationale, and that a version 6 ledger can't be opened by earlier gh-ledger versions.
+1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1269 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-7.md`, and the files the tasks list.
+2. Pushes `swigerb-sprint-8-ledger-import-backfill` and opens one pull request titled exactly "Sprint 8: `gh ledger import`: retroactive backfill from local session stores (Copilot, Claude, Codex)", whose body says `Closes #63`, lists the plan commits, which include the review amendments, and the nineteen task commits, and states the migration number (6), the deviations of "Deviations from issue #63", each with a one-line rationale, and that a version 6 ledger can't be opened by earlier gh-ledger versions.
 3. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary.
 4. Optionally, with a temporary `COPILOT_LEDGER_HOME` and a synthetic session that a real Copilot CLI 1.0.103–1.0.114 wrote in a temporary `COPILOT_HOME` (never a copy of a user's session), runs `gh ledger import --all --dry-run` and then `gh ledger import --all`, and checks that the two reports agree and that a second run records nothing. Never point it at a real home directory.
 5. Asks `ledger-architect` to review the branch.
@@ -16294,3 +17067,9 @@ This sprint doesn't bump the version, tag, or release. When the sprint closes, `
 - **Old daemons.** `import` refuses while a daemon without the import rules runs (D29), but such a daemon started during an import, or still running after another command upgraded the ledger (possible only off Windows), records live rows without the rules until it restarts; a later migration could re-run the reconciliation.
 - **Unmatched supersession.** `Superseded, unmatched` rows keep coverage incomplete on every run whose scope holds them; a way to acknowledge them, or to learn which calls the live spans cover, could close that gap.
 - **Carried from Sprint 7:** the backfill's discoverability and batching, what the API rate card hash covers, what-if fidelity, re-billing requests recorded as `unknown_model`, more dated ids, longer cache lifetimes, MAI list prices, and the carry-overs from Sprint 6, as described in `.github/plans/archive/sprint-7.md`.
+- **Fork copies beside unidentified live rows (review of Tasks 1–16; A11).** If the GitHub Copilot app's fork copies keep `usageId` and `serviceRequestId`, a fork's copies of calls that only unidentified live rows recorded (rows from before migration 6, or BYOK spans) are recorded: the fork's own conversation has no live rows, so I2 and I3 don't defer them, and no canonical ID matches. A metadata-only census of usage IDs found in more than one session, and of whether a fork's first event names its parent, would show whether such copies need deferring. `accounting.sourceSessionId` isn't a parent pointer: sub-agent records carry the sub-agent's ID there.
+- **Matching superseded rows later (review).** `Superseded, unmatched` counts an imported row whose superseding live row lacked its canonical ID even after a live row with that ID arrives; checking every effective live row's canonical ID, not only `superseded_by`'s, would stop reporting rows that the live spans did cover.
+- **Messages of unexpected exceptions (review).** `ImportCommands` prints the message of any `InvalidOperationException`. After Task 17, only gh-ledger's own refusals throw one (a newer ledger, a dry run beside one companion file), but a dedicated exception type would keep a future one's message out of the output.
+- **Producer versions in warnings (review).** Warnings print a session's validated `copilotVersion` or `cli_version` in full (at most 64 of `[0-9A-Za-z.+-]`); printing only `MAJOR.MINOR.PATCH` would keep every string from a log out of the output.
+- **A dry run beside a running daemon (review).** No test hashes `ledger.db`, `-wal`, and `-shm` around a dry run that opens the ledger with `Mode=ReadOnly` while another connection holds it in WAL mode; the review checked it by hand, and all three were unchanged.
+- **The cost of the unchanged check (review).** A completely imported log is hashed in full on every run, so a large store costs a full read each time; see "Re-scanning and incremental parsing" above.
