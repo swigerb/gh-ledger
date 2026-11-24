@@ -4,7 +4,8 @@ using CopilotLedger.Core.Audit;
 namespace CopilotLedger.Cli.Audit;
 
 // gh ledger audit's text output: a title, the findings table, what the rules could and couldn't see, and the recommendation
-// of each kind of finding shown. Public for tests.
+// of each kind of finding shown. Strings from the ledger, the options, or the rates reach the console only through
+// AdvisoryText.Line, without escape sequences or controls. Public for tests.
 public static class AuditTable
 {
     private static readonly TableColumn[] Columns =
@@ -20,8 +21,8 @@ public static class AuditTable
     public static void Write(TextWriter output, AuditReport report, TimeZoneInfo zone)
     {
         AuditReportFilter filter = report.Filter;
-        string scope = (filter.Repository ?? "all repositories") +
-            (filter.Branch is null ? "" : $", branch {filter.Branch}") +
+        string scope = AdvisoryText.Line(filter.Repository ?? "all repositories") +
+            (filter.Branch is null ? "" : $", branch {AdvisoryText.Line(filter.Branch)}") +
             (filter.PullRequestNumber is int pr ? $", pull request #{pr}" : "");
         output.WriteLine($"Audit of {scope} ({filter.Period})");
         IReadOnlyList<AuditFinding> shown = report.Shown;
@@ -51,7 +52,7 @@ public static class AuditTable
                     [
                         AuditText.Severity(finding.Severity),
                         finding.RuleId,
-                        AuditText.Scope(finding.Scope),
+                        AdvisoryText.Line(AuditText.Scope(finding.Scope)),
                         AuditText.Window(finding.WindowStart, finding.WindowEnd, zone),
                         AuditText.KeyMetrics(finding, report.Thresholds),
                         AuditText.Impact(finding.EstimatedImpactUsd),
@@ -91,8 +92,8 @@ public static class AuditTable
         lines.Add($"Tool calls: {LedgerFormat.Count(summary.ToolCalls)} analyzed.");
         lines.Add(
             "Impacts: billed USD (GitHub AI credits and Foundry BYOK)" +
-            (report.RatesVersion is null ? "" : $" at rates {report.RatesVersion}") +
-            (report.EconomyModel is null ? "" : $", economy model {report.EconomyModel}") +
+            (report.RatesVersion is null ? "" : $" at rates {AdvisoryText.Line(report.RatesVersion)}") +
+            (report.EconomyModel is null ? "" : $", economy model {AdvisoryText.Line(report.EconomyModel)}") +
             ". Findings can overlap, so don't add their impacts up.");
         long unknownCache = summary.CacheAbsentSpans + summary.CacheLegacyUnknownSpans;
         if (unknownCache > 0)
@@ -211,6 +212,6 @@ public static class AuditTable
         "otlp" => "live",
         "import:copilot" => "from Copilot session logs",
         "import:codex" => "from Codex rollouts",
-        _ => $"from {source}",
+        _ => $"from {AdvisoryText.Line(source)}",
     };
 }

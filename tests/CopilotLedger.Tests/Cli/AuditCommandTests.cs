@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CopilotLedger.Storage;
 using CopilotLedger.Tests.TestSupport;
 
 namespace CopilotLedger.Tests.Cli;
@@ -168,6 +169,38 @@ public sealed class AuditCommandTests
         Assert.Equal((12, "premium_model_trivial_turn"), main);
         Assert.Equal((14, "failed_tool_retry cache_miss_streak context_bloat"), pullRequest);
         Assert.Equal((3, ""), imported);
+    }
+
+    // Names from the ledger reach the table without escape sequences or controls, which could rewrite the terminal; the JSON
+    // keeps them, escaped.
+    [Fact]
+    public async Task AC9_EscapesInLedgerNames_NeverReachTheTable()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), new ManualTimeProvider(AuditSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        const string agentName = "explore\u001B]0;owned\u0007";
+        const string toolName = "view\u001B[2J\u009B31m";
+        AuditSeeds.LiveTrace trace = new("e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5", "conv-e", null);
+        string agent = trace.Agent(0, AuditSeeds.At("19:00:00"), null, agentName);
+        trace.Request(1, agent, AuditSeeds.At("19:00:00"), "claude-sonnet-5.5", 10_000, 8_000, 300, agentName);
+        for (int k = 0; k < 8; k++)
+        {
+            trace.Tool(k, agent, AuditSeeds.At("19:00:00").AddSeconds(10 * (k + 1)), toolName, null, 1, agentName);
+        }
+
+        await trace.RecordAsync(store);
+        await using CliHarness harness = Harness(temp.Path);
+
+        CliRun table = await harness.RunAsync("audit");
+        CliRun json = await harness.RunAsync("audit", "--json");
+
+        Assert.Equal((0, ""), (table.ExitCode, table.Error));
+        Assert.DoesNotContain(table.Out, character => character is '\u0007' or '\u001B' or (>= '\u0080' and <= '\u009F'));
+        Assert.Contains("  (none) @ (none), explore, view  ", table.Out);
+        using JsonDocument document = JsonDocument.Parse(json.Out);
+        JsonElement scope = Assert.Single(document.RootElement.GetProperty("findings").EnumerateArray()).GetProperty("scope");
+        Assert.Equal((agentName, toolName), (scope.GetProperty("agent").GetString(), scope.GetProperty("tool").GetString()));
     }
 
     private static CliHarness Harness(string root) =>
