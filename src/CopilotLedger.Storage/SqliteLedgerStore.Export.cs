@@ -22,19 +22,24 @@ public sealed partial class SqliteLedgerStore
                COALESCE((SELECT owner.ingest_source FROM spans AS owner WHERE owner.id = span_links.owner_span_row_id), 'otlp')
         """;
 
-    // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span.
-    // Unqualified columns are span_links' outside the subquery and spans' inside it.
+    // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span: a
+    // correlated EXISTS, which finds each link's trace through ix_spans_trace, rather than an IN list of every selected trace
+    // that each page would build again. Unqualified columns are span_links' outside the subquery and spans' inside it.
     private const string ExportToolCallWhereSql = $"""
         operation_name = 'execute_tool'
           AND {EffectiveLinkSql}
           AND (@from IS NULL OR start_time_unix_ms >= @from)
           AND (@to IS NULL OR start_time_unix_ms < @to)
-          AND trace_id IN (SELECT trace_id FROM spans WHERE {FilterSql})
+          AND EXISTS (SELECT 1 FROM spans AS chain WHERE chain.trace_id = span_links.trace_id AND {FilterSql})
         """;
 
-    // Rows after the cursor in (start time, trace ID, span ID) order, or every row when there's no cursor.
-    private const string AfterCursorSql =
-        "(@after_start IS NULL OR (start_time_unix_ms, trace_id, span_id) > (@after_start, @after_trace, @after_span))";
+    // Rows after the cursor in (start time, trace ID, span ID) order. The plain lower bound on start_time_unix_ms lets every
+    // page seek ix_spans_start_time or ix_span_links_start instead of scanning and sorting the whole table; the first page's
+    // cursor is the period's start, or the earliest time, with empty IDs, which sorts before every row (ReadExportRowsAsync).
+    private const string AfterCursorSql = """
+        start_time_unix_ms >= @after_start
+          AND (start_time_unix_ms, trace_id, span_id) > (@after_start, @after_trace, @after_span)
+        """;
 
     internal static Task<IReadOnlyList<ExportSpanRow>> ReadExportSpansAsync(
         SqliteTransaction snapshot,
@@ -344,9 +349,9 @@ public sealed partial class SqliteLedgerStore
         command.Transaction = snapshot;
         command.CommandText = sql;
         AddFilterParameters(command, filter);
-        command.Parameters.AddWithValue("@after_start", OrDbNull(after?.StartTimeUnixMs));
-        command.Parameters.AddWithValue("@after_trace", OrDbNull(after?.TraceId));
-        command.Parameters.AddWithValue("@after_span", OrDbNull(after?.SpanId));
+        command.Parameters.AddWithValue("@after_start", after?.StartTimeUnixMs ?? filter.From?.ToUnixTimeMilliseconds() ?? long.MinValue);
+        command.Parameters.AddWithValue("@after_trace", after?.TraceId ?? string.Empty);
+        command.Parameters.AddWithValue("@after_span", after?.SpanId ?? string.Empty);
         command.Parameters.AddWithValue("@limit", limit);
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         List<T> rows = [];

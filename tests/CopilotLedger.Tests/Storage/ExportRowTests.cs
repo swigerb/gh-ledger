@@ -1,3 +1,4 @@
+using System.Globalization;
 using CopilotLedger.Core.Breaker;
 using CopilotLedger.Core.Import;
 using CopilotLedger.Core.Pricing;
@@ -268,6 +269,51 @@ public sealed class ExportRowTests
         Assert.Equal([null, ImportEntries.Start, new DateTimeOffset(2026, 11, 21, 15, 0, 10, TimeSpan.Zero)], earliest);
     }
 
+    // Pages seek past rows that start in the same millisecond, from the period's first, and skip or repeat none.
+    [Fact]
+    public async Task XR13_PagesSplitRowsThatStartTogether()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        DateTimeOffset start = new(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
+        string[] traces = [.. "12345".Select(digit => new string(digit, 32))];
+        await store.RecordAsync(
+        [
+            .. traces.SelectMany(trace => new[] { Request(trace, 2, start), Request(trace, 1, start) }),
+            Request(traces[0], 3, start.AddMilliseconds(-1)),
+            Request(traces[4], 3, start.AddSeconds(1)),
+        ]);
+        await store.RecordSpanLinksAsync(
+        [
+            .. traces.Take(3).SelectMany(trace => new[] { ToolCall(trace, 2, start.AddSeconds(30)), ToolCall(trace, 1, start.AddSeconds(30)) }),
+            ToolCall(new string('9', 32), 1, start.AddSeconds(30)),
+        ]);
+        LedgerFilter filter = LedgerFilter.All with { From = start, To = start.AddHours(1) };
+        await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();
+
+        List<string> spans = [];
+        ExportCursor? after = null;
+        IReadOnlyList<ExportSpanRow> page;
+        while ((page = await snapshot.GetSpansAsync(filter, after, 3)).Count > 0)
+        {
+            spans.AddRange(page.Select(row => $"{row.TraceId[0]}{row.SpanId[^1]}"));
+            after = new ExportCursor(page[^1].StartTime.ToUnixTimeMilliseconds(), page[^1].TraceId, page[^1].SpanId);
+        }
+
+        List<string> toolCalls = [];
+        after = null;
+        IReadOnlyList<ExportToolCallRow> calls;
+        while ((calls = await snapshot.GetToolCallsAsync(filter, after, 4)).Count > 0)
+        {
+            toolCalls.AddRange(calls.Select(row => $"{row.TraceId[0]}{row.SpanId[^1]}"));
+            after = new ExportCursor(calls[^1].StartTime.ToUnixTimeMilliseconds(), calls[^1].TraceId, calls[^1].SpanId);
+        }
+
+        Assert.Equal(["11", "12", "21", "22", "31", "32", "41", "42", "51", "52", "53"], spans);
+        Assert.Equal(["11", "12", "21", "22", "31", "32"], toolCalls);
+    }
+
     [Fact]
     public async Task XR5_ProvenanceListsTheRateCardsThatPricedTheSelection()
     {
@@ -355,4 +401,32 @@ public sealed class ExportRowTests
         Assert.Equal(toolCalls, (await snapshot.GetToolCallsAsync(filter, null, 100)).Count);
         Assert.Equal(trips, (await snapshot.GetBreakerTripsAsync(filter)).Count);
     }
+
+    // A claude-haiku-4.5 request, the index-th of trace, at start.
+    private static LedgerEntry Request(string trace, int index, DateTimeOffset start)
+    {
+        NormalizedGenAiSpan span = TestSpans.Chat(
+            startTime: start,
+            requestModel: "claude-haiku-4.5",
+            conversationId: "conv-" + trace[0],
+            inputTokens: 1_000,
+            outputTokens: 100) with
+        {
+            TraceId = trace,
+            SpanId = ExportSeeds.SpanId(trace, index),
+        };
+        return new LedgerEntry(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), null);
+    }
+
+    // A bash call, the index-th of trace, at start.
+    private static GenAiSpanLink ToolCall(string trace, int index, DateTimeOffset start) => new()
+    {
+        TraceId = trace,
+        SpanId = "7" + trace[0] + "0000000000000" + index.ToString(CultureInfo.InvariantCulture),
+        OperationName = "execute_tool",
+        ConversationId = "conv-" + trace[0],
+        StartTime = start,
+        ToolName = "bash",
+        ToolExitCode = 0,
+    };
 }
