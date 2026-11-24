@@ -11,7 +11,7 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–17 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–23 are sequential, and each builds on the ones before it.
 
 This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-8.md`, then each task as its own commit, `Sprint 9 Task N: <Title>`, on branch `swigerb-sprint-9-ledger-export-html-report`, and opens one pull request titled exactly "Sprint 9: `gh ledger export`: self-contained offline HTML report & metadata-only bundle", with `Closes #64`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
@@ -47,6 +47,12 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 15: Tool History Counts Every Missing Tool Call and Every Deleted One (CopilotLedger.Storage, CopilotLedger.Cli, docs & tests). Review findings A1 (R4) and R5: each imported request lacks the tool calls it reported beyond the links it owns, and tool history starts no earlier than the earliest tool call the ledger keeps, so an export with a past `--generated-at` doesn't count on tool calls that the daemon deleted.
 - [x] Task 16: Pages Seek the Start-Time Indexes (CopilotLedger.Storage & tests). Review finding C2: a plain lower bound on the start time, and a first cursor at the period's start, let each page of `spans.json` and `tool-calls.json` seek its index instead of scanning and sorting the table, and tool calls find their prompt chains through `ix_spans_trace`; 200,000 requests page in 0.3 s instead of 21 s.
 - [x] Task 17: The Timeline Draws Every Request, Labels Only Real Times, and Lets the Page Scroll (CopilotLedger.Cli, docs & tests). Review findings C1, R7 (C3), R8, and A2: a bar is at least 0.001 wide, a local time that a transition skips is no tick and one it repeats is two, `ledger-data`'s `minWidth` stops zooming where the axis still has two labels, and only Ctrl or Command with the wheel, or a pinch, zooms, so a plain scroll or a swipe scrolls the page.
+- [ ] Task 18: An Encoded Path Shows Only Its Folder Name (CopilotLedger.Cli & tests). Review finding N1: a key's percent-encoded bytes are decoded before it's judged a path and before its folder name is taken, so no `file:` URI or other encoding of a `--repo` path reaches a file or the console.
+- [ ] Task 19: The Report and the Bundle Are Moved Into Place by One Rule (CopilotLedger.Cli, docs & tests). Review findings N2, N3, D1, N6, and A4: without `--force` nothing is replaced, a read-only report or ZIP is refused even with it, the replaced ZIP is put back when the report can't be moved into place, and an export that leaves a backup or a mismatched ZIP behind exits with 1 and says so; export writes the report's temporary file, and moves and deletes both files, through `ICliPlatform`, so tests act at each step on any OS, including between the checks and the moves.
+- [ ] Task 20: Tool History Starts at the Earliest Link Kept, and Without Links There Is None (CopilotLedger.Storage, CopilotLedger.Cli, docs & tests). Review finding N4: tool history starts no earlier than the earliest span link of any kind that the ledger keeps, and a ledger that keeps none has no tool history, so a past `--generated-at` never counts on tool calls the daemon deleted.
+- [ ] Task 21: The Coverage Query Counts Each Request's Tool Links Once (CopilotLedger.Storage & tests). Review finding D2: a grouped join replaces a subquery that scanned all of `span_links` for each imported request, so the coverage query takes 0.13 s instead of 179 s for 30,000 imported requests.
+- [ ] Task 22: A Range That Ends in a Repeated Hour Keeps Its Ticks (CopilotLedger.Cli & tests). Review finding N5: ticks are found over whole local days around the range, so a range that ends inside the hour that fall-back repeats keeps the ticks of the hour's first pass, and `minWidth` never exceeds the axis.
+- [ ] Task 23: Imported Requests Without Tool Data Leave Tool History Incomplete (CopilotLedger.Storage, CopilotLedger.Cli, docs & tests). Review finding E1: the selected imported requests whose logs record no tool calls (every Codex request) are counted as `coverage.toolHistory.importedRequestsWithoutToolData`, and while there are any, tool history isn't complete; Copilot requests, compactions included, and live spans keep their coverage.
 
 ## Starting point
 
@@ -210,21 +216,21 @@ Export reads only the ledger. By default no absolute path appears anywhere: repo
 | Privacy canaries absent from `report.html`, every ZIP entry, standard output, and standard error | 10 | EP1 |
 | Allowlist tests for `ExportSpanRecord` JSON and `manifest.json` | 11 | EL1, EL2, EL3 |
 | XSS: branch and agent strings only HTML-encoded; no literal `</script>` in the embedded JSON | 10 | EP2, TL5 |
-| `repo_root` and other absolute paths only with `--include-local-paths` | 4, 5, 10, 13, 14 | EC10, EH7, EP3, EP7, EC3; D10 |
+| `repo_root` and other absolute paths only with `--include-local-paths` | 4, 5, 10, 13, 14, 18 | EC10, EH7, EP3, EP7, EC3; D10 |
 | Byte-identical HTML and ZIP for the same database, arguments, and time | 9, 10 | EP4; D14 |
 | Replay inputs and rate provenance in the manifest; `--generated-at` replays; a cap below the dataset still exports every request, whose exact sums reproduce the summary from the same snapshot | 2, 9, 10, 16 | XS2, EB3, EB5, EP4, XR13; D2, D14 |
 | Bundle integrity: exactly the allowlisted entries; `sha256` and `bytes` match; money equals `WriteMoney` output | 9 | EB1, EB2, EB3; D4 |
 | `Unpriced` and `n/a`, never `$0.00` or `0%` | 4, 7 | EC7, CH3, CH4 |
 | API-equivalent and local savings never added to billed spend; tool ticks at known starts without invented durations | 6, 7, 9 | CH1, CH2, TL6, EB4; D15 |
-| Timeline: daylight-saving bands for a fixed `--time-zone`; truncation noted; aggregates complete | 1, 6, 17 | ET3–ET7, TL4, TL12, TL2, TL3, TL11 |
-| `--out` refused without `--force`; clear `--time-zone` and `--since` errors | 4, 9, 14 | EC1, EC2, EC3, EC12, EB6 |
+| Timeline: daylight-saving bands for a fixed `--time-zone`; truncation noted; aggregates complete | 1, 6, 17, 22 | ET3–ET7, TL4, TL12, TL14, TL2, TL3, TL11 |
+| `--out` refused without `--force`; clear `--time-zone` and `--since` errors | 4, 9, 14, 19 | EC1, EC2, EC3, EC12, EC14, EC15, EB6 |
 | Meaningful without JavaScript (structural assertions, no browser) | 4–8 | CH6, EA3, EC9 |
 | Invariant formatting under `de-DE` | 10 | EP5 |
 | No new NuGet packages, no browser, Node, or Python tooling, no CDN | 8, 10 | EP6, EA1 |
 | `docs/cli.md` and `docs/guide.md` updated; `GuideSamplesTests` passes | 11, 12 | EL1–EL3, GS1, GS2 |
 | Build and tests green with warnings as errors; hermetic | all | Every task |
 | #63: every export query leaves out superseded rows | 2, 3 | XR1, XR3, XR4 |
-| #63: export reports coverage limitations, with retained tool coverage marked separately and a truncated timeline never called complete | 3, 4, 6, 9, 15 | XR4, XR10, XR11, EC8, EC11, EC13, TL2, TL10, EB5; D9 |
+| #63: export reports coverage limitations, with retained tool coverage marked separately and a truncated timeline never called complete | 3, 4, 6, 9, 15, 20, 21, 23 | XR4, XR10, XR11, XR14, EC8, EC11, EC13, EC18, EC19, EC20, TL2, TL10, EB5; D9 |
 
 ### Review fixes (Tasks 13–17)
 
@@ -254,6 +260,35 @@ Measured on 2026-11-23 for Task 16, on SQLite 3.53.3 (Microsoft.Data.Sqlite 10.0
 | Tool calls, after | `SEARCH span_links USING INDEX ix_span_links_start (start_time_unix_ms>?)`; `SEARCH chain EXISTS USING INDEX ix_spans_trace (trace_id=?)` | 0.4 s |
 
 Through the public snapshot after Task 17, the same ledger's requests page in 0.97 s and its tool calls in 0.45 s, and `export --all-repos --since all --bundle --max-timeline-spans 0` takes 9.2 s. Assumption A5, measured after Task 17: 25,000 requests and 25,000 tool calls over 25 days make a 6,067,672-byte report and a 1,716,559-byte ZIP at the default cap.
+
+### Review fixes, rounds 2 and 3 (Tasks 18–23)
+
+A second round of reviews, of Tasks 13–17 as committed at `ecc91f6`, found the problems below: the independent reviewer's N1–N5, and the coordinator's D1 and D2 (D2 is also the architect's own finding from the same round). A third round, of Tasks 18–22 as built in the scratch repository, found that EC15 didn't guard N2's fix (the independent reviewer's N6). With it, the architect found that no test made a report appear during an export (A4), and the coordinator added E1, which Sprint 10's session found. Tasks 18–23 fix them on top of Task 17; N6 and A4 are fixed in Task 19, where EC15 is written. Each fix has tests that fail without it, except Task 21's, which changes only how fast the coverage query runs (XR14 pins counts that the old query gave too). Where these tasks and the earlier ones differ, these win. They were built like Tasks 13–17, in the scratch repository, whose Task 17 tree is the same as `ecc91f6`'s apart from the plans, and applied by script, in order, to `git archive ecc91f6` with Windows line endings, with a build and the whole suite after each task: 1403, 1409, 1410, 1411, 1412, and 1414 tests, and, line endings aside, the same files.
+
+| Finding | Problem | Fix | Task |
+|---|---|---|---|
+| N1 | A `file:` URI with percent-encoded separators (`file:///C:%5CUsers%5C…%5Crepo`) kept them in its last segment, so the encoded path reached standard output and the files | A key's percent-encoded bytes are decoded, however deep the encoding, before it's judged a path and before its folder name is taken | 18 |
+| N2 | Task 14 moved aside any ZIP that existed at the move, so a ZIP that another program wrote during an export without `--force` was replaced, and its backup deleted | Without `--force`, no move replaces a file, and a ZIP or report that appeared since the check is refused as already existing | 19 |
+| N3 | When the report couldn't be moved into place and the new ZIP couldn't be deleted, the failure was swallowed | Standard error says `<zip> was written, but <report> wasn't, so they don't match.` | 19 |
+| D1 | Windows renames a read-only file but won't delete it, so `--force` moved a read-only ZIP aside, replaced it, exited 0, and left the old ZIP behind as a read-only `.bak` | A read-only report or ZIP is refused before anything is written, even with `--force` (`access is denied.`); a replaced ZIP that can't be deleted ends the export with exit code 1, and the message says where it's kept | 19 |
+| N4 | With every link deleted, tool history fell back to the 7 days before `generatedAt`, so a past `--generated-at` could still call it complete | Tool history starts no earlier than the earliest link of any kind (the daemon deletes agent invocations' links with tool calls'), and a ledger that keeps no link has no tool history | 20 |
+| D2 | The coverage query counted each imported request's links with a subquery on `owner_span_row_id`, which has no index, so it scanned all of `span_links` for every such request: 33 s for 10,000 imported requests and 30,000 links, and 179 s for 30,000 and 50,000 | A grouped join counts each owner's links once: 65 ms and 133 ms for the whole coverage query | 21 |
+| N5 | A range that ended inside the hour that fall-back repeats lost the ticks of the hour's first pass, because the loop stopped at the end's local time, and `minWidth` could exceed the axis | The tick loop walks whole local days around the range and keeps the instants inside it; `minWidth` is at most the axis, in C# and in the script | 22 |
+| N6 | EC15 wrote the other program's ZIP just before the export moved its own ZIP into place, after the decision to move a ZIP aside, so it passed even when that decision ignored `--force`; no platform call came between the checks and that decision | Export writes its report's temporary file through `ICliPlatform.WriteFileAsync`, after the checks and before that decision, and EC15 writes the other program's file there | 19 |
+| A4 | No test made a report appear during an export without `--force`, so a report move that overwrote would have passed | EC15's second case writes the report there | 19 |
+| E1 | A Codex rollout records no tool calls, so a Codex request owns no link and has no count, and an export of recent Codex imports said "Tool calls: complete for this window." | `coverage.toolHistory.importedRequestsWithoutToolData` counts the selected imported requests, other than Copilot's, without a tool-call count; above 0, tool history isn't complete, with the warning `imported-requests-without-tool-data` and a note | 23 |
+
+E1's figure leaves Copilot rows out. Copilot logs count each usage record's tool calls, and Copilot's importer records a compaction, which makes no tool calls, without a count; nothing stored tells the two apart, so a Copilot row without a count is taken for a compaction. Counting every imported row without a count would have called every export with a compaction incomplete.
+
+After Task 19, one rule set moves the two files into place:
+
+- `CanWrite` refuses a directory, an existing file without `--force`, and a read-only file even with it.
+- Without `--force`, no move overwrites.
+- With `--force`, an existing ZIP waits as `<zip>.<process ID>.bak` until the report is in place, and is put back if the report can't be.
+- An export that leaves a backup behind, or can't take a new ZIP back, exits with 1 and says so on standard error, without a path.
+- Export writes its report's temporary file through `ICliPlatform.WriteFileAsync`, and moves and deletes both files through `MoveFile` and `DeleteFile`, so a test can make another program's file appear, or a move or deletion fail, at an exact step on any OS, including between the checks and the moves.
+
+Not fixed (Low): a share path without a share (`//server`) shows the server's name; and two items deferred below.
 
 ## Task 1 specification: Time Zones and the Export's Time Rules
 
@@ -12451,6 +12486,1883 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 18 specification: An Encoded Path Shows Only Its Folder Name
+
+Review finding N1. Task 13 took a `file:` URI's last segment as it was written, so `file:///C:%5CUsers%5CAlice%5Cprivate%5Crepo`, whose separators are percent-encoded, became `C:%5CUsers%5CAlice%5Cprivate%5Crepo` in standard output, the page, and `manifest.filter.repo`.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Cli/Export/ExportRecords.cs` | `Unescape`, which `FolderName` and `LooksLikeLocalPath` apply first |
+| `tests/CopilotLedger.Tests/Cli/ExportPrivacyTests.cs` | EP7 gains 5 cases |
+
+### Rules
+
+1. `Unescape(text)` applies `Uri.UnescapeDataString` until the text stops changing, so a byte encoded twice (`%255C`) is decoded as well. `Uri.UnescapeDataString` leaves an invalid escape as it is.
+2. `LooksLikeLocalPath` judges the decoded key, so `%2Fhome%2F…` is a path, and `FolderName` takes the decoded path's last segment by Task 13's rules. A slug doesn't change: `owner/repo` holds no `%`.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/ExportRecords.cs`, replace:
+
+```csharp
+        !includeLocalPaths && (roots.Contains(key) || LooksLikeLocalPath(key)) ? FolderName(key) : key;
+
+    // A local path's last segment, once trailing / and \ are removed, so it's never a path; (root folder) for a root, such as
+    // C:\, /, or \\server\share.
+    public static string FolderName(string path)
+    {
+        string trimmed = path.TrimEnd('/', '\\');
+        string name = trimmed[(trimmed.LastIndexOfAny(['/', '\\']) + 1)..];
+        return name.Length == 0 || name.EndsWith(':') || IsShareRoot(trimmed) ? "(root folder)" : name;
+    }
+
+    // Starts with / or \, with a drive letter and a colon, or with file:.
+    public static bool LooksLikeLocalPath(string key) =>
+        key.StartsWith('/') || key.StartsWith('\\') || (key.Length >= 2 && char.IsAsciiLetter(key[0]) && key[1] == ':')
+        || key.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
+
+    // \\server\share or //server/share, without trailing separators.
+```
+
+with:
+
+```csharp
+        !includeLocalPaths && (roots.Contains(key) || LooksLikeLocalPath(key)) ? FolderName(key) : key;
+
+    // A local path's last segment, once its percent-encoded bytes are decoded and trailing / and \ removed, so it's never a
+    // path; (root folder) for a root, such as C:\, /, or \\server\share.
+    public static string FolderName(string path)
+    {
+        string trimmed = Unescape(path).TrimEnd('/', '\\');
+        string name = trimmed[(trimmed.LastIndexOfAny(['/', '\\']) + 1)..];
+        return name.Length == 0 || name.EndsWith(':') || IsShareRoot(trimmed) ? "(root folder)" : name;
+    }
+
+    // Starts with / or \, with a drive letter and a colon, or with file:, once its percent-encoded bytes are decoded.
+    public static bool LooksLikeLocalPath(string key)
+    {
+        string path = Unescape(key);
+        return path.StartsWith('/') || path.StartsWith('\\') || (path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':')
+            || path.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // text with its percent-encoded bytes decoded until none is left, however deep the encoding, as a file: URI can hold
+    // separators: file:///C:%5CUsers%5C…
+    private static string Unescape(string text)
+    {
+        string decoded = Uri.UnescapeDataString(text);
+        while (decoded != text)
+        {
+            text = decoded;
+            decoded = Uri.UnescapeDataString(text);
+        }
+
+        return text;
+    }
+
+    // \\server\share or //server/share, without trailing separators.
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Cli/ExportPrivacyTests.cs`, replace:
+
+```csharp
+    }
+
+    // A --repo that's a path shows as its last folder's name, however it ends, or as (root folder); nothing else of it
+    // reaches a file or the console.
+    [Theory]
+    [InlineData("C:/Users/Alice/private-9f3e/project/", "project")]
+```
+
+with:
+
+```csharp
+    }
+
+    // A --repo that's a path shows as its last folder's name, however it ends or is encoded, or as (root folder); nothing else
+    // of it reaches a file or the console.
+    [Theory]
+    [InlineData("C:/Users/Alice/private-9f3e/project/", "project")]
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Cli/ExportPrivacyTests.cs`, replace:
+
+```csharp
+    [InlineData("//fileserver-9f3e/share/project/", "project")]
+    [InlineData("file:///C:/Users/Alice/private-9f3e/project/", "project")]
+    [InlineData(@"\\fileserver-9f3e\private-9f3e\", "(root folder)")]
+    [InlineData(@"C:\", "(root folder)")]
+```
+
+with:
+
+```csharp
+    [InlineData("//fileserver-9f3e/share/project/", "project")]
+    [InlineData("file:///C:/Users/Alice/private-9f3e/project/", "project")]
+    [InlineData("file:///C:%5CUsers%5CAlice%5Cprivate-9f3e%5Cproject", "project")]
+    [InlineData("FILE:///home/alice%2Fprivate-9f3e%2Fproject%2f", "project")]
+    [InlineData("file:///C:/Users/Alice/private-9f3e%5cproject%5C", "project")]
+    [InlineData("C:%255CUsers%255CAlice%255Cprivate-9f3e%255Cproject", "project")]
+    [InlineData("%2Fhome%2Falice%2Fprivate-9f3e%2Fproject", "project")]
+    [InlineData(@"\\fileserver-9f3e\private-9f3e\", "(root folder)")]
+    [InlineData(@"C:\", "(root folder)")]
+```
+
+### Tests
+
+- **EP7** (5 more cases) `file:///C:%5CUsers%5CAlice%5Cprivate-9f3e%5Cproject`, `FILE:///home/alice%2Fprivate-9f3e%2Fproject%2f`, `file:///C:/Users/Alice/private-9f3e%5cproject%5C`, `C:%255CUsers%255CAlice%255Cprivate-9f3e%255Cproject`, and `%2Fhome%2Falice%2Fprivate-9f3e%2Fproject` each show `project`, and `9f3e` reaches no file.
+
+### Acceptance criteria
+
+- No encoding of a path given to `--repo` reaches a file or the console without `--include-local-paths`.
+- `dotnet test CopilotLedger.slnx` passes **1403** tests (1398 + 5).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 19 specification: The Report and the Bundle Are Moved Into Place by One Rule
+
+Review findings N2, N3, and D1:
+
+- **N2.** Task 14 moved aside any ZIP that existed at the move, with or without `--force`, so a ZIP that another program wrote during an export without `--force` was replaced, and its backup deleted.
+- **N3.** When the report couldn't be moved into place and the new ZIP couldn't be deleted, the rollback swallowed the failure.
+- **D1.** Windows renames a read-only file but won't delete it, so `--force` moved a read-only ZIP aside, replaced it, exited 0, and left the old ZIP behind, still read-only, as `<zip>.<process ID>.bak`. Before Task 14, `File.Move(…, overwrite: true)` had refused it.
+
+And review round 3's N6 and A4:
+
+- **N6.** EC15 as first written wrote the other program's ZIP just before the export moved its own ZIP into place, after the decision to move a ZIP aside, so it passed even when that decision ignored `--force`. No platform call came between the checks and that decision for a test to act at.
+- **A4.** No test made a report appear during an export without `--force`, so a report move that overwrote would have passed.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Cli/ICliPlatform.cs` | `MoveFile`, `DeleteFile`, and `WriteFileAsync` |
+| `src/CopilotLedger.Cli/SystemCliPlatform.cs` | They call `File.Move`, `File.Delete`, and `File.WriteAllBytesAsync` |
+| `src/CopilotLedger.Cli/Export/ExportCommands.cs` | `CanWrite` refuses read-only files; the rules below; `RestoreZip` returns what's left |
+| `docs/cli.md` | `--force` replaces only files that aren't read-only |
+| `tests/CopilotLedger.Tests/TestSupport/FakeCliPlatform.cs` | `MoveFile`, `DeleteFile`, `WriteFileAsync`, and `FileOperationHandler` |
+| `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs` | New: EC14 (2 cases), EC15 (2 cases), EC16, EC17 |
+
+### Rules
+
+1. `CanWrite` refuses, before anything is read or written: a directory (`<shown> is a directory.`), an existing file without `--force` (`<shown> already exists. Use --force to replace it.`), and, even with `--force`, a read-only file (`Could not write <shown>: access is denied.`). Read-only is `FileAttributes.ReadOnly`, which on Unix means that this user can read the file but not write it.
+2. Export moves its two files into place, and deletes them, through `ICliPlatform.MoveFile` and `DeleteFile`, and writes its report's temporary file through `WriteFileAsync`, which `SystemCliPlatform` implements with `File.Move`, `File.Delete`, and `File.WriteAllBytesAsync`. That write comes after `CanWrite` and before the decision to move a ZIP aside, so a test can act between the two. `ExportBundleWriter` still writes the bundle's temporary file, and temporary files are still deleted with `File.Delete`.
+3. Without `--force`, no move replaces a file. A file that appeared at either path since `CanWrite` is refused with `<shown> already exists. Use --force to replace it.`
+4. With `--force`, an existing ZIP is moved to `<zip>.<process ID>.bak` first. Then the new ZIP, and the report, are moved into place, the report replacing an existing one.
+5. If a step fails, the export exits with 1 after `Could not write <shown>: <reason>`, or after the `already exists` line, and puts the ZIP back as it was: the backup is moved over the new ZIP, or, with no backup, a new ZIP is deleted. If that fails, a second line says what's left: `<zip> was written, but <report> wasn't, so they don't match.`, followed by ` The replaced <zip> is kept as <backup's file name>.` when there's a backup; or only `The replaced <zip> is kept as <backup's file name>.` when the new ZIP never moved.
+6. After the report is in place, the backup is deleted. If it can't be, the export exits with 1, writes nothing to standard output, and says on standard error `<report> and <zip> were written, but the replaced <zip> is kept as <backup's file name>: it couldn't be deleted.`
+7. Every line names the files as `--out` gives them, and no other folder.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+```markdown
+| `--max-timeline-spans` | `20000` | The most requests, and the most tool calls, that the timeline draws: the latest ones. 0 to 100,000. |
+| `--generated-at` | Now | The generation time to record, in UTC, such as `2026-11-21T21:30:00Z`, to reproduce an earlier export. |
+| `--force` | | Replace existing files. If the report can't be replaced, the ZIP is put back as it was. |
+
+The export reads the ledger once, so the report and the bundle agree. It covers the requests that start from the first day of `--since` up to the generation time, and the tool calls of their prompt chains in the same window; breaker trips are those of the same prompt chains, and budgets those of the requests' branches, with their all-time spend as `budget list` shows it. Standard output names the files, the number of requests, the scope, and the period, and never a folder:
+```
+
+with:
+
+```markdown
+| `--max-timeline-spans` | `20000` | The most requests, and the most tool calls, that the timeline draws: the latest ones. 0 to 100,000. |
+| `--generated-at` | Now | The generation time to record, in UTC, such as `2026-11-21T21:30:00Z`, to reproduce an earlier export. |
+| `--force` | | Replace existing files that aren't read-only. If the report can't be replaced, the ZIP is put back as it was. |
+
+The export reads the ledger once, so the report and the bundle agree. It covers the requests that start from the first day of `--since` up to the generation time, and the tool calls of their prompt chains in the same window; breaker trips are those of the same prompt chains, and budgets those of the requests' branches, with their all-time spend as `budget list` shows it. Standard output names the files, the number of requests, the scope, and the period, and never a folder:
+```
+
+Edit 1 of 6 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+        try
+        {
+            // Both files are written from one snapshot, then moved into place: the ZIP first, then the report. A ZIP that
+            // --force replaces waits beside it until the report is in place, so a failed export leaves both as they were.
+            await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
+            {
+                model = await ExportModelBuilder.BuildAsync(snapshot, inputs, cancellationToken);
+                byte[] html = HtmlReportWriter.Write(model);
+                await File.WriteAllBytesAsync(htmlTemp, html, cancellationToken);
+                if (zipTemp is not null)
+                {
+```
+
+with:
+
+```csharp
+        try
+        {
+            // Both files are written from one snapshot, then moved into place: the ZIP first, then the report. Without --force,
+            // no move replaces a file, so one that appeared since CanWrite is refused. With it, an existing ZIP waits beside the
+            // new one until the report is in place, so a failed export leaves both as they were.
+            await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
+            {
+                model = await ExportModelBuilder.BuildAsync(snapshot, inputs, cancellationToken);
+                byte[] html = HtmlReportWriter.Write(model);
+                await context.Platform.WriteFileAsync(htmlTemp, html, cancellationToken);
+                if (zipTemp is not null)
+                {
+```
+
+Edit 2 of 6 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+            {
+                writing = zipShown;
+                if (File.Exists(zipPath))
+                {
+                    string backup = BackupPath(zipPath!);
+                    File.Move(zipPath!, backup);
+                    zipBackup = backup;
+                }
+
+                File.Move(zipTemp, zipPath!);
+                zipMoved = true;
+            }
+
+            writing = output;
+            File.Move(htmlTemp, htmlPath, overwrite: force);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            context.Error.WriteLine($"Could not write {writing}: {WriteFailure(ex)}");
+            if (zipPath is not null && !RestoreZip(zipPath, zipBackup, zipMoved))
+            {
+                context.Error.WriteLine($"The replaced {zipShown} is kept as {Path.GetFileName(zipBackup)}.");
+                zipBackup = null;
+            }
+
+            return 1;
+```
+
+with:
+
+```csharp
+            {
+                writing = zipShown;
+                if (force && File.Exists(zipPath))
+                {
+                    string backup = BackupPath(zipPath!);
+                    context.Platform.MoveFile(zipPath!, backup, overwrite: false);
+                    zipBackup = backup;
+                }
+
+                context.Platform.MoveFile(zipTemp, zipPath!, overwrite: false);
+                zipMoved = true;
+            }
+
+            writing = output;
+            context.Platform.MoveFile(htmlTemp, htmlPath, overwrite: force);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            context.Error.WriteLine(!force && ex is IOException && File.Exists(writing == output ? htmlPath : zipPath)
+                ? $"{writing} already exists. Use --force to replace it."
+                : $"Could not write {writing}: {WriteFailure(ex)}");
+            if (zipPath is not null && RestoreZip(context.Platform, zipPath, zipShown, output, zipBackup, zipMoved) is string left)
+            {
+                context.Error.WriteLine(left);
+            }
+
+            return 1;
+```
+
+Edit 3 of 6 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+                DeleteIfPresent(zipTemp);
+            }
+
+            if (zipBackup is not null)
+            {
+                DeleteIfPresent(zipBackup);
+            }
+        }
+```
+
+with:
+
+```csharp
+                DeleteIfPresent(zipTemp);
+            }
+        }
+
+        // The report is in place, so the replaced ZIP goes; an export that has to leave it behind doesn't succeed.
+        if (zipBackup is not null)
+        {
+            try
+            {
+                context.Platform.DeleteFile(zipBackup);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                context.Error.WriteLine(
+                    $"{output} and {zipShown} were written, but the replaced {zipShown} is kept as {Path.GetFileName(zipBackup)}: it couldn't be deleted.");
+                return 1;
+            }
+        }
+```
+
+Edit 4 of 6 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+    }
+
+    // False, after writing why, when path is a directory, or a file that --force doesn't allow replacing.
+    private static bool CanWrite(CliContext context, string path, string shown, bool force)
+    {
+```
+
+with:
+
+```csharp
+    }
+
+    // False, after writing why, when path is a directory, a file that --force doesn't allow replacing, or a read-only file,
+    // which even --force doesn't replace.
+    private static bool CanWrite(CliContext context, string path, string shown, bool force)
+    {
+```
+
+Edit 5 of 6 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+        }
+
+        return true;
+    }
+
+    // The temporary file beside target that a file is written to before it's moved into place.
+```
+
+with:
+
+```csharp
+        }
+
+        if (File.Exists(path) && IsReadOnly(path))
+        {
+            context.Error.WriteLine($"Could not write {shown}: access is denied.");
+            return false;
+        }
+
+        return true;
+    }
+
+    // Whether path is read-only (on Unix, a file that this user can read but not write); false when it can't be examined.
+    private static bool IsReadOnly(string path)
+    {
+        try
+        {
+            return File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    // The temporary file beside target that a file is written to before it's moved into place.
+```
+
+Edit 6 of 6 in `src/CopilotLedger.Cli/Export/ExportCommands.cs`, replace:
+
+```csharp
+    };
+
+    // Puts back the ZIP that --force replaced, or deletes the new one when there was none, so a failed export leaves no ZIP
+    // that doesn't match the report beside it. False when the replaced ZIP couldn't be put back.
+    private static bool RestoreZip(string zipPath, string? backup, bool moved)
+    {
+        if (backup is null)
+        {
+            if (moved)
+            {
+                DeleteIfPresent(zipPath);
+            }
+
+            return true;
+        }
+
+        try
+        {
+            File.Move(backup, zipPath, overwrite: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+```
+
+with:
+
+```csharp
+    };
+
+    // Puts the ZIP back as it was before the export: the one --force replaced, or none. Returns a line for standard error when
+    // it can't, so what's left is said, or null.
+    private static string? RestoreZip(
+        ICliPlatform platform,
+        string zipPath,
+        string zipShown,
+        string output,
+        string? backup,
+        bool moved)
+    {
+        try
+        {
+            if (backup is not null)
+            {
+                platform.MoveFile(backup, zipPath, overwrite: true);
+            }
+            else if (moved)
+            {
+                platform.DeleteFile(zipPath);
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            string kept = backup is null ? string.Empty : $"The replaced {zipShown} is kept as {Path.GetFileName(backup)}.";
+            return moved ? $"{zipShown} was written, but {output} wasn't, so they don't match. {kept}".TrimEnd() : kept;
+        }
+    }
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/ICliPlatform.cs`, replace:
+
+```csharp
+    void SetStartupCommand(string name, string? command);                  // Windows: sets that value (REG_SZ), or deletes it when command is null; other platforms throw PlatformNotSupportedException
+    bool FileExists(string path);
+    string? FindOnPath(string fileName);                                   // full path of an executable on PATH, or null
+    TimeZoneInfo? FindTimeZone(string id);                                 // a time zone by IANA ID (on Windows also by Windows ID), or null
+```
+
+with:
+
+```csharp
+    void SetStartupCommand(string name, string? command);                  // Windows: sets that value (REG_SZ), or deletes it when command is null; other platforms throw PlatformNotSupportedException
+    bool FileExists(string path);
+    void MoveFile(string source, string destination, bool overwrite);      // File.Move; export moves its files into place through it
+    void DeleteFile(string path);                                          // File.Delete; nothing when the file doesn't exist
+    Task WriteFileAsync(string path, byte[] bytes, CancellationToken cancellationToken); // File.WriteAllBytesAsync; export writes its report's temporary file through it
+    string? FindOnPath(string fileName);                                   // full path of an executable on PATH, or null
+    TimeZoneInfo? FindTimeZone(string id);                                 // a time zone by IANA ID (on Windows also by Windows ID), or null
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/SystemCliPlatform.cs`, replace:
+
+```csharp
+    }
+
+    public bool FileExists(string path) => File.Exists(path);
+
+    public string? FindOnPath(string fileName)
+```
+
+with:
+
+```csharp
+    }
+
+    public bool FileExists(string path) => File.Exists(path);
+
+    public void MoveFile(string source, string destination, bool overwrite) => File.Move(source, destination, overwrite);
+
+    public void DeleteFile(string path) => File.Delete(path);
+
+    public Task WriteFileAsync(string path, byte[] bytes, CancellationToken cancellationToken) =>
+        File.WriteAllBytesAsync(path, bytes, cancellationToken);
+
+    public string? FindOnPath(string fileName)
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+using System.Text.Json;
+using System.Xml.Linq;
+```
+
+with:
+
+```csharp
+using System.Globalization;
+using System.Text.Json;
+using System.Xml.Linq;
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+with:
+
+```csharp
+    }
+
+    // Even with --force, a read-only report or bundle stops the export before it writes anything, on every OS.
+    [Theory]
+    [InlineData("copilot-ledger-report.html")]
+    [InlineData("copilot-ledger-report.zip")]
+    public async Task EC14_AReadOnlyFileIsNotReplacedEvenWithForce(string readOnly)
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        string report = Path.Combine(temp.Path, Report);
+        string bundle = Path.ChangeExtension(report, ".zip");
+        File.WriteAllText(report, "old report");
+        File.WriteAllText(bundle, "old bundle");
+
+        File.SetAttributes(Path.Combine(temp.Path, readOnly), FileAttributes.ReadOnly);
+        CliRun run = await Harness(temp.Path).RunAsync("export", "--all-repos", "--bundle", "--force");
+        File.SetAttributes(Path.Combine(temp.Path, readOnly), FileAttributes.Normal);
+
+        Assert.Equal((1, $"Could not write {readOnly}: access is denied.\n"), (run.ExitCode, run.Error));
+        Assert.Equal(("old report", "old bundle"), (File.ReadAllText(report), File.ReadAllText(bundle)));
+        Assert.Equal([report, bundle], Directory.GetFiles(temp.Path).Order(StringComparer.Ordinal));
+    }
+
+    // Without --force, a report or bundle that another program writes during the export is refused and kept: the fake platform
+    // writes it after the checks, as the export writes its report's temporary file, so before the export decides whether to
+    // move a bundle aside.
+    [Theory]
+    [InlineData("copilot-ledger-report.zip")]
+    [InlineData("copilot-ledger-report.html")]
+    public async Task EC15_AFileThatAppearsDuringTheExportIsKeptWithoutForce(string name)
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        string competing = Path.Combine(temp.Path, name);
+        string reportTemp = $"{Path.Combine(temp.Path, Report)}.{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}.tmp";
+        FakeCliPlatform platform = new()
+        {
+            FileOperationHandler = (operation, path) =>
+            {
+                if (operation == "write" && path == reportTemp)
+                {
+                    File.WriteAllText(competing, "another program's file");
+                }
+            },
+        };
+        CliHarness cli = new(temp.Path, platform, new ManualTimeProvider(ExportSeeds.GeneratedAt, ManualTimeProvider.UtcMinus5));
+
+        CliRun run = await cli.RunAsync("export", "--all-repos", "--bundle");
+
+        Assert.Equal((1, $"{name} already exists. Use --force to replace it.\n"), (run.ExitCode, run.Error));
+        Assert.Equal("another program's file"u8.ToArray(), File.ReadAllBytes(competing));
+        Assert.Equal([competing], Directory.GetFiles(temp.Path));
+    }
+
+    // When the report can't be moved into place and the new bundle can't be deleted, standard error says that they don't
+    // match: the fake platform fails both.
+    [Fact]
+    public async Task EC16_ABundleThatCantBeTakenBackIsReported()
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        string bundle = Path.Combine(temp.Path, "copilot-ledger-report.zip");
+        FakeCliPlatform platform = new()
+        {
+            FileOperationHandler = (operation, path) =>
+            {
+                if (operation == "move" && path == Path.Combine(temp.Path, Report))
+                {
+                    throw new UnauthorizedAccessException();
+                }
+
+                if (operation == "delete" && path == bundle)
+                {
+                    throw new IOException();
+                }
+            },
+        };
+        CliHarness cli = new(temp.Path, platform, new ManualTimeProvider(ExportSeeds.GeneratedAt, ManualTimeProvider.UtcMinus5));
+
+        CliRun run = await cli.RunAsync("export", "--all-repos", "--bundle");
+
+        Assert.Equal(
+            (1, "Could not write copilot-ledger-report.html: access is denied.\ncopilot-ledger-report.zip was written, but copilot-ledger-report.html wasn't, so they don't match.\n"),
+            (run.ExitCode, run.Error));
+        Assert.Equal([bundle], Directory.GetFiles(temp.Path));
+    }
+
+    // An export that can't delete the bundle it replaced doesn't succeed: the fake platform fails the deletion.
+    [Fact]
+    public async Task EC17_AReplacedBundleThatCantBeDeletedIsReported()
+    {
+        using TempDirectory temp = new();
+        await ExportSeeds.CreateAsync(temp.Path);
+        string bundle = Path.Combine(temp.Path, "copilot-ledger-report.zip");
+        string backup = $"{bundle}.{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}.bak";
+        File.WriteAllText(bundle, "old bundle");
+        FakeCliPlatform platform = new()
+        {
+            FileOperationHandler = (operation, path) =>
+            {
+                if (operation == "delete" && path == backup)
+                {
+                    throw new IOException();
+                }
+            },
+        };
+        CliHarness cli = new(temp.Path, platform, new ManualTimeProvider(ExportSeeds.GeneratedAt, ManualTimeProvider.UtcMinus5));
+
+        CliRun run = await cli.RunAsync("export", "--all-repos", "--bundle", "--force");
+
+        Assert.Equal(
+            (1, string.Empty, $"copilot-ledger-report.html and copilot-ledger-report.zip were written, but the replaced copilot-ledger-report.zip is kept as {Path.GetFileName(backup)}: it couldn't be deleted.\n"),
+            (run.ExitCode, run.Out, run.Error));
+        Assert.Equal("old bundle", File.ReadAllText(backup));
+        Assert.Equal(
+            [Path.Combine(temp.Path, Report), bundle, backup],
+            Directory.GetFiles(temp.Path).Order(StringComparer.Ordinal));
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/TestSupport/FakeCliPlatform.cs`, replace:
+
+```csharp
+    public Dictionary<string, TimeZoneInfo> TimeZones { get; } = new(StringComparer.Ordinal);
+    public HashSet<string> ExistingFiles { get; } = new(StringComparer.Ordinal);
+    public List<(string FileName, IReadOnlyList<string> Arguments)> ProcessRuns { get; } = [];
+    public Func<string, IReadOnlyList<string>, CancellationToken, Task<ProcessRunResult>>? RunHandler { get; set; }
+```
+
+with:
+
+```csharp
+    public Dictionary<string, TimeZoneInfo> TimeZones { get; } = new(StringComparer.Ordinal);
+    public HashSet<string> ExistingFiles { get; } = new(StringComparer.Ordinal);
+
+    // Runs before each WriteFileAsync, with "write" and the file, before each MoveFile, with "move" and the destination, and
+    // before each DeleteFile, with "delete" and the file; a test may create a file or throw. The three act on real files, which
+    // tests keep in their TempDirectory.
+    public Action<string, string>? FileOperationHandler { get; set; }
+    public List<(string FileName, IReadOnlyList<string> Arguments)> ProcessRuns { get; } = [];
+    public Func<string, IReadOnlyList<string>, CancellationToken, Task<ProcessRunResult>>? RunHandler { get; set; }
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/TestSupport/FakeCliPlatform.cs`, replace:
+
+```csharp
+    public bool FileExists(string path) => ExistingFiles.Contains(path);
+
+    public string? FindOnPath(string fileName) =>
+        PathExecutables.GetValueOrDefault(fileName);
+```
+
+with:
+
+```csharp
+    public bool FileExists(string path) => ExistingFiles.Contains(path);
+
+    public void MoveFile(string source, string destination, bool overwrite)
+    {
+        FileOperationHandler?.Invoke("move", destination);
+        File.Move(source, destination, overwrite);
+    }
+
+    public void DeleteFile(string path)
+    {
+        FileOperationHandler?.Invoke("delete", path);
+        File.Delete(path);
+    }
+
+    public Task WriteFileAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+    {
+        FileOperationHandler?.Invoke("write", path);
+        return File.WriteAllBytesAsync(path, bytes, cancellationToken);
+    }
+
+    public string? FindOnPath(string fileName) =>
+        PathExecutables.GetValueOrDefault(fileName);
+```
+
+### Tests
+
+- **EC14** (2 cases) With `--force`, an old report and ZIP, and a read-only report, or a read-only ZIP: exit code 1, `Could not write <that file>: access is denied.`, both files unchanged, and no other file in the folder, on every OS.
+- **EC15** (2 cases) Without `--force`, the fake platform writes the ZIP, or the report, as the export writes its report's temporary file: exit code 1, `<that file> already exists. Use --force to replace it.`, the other program's file kept byte for byte, and no other file in the folder. The ZIP case fails when the decision to move a ZIP aside ignores `--force`; the report case fails when the report's move overwrites.
+- **EC16** The fake platform fails the report's move and the new ZIP's deletion: exit code 1, `Could not write copilot-ledger-report.html: access is denied.`, and `copilot-ledger-report.zip was written, but copilot-ledger-report.html wasn't, so they don't match.`
+- **EC17** With `--force` over an old ZIP, the fake platform fails the backup's deletion: exit code 1, nothing on standard output, `copilot-ledger-report.html and copilot-ledger-report.zip were written, but the replaced copilot-ledger-report.zip is kept as copilot-ledger-report.zip.<process ID>.bak: it couldn't be deleted.`, and the backup holds the old ZIP.
+
+### Acceptance criteria
+
+- An export never replaces a file without `--force`, or a read-only file with it; never exits 0 with a backup left behind; and says, without a path, what's left when it can't undo a step.
+- `dotnet test CopilotLedger.slnx` passes **1409** tests (1403 + 6).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 20 specification: Tool History Starts at the Earliest Link Kept, and Without Links There Is None
+
+Review finding N4. Task 15 started tool history at the earliest tool call the ledger kept, and, when it kept none, at 7 days before `generatedAt`. So after the daemon had deleted every link, an export with a past `--generated-at` could still call tool history complete.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs` | `ReadEarliestLinkStartAsync` replaces `ReadEarliestToolCallStartAsync` |
+| `src/CopilotLedger.Storage/LedgerExportSnapshot.cs` | `GetEarliestLinkStartAsync` replaces `GetEarliestToolCallStartAsync` |
+| `src/CopilotLedger.Cli/Export/ExportReportModel.cs` | `ExportToolHistoryStart`, and `ExportCoverage.ToolHistoryStart` instead of `ToolHistoryFromEarliestToolCall` |
+| `src/CopilotLedger.Cli/Export/ExportModelBuilder.cs` | The rule below |
+| `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs` | The note's three wordings |
+| `docs/cli.md` | Where tool history starts |
+| `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs` | XR12: the earliest link of any kind |
+| `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs` | EC13's note and name; new: EC18 |
+
+### Rules
+
+1. `GetEarliestLinkStartAsync` returns the smallest `start_time_unix_ms` in `span_links`, of any operation, filter, or owner, or null. The daemon deletes links of every kind by the same rule, so an agent invocation's link bounds what it deleted as well as a tool call's.
+2. Tool history (`ExportToolHistoryStart`) starts at the earliest link when that's later than 7 days before `generatedAt` (`EarliestLink`), at 7 days before `generatedAt` otherwise (`Retention`), and at `generatedAt` when the ledger keeps no link (`NoLinks`). In that last case every selected request starts before it, so `toolHistory.complete` is false. `retainedFromUtc` is the start.
+3. The notes are `Tool calls are kept for 7 days, so the <n requests> before <local time> may be missing their tool calls.` (`Retention`), `The ledger's tool history starts at <local time>, so the <n requests> before it may be missing their tool calls.` (`EarliestLink`), and `The ledger keeps no tool history, so the <n requests> may be missing their tool calls.` (`NoLinks`), with `its` for 1 request.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+```markdown
+### What the report shows
+
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call the ledger keeps, because the daemon deletes older tool calls by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Hold Ctrl or Command and scroll, or pinch, to zoom, as far as the axis can still label two times; drag sideways to pan; or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+```
+
+with:
+
+```markdown
+### What the report shows
+
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call or agent link the ledger keeps, because the daemon deletes older ones by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. A ledger that keeps none has no tool history: every request may be missing its tool calls, and `retainedFromUtc` is the generation time. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Hold Ctrl or Command and scroll, or pinch, to zoom, as far as the axis can still label two times; drag sideways to pan; or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Cli/Export/ExportModelBuilder.cs`, replace:
+
+```csharp
+        LedgerRollupRow totals = ReportCommands.Sum(byChannelModel);
+
+        // Tool history is the retention before generatedAt, but starts no earlier than the earliest tool call the ledger
+        // keeps: the daemon deletes tool calls by its own clock, so a past --generated-at can't count on the retention.
+        DateTimeOffset retained = inputs.GeneratedAt - LedgerImporter.ToolLinkRetention;
+        DateTimeOffset? earliestToolCall = await snapshot.GetEarliestToolCallStartAsync(cancellationToken);
+        DateTimeOffset toolHistoryFrom = earliestToolCall is DateTimeOffset earliest && earliest > retained ? earliest : retained;
+        ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
+        IReadOnlyList<LedgerRollupRow> byModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken);
+```
+
+with:
+
+```csharp
+        LedgerRollupRow totals = ReportCommands.Sum(byChannelModel);
+
+        // Tool history is the retention before generatedAt, but starts no earlier than the earliest span link the ledger
+        // keeps: the daemon deletes links, of tool calls and agent invocations alike, by its own clock, so a past
+        // --generated-at can't count on the retention. A ledger that keeps no link keeps no tool history.
+        DateTimeOffset retained = inputs.GeneratedAt - LedgerImporter.ToolLinkRetention;
+        DateTimeOffset? earliestLink = await snapshot.GetEarliestLinkStartAsync(cancellationToken);
+        (DateTimeOffset toolHistoryFrom, ExportToolHistoryStart toolHistoryStart) = earliestLink switch
+        {
+            null => (inputs.GeneratedAt, ExportToolHistoryStart.NoLinks),
+            DateTimeOffset earliest when earliest > retained => (earliest, ExportToolHistoryStart.EarliestLink),
+            _ => (retained, ExportToolHistoryStart.Retention),
+        };
+        ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
+        IReadOnlyList<LedgerRollupRow> byModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken);
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Cli/Export/ExportModelBuilder.cs`, replace:
+
+```csharp
+                ToolHistoryRetentionDays = LedgerImporter.ToolLinkRetention.Days,
+                ToolHistoryFromUtc = toolHistoryFrom,
+                ToolHistoryFromEarliestToolCall = toolHistoryFrom > retained,
+                SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
+                ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
+```
+
+with:
+
+```csharp
+                ToolHistoryRetentionDays = LedgerImporter.ToolLinkRetention.Days,
+                ToolHistoryFromUtc = toolHistoryFrom,
+                ToolHistoryStart = toolHistoryStart,
+                SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
+                ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Cli/Export/ExportReportModel.cs`, replace:
+
+```csharp
+}
+
+internal sealed record ExportCoverage
+{
+```
+
+with:
+
+```csharp
+}
+
+// Where tool history starts: at the retention before GeneratedAt, at the earliest span link the ledger keeps when that's
+// later, or at GeneratedAt when the ledger keeps no link.
+internal enum ExportToolHistoryStart
+{
+    Retention,
+    EarliestLink,
+    NoLinks,
+}
+
+internal sealed record ExportCoverage
+{
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Cli/Export/ExportReportModel.cs`, replace:
+
+```csharp
+    public required long CacheLegacyUnknownSpans { get; init; }
+    public required int ToolHistoryRetentionDays { get; init; }        // LedgerImporter.ToolLinkRetention.Days (7)
+    public required DateTimeOffset ToolHistoryFromUtc { get; init; }    // GeneratedAt less the retention, or the earliest tool call kept
+    public required bool ToolHistoryFromEarliestToolCall { get; init; } // ToolHistoryFromUtc is the earliest tool call kept, which is later
+    public required long SpansBeforeToolHistory { get; init; }
+    public required long ImportedToolCallsWithoutDetail { get; init; }
+```
+
+with:
+
+```csharp
+    public required long CacheLegacyUnknownSpans { get; init; }
+    public required int ToolHistoryRetentionDays { get; init; }        // LedgerImporter.ToolLinkRetention.Days (7)
+    public required DateTimeOffset ToolHistoryFromUtc { get; init; }    // where ToolHistoryStart says tool history starts
+    public required ExportToolHistoryStart ToolHistoryStart { get; init; }
+    public required long SpansBeforeToolHistory { get; init; }
+    public required long ImportedToolCallsWithoutDetail { get; init; }
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs`, replace:
+
+```csharp
+            string their = before == 1 ? "its" : "their";
+            string from = LedgerFormat.LocalTime(coverage.ToolHistoryFromUtc, zone);
+            yield return coverage.ToolHistoryFromEarliestToolCall
+                ? $"The earliest tool call the ledger keeps started at {from}, so the {requests} before it may be missing {their} tool calls."
+                : $"Tool calls are kept for {coverage.ToolHistoryRetentionDays.ToString(CultureInfo.InvariantCulture)} days, so the {requests} before {from} may be missing {their} tool calls.";
+        }
+
+        long withoutDetail = coverage.ImportedToolCallsWithoutDetail;
+```
+
+with:
+
+```csharp
+            string their = before == 1 ? "its" : "their";
+            string from = LedgerFormat.LocalTime(coverage.ToolHistoryFromUtc, zone);
+            yield return coverage.ToolHistoryStart switch
+            {
+                ExportToolHistoryStart.NoLinks => $"The ledger keeps no tool history, so the {requests} may be missing {their} tool calls.",
+                ExportToolHistoryStart.EarliestLink => $"The ledger's tool history starts at {from}, so the {requests} before it may be missing {their} tool calls.",
+                _ => $"Tool calls are kept for {coverage.ToolHistoryRetentionDays.ToString(CultureInfo.InvariantCulture)} days, so the {requests} before {from} may be missing {their} tool calls.",
+            };
+        }
+
+        long withoutDetail = coverage.ImportedToolCallsWithoutDetail;
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/LedgerExportSnapshot.cs`, replace:
+
+```csharp
+        SqliteLedgerStore.CountExportToolCallsAsync(_transaction, filter, cancellationToken);
+
+    // The start of the earliest tool call the ledger keeps, of any filter, or null when it keeps none. The daemon deletes
+    // older ones, so no tool call before it is left.
+    public Task<DateTimeOffset?> GetEarliestToolCallStartAsync(CancellationToken cancellationToken = default) =>
+        SqliteLedgerStore.ReadEarliestToolCallStartAsync(_transaction, cancellationToken);
+
+    // What the filter's spans cover. Spans that start before toolHistoryFrom may have lost their tool calls to retention.
+```
+
+with:
+
+```csharp
+        SqliteLedgerStore.CountExportToolCallsAsync(_transaction, filter, cancellationToken);
+
+    // The start of the earliest span link the ledger keeps, a tool call's or an agent invocation's, of any filter, or null when
+    // it keeps none. The daemon deletes older links of every kind, so no tool call before it is left.
+    public Task<DateTimeOffset?> GetEarliestLinkStartAsync(CancellationToken cancellationToken = default) =>
+        SqliteLedgerStore.ReadEarliestLinkStartAsync(_transaction, cancellationToken);
+
+    // What the filter's spans cover. Spans that start before toolHistoryFrom may have lost their tool calls to retention.
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+    }
+
+    // The start of the earliest execute_tool link in the whole ledger, whatever its owner, or null when there's none.
+    internal static async Task<DateTimeOffset?> ReadEarliestToolCallStartAsync(
+        SqliteTransaction snapshot,
+        CancellationToken cancellationToken)
+```
+
+with:
+
+```csharp
+    }
+
+    // The start of the earliest span link in the whole ledger, of any operation or owner, or null when there's none.
+    internal static async Task<DateTimeOffset?> ReadEarliestLinkStartAsync(
+        SqliteTransaction snapshot,
+        CancellationToken cancellationToken)
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+        await using SqliteCommand command = snapshot.Connection!.CreateCommand();
+        command.Transaction = snapshot;
+        command.CommandText = "SELECT MIN(start_time_unix_ms) FROM span_links WHERE operation_name = 'execute_tool';";
+        return await command.ExecuteScalarAsync(cancellationToken) is long start
+            ? DateTimeOffset.FromUnixTimeMilliseconds(start)
+```
+
+with:
+
+```csharp
+        await using SqliteCommand command = snapshot.Connection!.CreateCommand();
+        command.Transaction = snapshot;
+        command.CommandText = "SELECT MIN(start_time_unix_ms) FROM span_links;";
+        return await command.ExecuteScalarAsync(cancellationToken) is long start
+            ? DateTimeOffset.FromUnixTimeMilliseconds(start)
+```
+
+Edit 1 of 3 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+    // within 7 days of the generation time.
+    [Fact]
+    public async Task EC13_ToolHistoryStartsNoEarlierThanTheEarliestToolCallKept()
+    {
+        using TempDirectory temp = new();
+```
+
+with:
+
+```csharp
+    // within 7 days of the generation time.
+    [Fact]
+    public async Task EC13_ToolHistoryStartsNoEarlierThanTheEarliestLinkKept()
+    {
+        using TempDirectory temp = new();
+```
+
+Edit 2 of 3 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains(
+            "The earliest tool call the ledger keeps started at 2026-11-21 08:00, so the 2 requests before it may be missing their tool calls.",
+            Notes(page));
+    }
+```
+
+with:
+
+```csharp
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains(
+            "The ledger's tool history starts at 2026-11-21 08:00, so the 2 requests before it may be missing their tool calls.",
+            Notes(page));
+    }
+```
+
+Edit 3 of 3 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+with:
+
+```csharp
+    }
+
+    // With every link deleted, the ledger keeps no tool history, so no request's tool calls count as kept, even at a past
+    // --generated-at.
+    [Fact]
+    public async Task EC18_ALedgerWithoutLinksKeepsNoToolHistory()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        await store.PruneSpanLinksAsync(new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero));
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos", "--generated-at", "2026-11-21T21:30:00Z");
+
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement history = data.RootElement.GetProperty("coverage").GetProperty("toolHistory");
+        Assert.Equal(
+            ("2026-11-21T21:30:00.0000000+00:00", 8, false),
+            (history.GetProperty("retainedFromUtc").GetString(), history.GetProperty("spansBeforeRetention").GetInt32(), history.GetProperty("complete").GetBoolean()));
+        Assert.Contains("The ledger keeps no tool history, so the 8 requests may be missing their tool calls.", Notes(page));
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+Edit 1 of 2 in `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs`, replace:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task XR12_TheEarliestToolCallIsTheWholeLedgers()
+    {
+        using TempDirectory temp = new();
+```
+
+with:
+
+```csharp
+    }
+
+    [Fact]
+    public async Task XR12_TheEarliestLinkIsTheWholeLedgers()
+    {
+        using TempDirectory temp = new();
+```
+
+Edit 2 of 2 in `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs`, replace:
+
+```csharp
+        {
+            await using LedgerExportSnapshot snapshot = await ledger.OpenExportSnapshotAsync();
+            earliest.Add(await snapshot.GetEarliestToolCallStartAsync());
+        }
+
+        // Once I1's, I2's, T1, and T2 are deleted, T5 (A's invoke_agent link, at 14:00:50) is the earliest link, but T3 the
+        // earliest tool call.
+        await store.PruneSpanLinksAsync(new DateTimeOffset(2026, 11, 21, 14, 0, 45, TimeSpan.Zero));
+        await using (LedgerExportSnapshot pruned = await store.OpenExportSnapshotAsync())
+        {
+            earliest.Add(await pruned.GetEarliestToolCallStartAsync());
+        }
+
+        Assert.Equal([null, ImportEntries.Start, new DateTimeOffset(2026, 11, 21, 15, 0, 10, TimeSpan.Zero)], earliest);
+    }
+
+    // Pages seek past rows that start in the same millisecond, from the period's first, and skip or repeat none.
+```
+
+with:
+
+```csharp
+        {
+            await using LedgerExportSnapshot snapshot = await ledger.OpenExportSnapshotAsync();
+            earliest.Add(await snapshot.GetEarliestLinkStartAsync());
+        }
+
+        // Once I1's, I2's, T1, and T2 are deleted, the earliest link is T5, A's invoke_agent link at 14:00:50, though the
+        // earliest tool call is T3's: the daemon deletes both kinds by the same rule.
+        await store.PruneSpanLinksAsync(new DateTimeOffset(2026, 11, 21, 14, 0, 45, TimeSpan.Zero));
+        await using (LedgerExportSnapshot pruned = await store.OpenExportSnapshotAsync())
+        {
+            earliest.Add(await pruned.GetEarliestLinkStartAsync());
+        }
+
+        Assert.Equal([null, ImportEntries.Start, new DateTimeOffset(2026, 11, 21, 14, 0, 50, TimeSpan.Zero)], earliest);
+    }
+
+    // Pages seek past rows that start in the same millisecond, from the period's first, and skip or repeat none.
+```
+
+### Tests
+
+- **XR12** (changed) The earliest link is null in an empty ledger, and I1's and I2's 11-20 12:00 in `ExportSeeds`. Once the links before 14:00:45 on 11-21 are deleted, it's T5's 14:00:50, an invoke_agent link.
+- **EC13** (changed) Renamed `EC13_ToolHistoryStartsNoEarlierThanTheEarliestLinkKept`. Its note is `The ledger's tool history starts at 2026-11-21 08:00, so the 2 requests before it may be missing their tool calls.`
+- **EC18** With every link deleted, an export at `2026-11-21T21:30:00Z` has `retainedFromUtc` `2026-11-21T21:30:00.0000000+00:00`, 8 requests before it, and `complete` false, and the note `The ledger keeps no tool history, so the 8 requests may be missing their tool calls.`
+
+### Acceptance criteria
+
+- At any `--generated-at`, tool history is never called complete for a request whose tool calls the daemon may have deleted.
+- `dotnet test CopilotLedger.slnx` passes **1410** tests (1409 + 1).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 21 specification: The Coverage Query Counts Each Request's Tool Links Once
+
+Review finding D2, from the coordinator's review and the architect's own. Task 15's `(SELECT COUNT(*) FROM span_links WHERE span_links.owner_span_row_id = spans.id AND span_links.operation_name = 'execute_tool')` ran once for each selected imported request with tool calls. `owner_span_row_id` has no index, and `span_links` is `WITHOUT ROWID`, so each run scanned the whole table (`SCAN spans`, `CORRELATED SCALAR SUBQUERY 1`, `SCAN span_links`).
+
+Measured on 2026-11-23 through `GetCoverageAsync`, with 10,000 imported requests and 30,007 links it took 33.2 s, and with 30,000 and 50,007, 178.8 s. Task 3's `NOT EXISTS` form, which Task 15 replaced, took 1.7 s and 44.7 s. The query runs on every export. The counts don't change.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs` | The coverage query joins each owner's link count |
+| `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs` | New: XR14 |
+
+### Rules
+
+1. The coverage query adds `LEFT JOIN (SELECT owner_span_row_id, COUNT(*) AS links FROM span_links WHERE operation_name = 'execute_tool' AND owner_span_row_id IS NOT NULL GROUP BY owner_span_row_id) AS owned ON owned.owner_span_row_id = spans.id`. A request then lacks `MAX(imported_tool_call_count - COALESCE(owned.links, 0), 0)`.
+2. SQLite counts once and finds each request's count through an automatic index: `MATERIALIZE owned`, then `SEARCH owned USING AUTOMATIC COVERING INDEX (owner_span_row_id=?)`. On the ledgers above, the whole coverage query takes 65 ms and 133 ms.
+3. A selected request is effective, so every link it owns counts, and `EffectiveLinkSql` doesn't change the counts. No index is added, because that needs a migration.
+
+### Code (copy exactly)
+
+Edit 1 of 3 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+    // call that no live span covers, so it counts when the filter selects it by its own columns, as gh ledger import reports
+    // it. An imported request lacks the detail of each tool call it made beyond the execute_tool links it owns: import keeps
+    // the links of only the tool calls that started within the retention, and that completed. import_sessions has no
+    // repository, so its two counts are the whole ledger's.
+    internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
+        SqliteTransaction snapshot,
+```
+
+with:
+
+```csharp
+    // call that no live span covers, so it counts when the filter selects it by its own columns, as gh ledger import reports
+    // it. An imported request lacks the detail of each tool call it made beyond the execute_tool links it owns: import keeps
+    // the links of only the tool calls that started within the retention, and that completed. Each owner's links are counted
+    // once, in a grouped join, because owner_span_row_id has no index to look them up by. import_sessions has no repository,
+    // so its two counts are the whole ledger's.
+    internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
+        SqliteTransaction snapshot,
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+            SELECT COALESCE(SUM(CASE WHEN start_time_unix_ms < @tool_history_from THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN imported_tool_call_count > 0
+                                     THEN MAX(imported_tool_call_count
+                                              - (SELECT COUNT(*) FROM span_links
+                                                  WHERE span_links.owner_span_row_id = spans.id
+                                                    AND span_links.operation_name = 'execute_tool'), 0)
+                                     ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
+```
+
+with:
+
+```csharp
+            SELECT COALESCE(SUM(CASE WHEN start_time_unix_ms < @tool_history_from THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN imported_tool_call_count > 0
+                                     THEN MAX(imported_tool_call_count - COALESCE(owned.links, 0), 0)
+                                     ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+                                      AND (cache_read_state = 'legacy_unknown' OR cache_write_state = 'legacy_unknown')
+                                     THEN 1 ELSE 0 END), 0)
+            FROM spans WHERE {FilterSql};
+
+            SELECT COALESCE(SUM(records_ambiguous), 0), COALESCE(SUM(CASE WHEN complete = 0 THEN 1 ELSE 0 END), 0)
+```
+
+with:
+
+```csharp
+                                      AND (cache_read_state = 'legacy_unknown' OR cache_write_state = 'legacy_unknown')
+                                     THEN 1 ELSE 0 END), 0)
+            FROM spans
+            LEFT JOIN (SELECT owner_span_row_id, COUNT(*) AS links FROM span_links
+                       WHERE operation_name = 'execute_tool' AND owner_span_row_id IS NOT NULL
+                       GROUP BY owner_span_row_id) AS owned ON owned.owner_span_row_id = spans.id
+            WHERE {FilterSql};
+
+            SELECT COALESCE(SUM(records_ambiguous), 0), COALESCE(SUM(CASE WHEN complete = 0 THEN 1 ELSE 0 END), 0)
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Storage/ExportRowTests.cs`, replace:
+
+```csharp
+    }
+
+    // Pages seek past rows that start in the same millisecond, from the period's first, and skip or repeat none.
+    [Fact]
+```
+
+with:
+
+```csharp
+    }
+
+    // An imported request lacks the tool calls it reported beyond its own execute_tool links: all 3 with none, 2 of 3 with one
+    // (an invoke_agent link it owns doesn't count), and none of 1 with two.
+    [Fact]
+    public async Task XR14_EachImportedRequestLacksWhatItsOwnToolLinksDontCover()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        ImportedLedgerEntry none = ImportEntries.Copilot("k1", "conv-1", null);
+        ImportedLedgerEntry some = ImportEntries.Copilot("k2", "conv-2", null);
+        ImportedLedgerEntry more = ImportEntries.Copilot("k3", "conv-3", null);
+        await store.RecordImportedAsync(
+        [
+            none with { ToolCallCount = 3 },
+            some with { ToolCallCount = 3, ToolLinks = [ImportEntries.ToolLink(some, "call-1", 0)] },
+            more with { ToolCallCount = 1, ToolLinks = [ImportEntries.ToolLink(more, "call-2", 0), ImportEntries.ToolLink(more, "call-3", 1)] },
+        ],
+            null);
+        await LedgerSql.ExecuteAsync(
+            store.DatabasePath,
+            """
+            INSERT INTO span_links (trace_id, span_id, operation_name, start_time_unix_ms, recorded_at_unix_ms, owner_span_row_id)
+            SELECT trace_id, '7a00000000000001', 'invoke_agent', start_time_unix_ms, 0, id FROM spans WHERE trace_id = @p0;
+            """,
+            some.Span.TraceId);
+
+        await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();
+        ExportCoverageRow coverage = await snapshot.GetCoverageAsync(LedgerFilter.All, ImportEntries.Start.AddDays(-7));
+
+        Assert.Equal(5, coverage.ImportedToolCallsWithoutDetail);
+    }
+
+    // Pages seek past rows that start in the same millisecond, from the period's first, and skip or repeat none.
+    [Fact]
+```
+
+### Tests
+
+- **XR14** Imported requests that reported 3 tool calls and own no link, 3 with one execute_tool link and an invoke_agent link, and 1 with two execute_tool links lack 3, 2, and 0, so 5 in all. XR14 passes before this task too: XR4, XR11, and XR14 pin counts that the old and the new query give alike.
+
+### Acceptance criteria
+
+- The coverage query reads `span_links` once, and its counts don't change.
+- `dotnet test CopilotLedger.slnx` passes **1411** tests (1410 + 1).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 22 specification: A Range That Ends in a Repeated Hour Keeps Its Ticks
+
+Review finding N5. Task 17's tick loop walked local times only as far as the local time of the range's end. So when a range ended inside the hour that fall-back repeats (New York, 2026-11-01 05:01–06:01:02 UTC), the 10-minute marks of the hour's first pass were never reached. One tick was left, and `minWidth` came to about 1966, more than the axis, so the script's clamp had a floor above its ceiling.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Cli/Export/TimelineLayout.cs` | `Ticks` walks whole local days around the range; `MinWidth` is at most `Width` |
+| `src/CopilotLedger.Cli/Export/Assets/report.js` | `minWidth` is at most `width` |
+| `tests/CopilotLedger.Tests/Cli/ExportTimelineTests.cs` | New: TL14 |
+
+### Rules
+
+1. `Ticks` walks local boundaries from the midnight before t0's local date to the midnight after t1's, and keeps each boundary's instants that fall in [t0, t1], as before.
+2. `MinWidth` is at most 1000, and the script uses `Math.min(timeline.minWidth, width)`.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/Assets/report.js`, replace:
+
+```
+    }
+
+    var width = timeline.width;
+    var minWidth = timeline.minWidth;
+    var height = Number(plot.getAttribute('height'));
+    var ticks = Array.isArray(timeline.ticks) ? timeline.ticks : [];
+```
+
+with:
+
+```
+    }
+
+    var width = timeline.width;
+    var minWidth = Math.min(timeline.minWidth, width);
+    var height = Number(plot.getAttribute('height'));
+    var ticks = Array.isArray(timeline.ticks) ? timeline.ticks : [];
+```
+
+Edit 1 of 3 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+    {
+        TimeSpan step = Step(t1 - t0);
+        DateTime end = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t1), zone).DateTime;
+        List<(long Instant, int Level, string Label)> boundaries = [];
+        for (DateTime local = ExportTime.LocalDate(DateTimeOffset.FromUnixTimeMilliseconds(t0), zone).ToDateTime(TimeOnly.MinValue);
+             local <= end;
+             local += step)
+        {
+```
+
+with:
+
+```csharp
+    {
+        TimeSpan step = Step(t1 - t0);
+        List<(long Instant, int Level, string Label)> boundaries = [];
+
+        // Whole local days around the range, so a time that a transition repeats is reached at both of its instants, whatever
+        // local time the range ends at; instants outside [t0, t1] are dropped.
+        DateTime last = ExportTime.LocalDate(DateTimeOffset.FromUnixTimeMilliseconds(t1), zone).AddDays(1).ToDateTime(TimeOnly.MinValue);
+        for (DateTime local = ExportTime.LocalDate(DateTimeOffset.FromUnixTimeMilliseconds(t0), zone).AddDays(-1).ToDateTime(TimeOnly.MinValue);
+             local <= last;
+             local += step)
+        {
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+        range <= DayMs ? 3 : range <= 7 * DayMs ? 2 : range <= 62 * DayMs ? 1 : 0;
+
+    // The narrowest view the script zooms to: twice the widest gap between two neighboring ticks, or between an end of the
+    // axis and its nearest tick, so every view holds at least two ticks to label; at least half a unit.
+    private static decimal MinWidth(IReadOnlyList<ExportAxisTick> ticks)
+    {
+```
+
+with:
+
+```csharp
+        range <= DayMs ? 3 : range <= 7 * DayMs ? 2 : range <= 62 * DayMs ? 1 : 0;
+
+    // The narrowest view the script zooms to: twice the widest gap between two neighboring ticks, or between an end of the
+    // axis and its nearest tick, so every view holds at least two ticks to label; at least half a unit, at most the axis.
+    private static decimal MinWidth(IReadOnlyList<ExportAxisTick> ticks)
+    {
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Cli/Export/TimelineLayout.cs`, replace:
+
+```csharp
+        }
+
+        return Math.Max(2 * widest, 0.5m);
+    }
+
+    private static ExportTimelineRow Row(
+```
+
+with:
+
+```csharp
+        }
+
+        return Math.Min(Math.Max(2 * widest, 0.5m), Width);
+    }
+
+    private static ExportTimelineRow Row(
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ExportTimelineTests.cs`, replace:
+
+```csharp
+    }
+
+    private static CliHarness Harness(string root)
+    {
+```
+
+with:
+
+```csharp
+    }
+
+    // A range that ends inside the hour that fall-back repeats has every tick: the 10-minute marks of the hour's first pass,
+    // and 01:00 of its second; and zooming never needs more than the whole axis.
+    [Fact]
+    public async Task TL14_ARangeThatEndsInARepeatedHourHasAllItsTicks()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = new(Path.Combine(temp.Path, "data", "ledger.db"), new ManualTimeProvider(ExportSeeds.GeneratedAt));
+        await store.InitializeAsync();
+        await store.RecordAsync(
+        [
+            Entry("conv-dst", 1, new DateTimeOffset(2026, 11, 1, 5, 1, 0, TimeSpan.Zero)),
+            Entry("conv-dst", 2, new DateTimeOffset(2026, 11, 1, 6, 1, 0, TimeSpan.Zero)),
+        ]);
+
+        await ExportAsync(
+            Harness(temp.Path),
+            temp.Path,
+            "--all-repos", "--since", "all", "--time-zone", "Test/New_York", "--generated-at", "2026-12-01T00:00:00Z");
+
+        string html = ExportFiles.ReadReport(Path.Combine(temp.Path, Report));
+        using JsonDocument data = ExportFiles.LedgerData(html);
+        JsonElement timeline = data.RootElement.GetProperty("timeline");
+        Assert.Equal(
+            ["01:10", "01:20", "01:30", "01:40", "01:50", "01:00"],
+            timeline.GetProperty("ticks").EnumerateArray().Select(tick => tick.GetProperty("label").GetString()));
+        Assert.Equal(333.148m, timeline.GetProperty("minWidth").GetDecimal());
+        Assert.Contains("var minWidth = Math.min(timeline.minWidth, width);", html, StringComparison.Ordinal);
+    }
+
+    private static CliHarness Harness(string root)
+    {
+```
+
+### Tests
+
+- **TL14** In `Test/New_York`, the range 2026-11-01 05:01–06:01:02 UTC has the ticks `01:10`, `01:20`, `01:30`, `01:40`, and `01:50` (the hour's first pass), and `01:00` (its second), and `minWidth` 333.148. The script holds `var minWidth = Math.min(timeline.minWidth, width);`.
+
+### Acceptance criteria
+
+- A range has every tick that falls in it, whatever local time it ends at, and `minWidth` never exceeds the axis.
+- `dotnet test CopilotLedger.slnx` passes **1412** tests (1411 + 1).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
+## Task 23 specification: Imported Requests Without Tool Data Leave Tool History Incomplete
+
+Review finding E1, which the coordinator added after Sprint 10's session found it. A Codex rollout records no tool calls, so a request imported from one owns no `span_links` row, and its `imported_tool_call_count` is NULL. `importedToolCallsWithoutDetail` sums only the deficits of requests whose count is above 0, so a Codex request added nothing to it, and an export of recent Codex imports said "Tool calls: complete for this window." (`toolHistory.complete: true`). That breaks #64's rule never to call incomplete data complete, and #63's requirement that export label missing tool coverage.
+
+The figure can't count every imported row without a count. Copilot's importer records a compaction (`session.compaction_complete`) without a count and never gives it links: a compaction is the billed call that summarizes the conversation, and it makes no tool calls. Nothing stored tells a compaction from a usage record: both are `chat` spans, and `import_record_aliases` keeps only a hash of the record's kind. Copilot logs count each usage record's tool calls (`data.usage.numToolCalls`, on every usage record of Copilot 1.0.103–1.0.114 in Sprint 8's census), and store a reported 0 as 0. So a Copilot row without a count is a compaction, and Copilot rows keep their coverage. Counting every imported row without a count would have called every export with a Copilot compaction incomplete, and ExportSeeds' I1 too.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Storage/ExportCoverageRow.cs` | New: `ImportedRequestsWithoutToolData` |
+| `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs` | The coverage query counts them, in the same scan as the other per-request counts |
+| `src/CopilotLedger.Cli/Export/ExportReportModel.cs` | `ExportCoverage.ImportedRequestsWithoutToolData`; `ToolHistoryComplete`; the warning |
+| `src/CopilotLedger.Cli/Export/ExportModelBuilder.cs` | Copies the figure |
+| `src/CopilotLedger.Cli/Export/ExportJson.cs` | `coverage.toolHistory.importedRequestsWithoutToolData` |
+| `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs` | The coverage note |
+| `docs/cli.md` | The coverage bullet and the allowlist row |
+| `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs` | New: EC19, EC20 |
+
+### Rules
+
+1. `importedRequestsWithoutToolData` counts the selected effective requests whose `ingest_source` is neither `otlp` nor `import:copilot` and whose `imported_tool_call_count` is NULL: today, every Codex request (`import:codex`). A known count, 0 included, is tool data; what a request with a count lacks stays in `importedToolCallsWithoutDetail`.
+2. Live spans never count (the schema keeps their count NULL), and Copilot rows never do.
+3. `toolHistory.complete` is false when the figure is above 0, and `coverage.warnings` then holds `imported-requests-without-tool-data`, which sorts between `import-superseded-unmatched` and `imported-tool-calls-without-detail`.
+4. `importedRequestsWithoutToolData` follows `importedToolCallsWithoutDetail` in `coverage.toolHistory`, which `ExportJson.WriteCoverage` writes to `manifest.json`, `telemetry/summary.json`, and `ledger-data` alike; the allowlist row in `docs/cli.md` lists it in that place.
+5. The note follows the without-detail note: `1 imported request has no tool-call data in its session log, so its tool calls are unknown.`, or `<N> imported requests have no tool-call data in their session logs, so their tool calls are unknown.`, with N formatted by `LedgerFormat.Count`. With it, the page says `Tool calls: partial; see the notes.`
+6. The query plan doesn't change: the new column is one more `CASE` in the scan that Task 21 joined to the grouped link counts.
+
+### Code (copy exactly)
+
+Edit 1 of 2 in `docs/cli.md`, replace:
+
+```markdown
+### What the report shows
+
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call or agent link the ledger keeps, because the daemon deletes older ones by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. A ledger that keeps none has no tool history: every request may be missing its tool calls, and `retainedFromUtc` is the generation time. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Hold Ctrl or Command and scroll, or pinch, to zoom, as far as the axis can still label two times; drag sideways to pan; or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+```
+
+with:
+
+```markdown
+### What the report shows
+
+- **Summary:** requests, GitHub AI credits, Foundry BYOK, API equivalent, local savings, cache hit ratio, prompt chains, breaker trips, and budgets. Each card's tooltip holds the exact amount.
+- **Coverage:** whether the requests are complete, whether the tool calls are, and notes on what's missing: imported requests that live spans recorded too (each counted once), imported requests that live spans of their sessions replaced without matching them (see [Overlap with live spans](#overlap-with-live-spans)), imports that deferred requests or didn't finish (counted across the whole ledger, because imports aren't kept per repository), requests older than the tool history, imported requests whose session logs hold no tool-call data (Codex rollouts hold none; Copilot logs count each request's tool calls, and a compaction makes none), unpriced requests, and requests without cache counters. Imports that were replaced without a match, deferred, or not finished may hide requests, so they make the requests incomplete; imported requests without tool-call data make the tool calls incomplete. Tool history is the 7 days before the generation time, but it starts no earlier than the earliest tool call or agent link the ledger keeps, because the daemon deletes older ones by its own clock; so an export with a past `--generated-at` doesn't count on tool calls that were deleted since. A ledger that keeps none has no tool history: every request may be missing its tool calls, and `retainedFromUtc` is the generation time. These limits are also in the bundle's `coverage` object.
+- **Timeline:** a row per Copilot session, a bar per request colored by model, a tick per tool call (red when it failed, with no duration, which the ledger doesn't keep), and nights shaded from 18:00 to 06:00 in the export's time zone. Hold Ctrl or Command and scroll, or pinch, to zoom, as far as the axis can still label two times; drag sideways to pan; or drag across the overview. When there are more than `--max-timeline-spans` requests or tool calls, it draws the latest ones; the totals and tables still include them all.
+- **Cost by model and agent:** billed spend (GitHub AI credits, then Foundry BYOK), the API-equivalent view, and local savings, each on its own scale. The comparison views are never added to billed spend.
+```
+
+Edit 2 of 2 in `docs/cli.md`, replace:
+
+```markdown
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage` | `requestsComplete`, `warnings`, `spans`, `spansBySource`, `supersededMatchedImportSpans`, `supersededUnmatchedImportSpans`, `ledgerAmbiguousImportRecords`, `ledgerIncompleteImportLogs`, `unpricedSpans`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans`, `cacheReportedSpans`, `cacheAbsentSpans`, `cacheLegacyUnknownSpans`, `toolHistory`, `timeline` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage.spansBySource[]` | `source`, `spans` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage.toolHistory` | `complete`, `retentionDays`, `retainedFromUtc`, `spansBeforeRetention`, `importedToolCallsWithoutDetail` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage.timeline` | `truncated`, `maxSpans`, `spans`, `spansDrawn`, `toolCalls`, `toolCallsDrawn` |
+| `telemetry/summary.json` | `.` | `schemaVersion`, `totals`, `byModel`, `byAgent`, `byBranch`, `byChannelModel`, `cacheByModel`, `cacheByAgent`, `breakerTrips`, `budgets`, `coverage` |
+```
+
+with:
+
+```markdown
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage` | `requestsComplete`, `warnings`, `spans`, `spansBySource`, `supersededMatchedImportSpans`, `supersededUnmatchedImportSpans`, `ledgerAmbiguousImportRecords`, `ledgerIncompleteImportLogs`, `unpricedSpans`, `apiEquivalentUnpricedSpans`, `apiEquivalentEstimatedSpans`, `cacheReportedSpans`, `cacheAbsentSpans`, `cacheLegacyUnknownSpans`, `toolHistory`, `timeline` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage.spansBySource[]` | `source`, `spans` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage.toolHistory` | `complete`, `retentionDays`, `retainedFromUtc`, `spansBeforeRetention`, `importedToolCallsWithoutDetail`, `importedRequestsWithoutToolData` |
+| `manifest.json`, `report.html`, `telemetry/summary.json` | `coverage.timeline` | `truncated`, `maxSpans`, `spans`, `spansDrawn`, `toolCalls`, `toolCallsDrawn` |
+| `telemetry/summary.json` | `.` | `schemaVersion`, `totals`, `byModel`, `byAgent`, `byBranch`, `byChannelModel`, `cacheByModel`, `cacheByAgent`, `breakerTrips`, `budgets`, `coverage` |
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/ExportJson.cs`, replace:
+
+```csharp
+        writer.WriteNumber("spansBeforeRetention", coverage.SpansBeforeToolHistory);
+        writer.WriteNumber("importedToolCallsWithoutDetail", coverage.ImportedToolCallsWithoutDetail);
+        writer.WriteEndObject();
+        writer.WriteStartObject("timeline");
+```
+
+with:
+
+```csharp
+        writer.WriteNumber("spansBeforeRetention", coverage.SpansBeforeToolHistory);
+        writer.WriteNumber("importedToolCallsWithoutDetail", coverage.ImportedToolCallsWithoutDetail);
+        writer.WriteNumber("importedRequestsWithoutToolData", coverage.ImportedRequestsWithoutToolData);
+        writer.WriteEndObject();
+        writer.WriteStartObject("timeline");
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/ExportModelBuilder.cs`, replace:
+
+```csharp
+                SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
+                ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
+                ToolCalls = await snapshot.CountToolCallsAsync(filter, cancellationToken),
+                MaxTimelineSpans = inputs.MaxTimelineSpans,
+```
+
+with:
+
+```csharp
+                SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
+                ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
+                ImportedRequestsWithoutToolData = coverage.ImportedRequestsWithoutToolData,
+                ToolCalls = await snapshot.CountToolCallsAsync(filter, cancellationToken),
+                MaxTimelineSpans = inputs.MaxTimelineSpans,
+```
+
+Edit 1 of 3 in `src/CopilotLedger.Cli/Export/ExportReportModel.cs`, replace:
+
+```csharp
+    public required long SpansBeforeToolHistory { get; init; }
+    public required long ImportedToolCallsWithoutDetail { get; init; }
+    public required long ToolCalls { get; init; }                       // CountToolCallsAsync
+    public required int MaxTimelineSpans { get; init; }
+```
+
+with:
+
+```csharp
+    public required long SpansBeforeToolHistory { get; init; }
+    public required long ImportedToolCallsWithoutDetail { get; init; }
+    public required long ImportedRequestsWithoutToolData { get; init; } // imported requests whose logs record no tool calls, as Codex's
+    public required long ToolCalls { get; init; }                       // CountToolCallsAsync
+    public required int MaxTimelineSpans { get; init; }
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Cli/Export/ExportReportModel.cs`, replace:
+
+```csharp
+    public bool RequestsComplete =>
+        LedgerAmbiguousImportRecords == 0 && LedgerIncompleteImportLogs == 0 && SupersededUnmatchedImportSpans == 0;
+    public bool ToolHistoryComplete => SpansBeforeToolHistory == 0 && ImportedToolCallsWithoutDetail == 0;
+
+    // The limitations that apply, ordinal.
+```
+
+with:
+
+```csharp
+    public bool RequestsComplete =>
+        LedgerAmbiguousImportRecords == 0 && LedgerIncompleteImportLogs == 0 && SupersededUnmatchedImportSpans == 0;
+    public bool ToolHistoryComplete =>
+        SpansBeforeToolHistory == 0 && ImportedToolCallsWithoutDetail == 0 && ImportedRequestsWithoutToolData == 0;
+
+    // The limitations that apply, ordinal.
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Cli/Export/ExportReportModel.cs`, replace:
+
+```csharp
+            (LedgerIncompleteImportLogs > 0, "import-incomplete"),
+            (SupersededUnmatchedImportSpans > 0, "import-superseded-unmatched"),
+            (ImportedToolCallsWithoutDetail > 0, "imported-tool-calls-without-detail"),
+            (TimelineTruncated, "timeline-truncated"),
+```
+
+with:
+
+```csharp
+            (LedgerIncompleteImportLogs > 0, "import-incomplete"),
+            (SupersededUnmatchedImportSpans > 0, "import-superseded-unmatched"),
+            (ImportedRequestsWithoutToolData > 0, "imported-requests-without-tool-data"),
+            (ImportedToolCallsWithoutDetail > 0, "imported-tool-calls-without-detail"),
+            (TimelineTruncated, "timeline-truncated"),
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Cli/Export/HtmlReportWriter.cs`, replace:
+
+```csharp
+                ? "1 tool call of an imported request is counted without detail."
+                : $"{LedgerFormat.Count(withoutDetail)} tool calls of imported requests are counted without detail.";
+        }
+
+        long unpriced = coverage.UnpricedSpans;
+```
+
+with:
+
+```csharp
+                ? "1 tool call of an imported request is counted without detail."
+                : $"{LedgerFormat.Count(withoutDetail)} tool calls of imported requests are counted without detail.";
+        }
+
+        long withoutToolData = coverage.ImportedRequestsWithoutToolData;
+        if (withoutToolData > 0)
+        {
+            yield return withoutToolData == 1
+                ? "1 imported request has no tool-call data in its session log, so its tool calls are unknown."
+                : $"{LedgerFormat.Count(withoutToolData)} imported requests have no tool-call data in their session logs, so their tool calls are unknown.";
+        }
+
+        long unpriced = coverage.UnpricedSpans;
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Storage/ExportCoverageRow.cs`, replace:
+
+```csharp
+    public required long SpansBeforeToolHistory { get; init; }       // selected spans that start before toolHistoryFrom
+    public required long ImportedToolCallsWithoutDetail { get; init; } // tool calls of imported requests beyond the links they own
+    public required long CacheReportedSpans { get; init; }
+    public required long CacheAbsentSpans { get; init; }
+```
+
+with:
+
+```csharp
+    public required long SpansBeforeToolHistory { get; init; }       // selected spans that start before toolHistoryFrom
+    public required long ImportedToolCallsWithoutDetail { get; init; } // tool calls of imported requests beyond the links they own
+    public required long ImportedRequestsWithoutToolData { get; init; } // selected imported requests, other than Copilot's, without a tool-call count
+    public required long CacheReportedSpans { get; init; }
+    public required long CacheAbsentSpans { get; init; }
+```
+
+Edit 1 of 4 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+    // it. An imported request lacks the detail of each tool call it made beyond the execute_tool links it owns: import keeps
+    // the links of only the tool calls that started within the retention, and that completed. Each owner's links are counted
+    // once, in a grouped join, because owner_span_row_id has no index to look them up by. import_sessions has no repository,
+    // so its two counts are the whole ledger's.
+    internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
+        SqliteTransaction snapshot,
+```
+
+with:
+
+```csharp
+    // it. An imported request lacks the detail of each tool call it made beyond the execute_tool links it owns: import keeps
+    // the links of only the tool calls that started within the retention, and that completed. Each owner's links are counted
+    // once, in a grouped join, because owner_span_row_id has no index to look them up by. An imported request whose log gives
+    // no tool-call count has no tool data at all, as every Codex request (a rollout records no tool calls); a known 0 is data.
+    // Copilot rows are left out: Copilot logs count each usage record's tool calls, so a Copilot row without a count is a
+    // compaction, which makes none. import_sessions has no repository, so its two counts are the whole ledger's.
+    internal static async Task<ExportCoverageRow> ReadExportCoverageAsync(
+        SqliteTransaction snapshot,
+```
+
+Edit 2 of 4 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+                                     THEN MAX(imported_tool_call_count - COALESCE(owned.links, 0), 0)
+                                     ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN NOT {ReportedSql}
+```
+
+with:
+
+```csharp
+                                     THEN MAX(imported_tool_call_count - COALESCE(owned.links, 0), 0)
+                                     ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN ingest_source NOT IN ('otlp', 'import:copilot') AND imported_tool_call_count IS NULL
+                                     THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN {ReportedSql} THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN NOT {ReportedSql}
+```
+
+Edit 3 of 4 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+        await reader.NextResultAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        (long before, long withoutDetail, long reported, long absent, long legacy) =
+            (reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4));
+        await reader.NextResultAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+```
+
+with:
+
+```csharp
+        await reader.NextResultAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        (long before, long withoutDetail, long withoutToolData, long reported, long absent, long legacy) =
+            (reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4), reader.GetInt64(5));
+        await reader.NextResultAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+```
+
+Edit 4 of 4 in `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`, replace:
+
+```csharp
+            SpansBeforeToolHistory = before,
+            ImportedToolCallsWithoutDetail = withoutDetail,
+            CacheReportedSpans = reported,
+            CacheAbsentSpans = absent,
+```
+
+with:
+
+```csharp
+            SpansBeforeToolHistory = before,
+            ImportedToolCallsWithoutDetail = withoutDetail,
+            ImportedRequestsWithoutToolData = withoutToolData,
+            CacheReportedSpans = reported,
+            CacheAbsentSpans = absent,
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs`, replace:
+
+```csharp
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+with:
+
+```csharp
+    }
+
+    // A Codex rollout records no tool calls, so a recent request imported from one leaves tool history incomplete, and the page,
+    // the manifest, and the summary say so.
+    [Fact]
+    public async Task EC19_ACodexImportLeavesToolHistoryIncomplete()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        await store.RecordImportedAsync([ImportEntries.Copilot("k7", "conv-codex", null) with { Source = ImportSourceKind.Codex }], null);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos", "--bundle");
+
+        IReadOnlyList<(string Name, byte[] Bytes)> entries = ExportFiles.ReadZip(Path.Combine(temp.Path, "copilot-ledger-report.zip"));
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        using JsonDocument manifest = JsonDocument.Parse(entries.Single(entry => entry.Name == "manifest.json").Bytes);
+        using JsonDocument summary = JsonDocument.Parse(entries.Single(entry => entry.Name == "telemetry/summary.json").Bytes);
+        JsonDocument[] documents = [data, manifest, summary];
+        foreach (JsonElement coverage in documents.Select(document => document.RootElement.GetProperty("coverage")))
+        {
+            JsonElement history = coverage.GetProperty("toolHistory");
+            Assert.Equal(
+                (false, 1, 0, 0),
+                (history.GetProperty("complete").GetBoolean(),
+                 history.GetProperty("importedRequestsWithoutToolData").GetInt32(),
+                 history.GetProperty("spansBeforeRetention").GetInt32(),
+                 history.GetProperty("importedToolCallsWithoutDetail").GetInt32()));
+            Assert.Contains(
+                "imported-requests-without-tool-data",
+                coverage.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()));
+        }
+
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains("1 imported request has no tool-call data in its session log, so its tool calls are unknown.", Notes(page));
+    }
+
+    // A Copilot import that reported 0 tool calls has tool data, and a Copilot compaction, whose row has no count, makes no
+    // tool calls, so tool history stays complete.
+    [Fact]
+    public async Task EC20_CopilotImportsKeepToolHistoryComplete()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        const string compaction = "33333333-3333-4333-8333-333333333333";
+        await store.RecordImportedAsync(
+        [
+            ImportEntries.Copilot("k8", "conv-zero", null) with { ToolCallCount = 0 },
+            ImportEntries.Copilot(compaction, "conv-zero", compaction, ImportedRecordKind.Compaction),
+        ],
+            null);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement history = data.RootElement.GetProperty("coverage").GetProperty("toolHistory");
+        Assert.Equal((true, 0), (history.GetProperty("complete").GetBoolean(), history.GetProperty("importedRequestsWithoutToolData").GetInt32()));
+        Assert.Equal("Tool calls: complete for this window.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Equal(
+            2L,
+            await LedgerSql.ScalarAsync(
+                Path.Combine(temp.Path, "data", "ledger.db"),
+                "SELECT COUNT(*) FROM spans WHERE conversation_id = 'conv-zero' AND accounting_state = 'effective';"));
+    }
+
+    // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
+    private static CliHarness Harness(string root)
+```
+
+### Tests
+
+- **EC19** ExportSeeds plus one Codex request imported at 2026-11-20 12:00 UTC (`ImportEntries.Copilot("k7", "conv-codex", null) with { Source = ImportSourceKind.Codex }`), exported with `--all-repos --bundle`. In `ledger-data`, `manifest.json`, and `telemetry/summary.json`, `coverage.toolHistory` has `complete` false, `importedRequestsWithoutToolData` 1, `spansBeforeRetention` 0, and `importedToolCallsWithoutDetail` 0, and `coverage.warnings` holds `imported-requests-without-tool-data`. The page says `Tool calls: partial; see the notes.` and has the note `1 imported request has no tool-call data in its session log, so its tool calls are unknown.`
+- **EC20** ExportSeeds plus two Copilot requests of `conv-zero`: a usage record that reported 0 tool calls (`ToolCallCount = 0`), and a compaction, which has no count (`ImportedRecordKind.Compaction`, service request ID `33333333-3333-4333-8333-333333333333`). Both are effective; `complete` is true, `importedRequestsWithoutToolData` is 0, and the page says `Tool calls: complete for this window.`
+
+Both fail without the fix, because `importedRequestsWithoutToolData` is missing. With the figure but the old `ToolHistoryComplete`, EC19 fails (`complete` true). With a figure that counts every imported row without a count, EC20 fails (2: the compaction and ExportSeeds' I1, a Copilot usage record that the test helper gives no count), and so does EC19 (2).
+
+### Acceptance criteria
+
+- An export whose requests include Codex imports says, in the page, the manifest, and the summary, that tool calls are partial, and why.
+- Live spans and Copilot imports, compactions included, keep their coverage.
+- `dotnet test CopilotLedger.slnx` passes **1414** tests (1412 + 2).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
 Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` with fixed times, `FakeCliPlatform` with the custom zones of `TestZones`, and `CliHarness` for the CLI. Ledgers are synthetic, written by `ExportSeeds` or the test itself. No test starts a process, runs `git` or a browser, uses the network, Node, Python, or Docker, or reads `~/.copilot`, `~/.codex`, `~/.claude`, or `~/.copilot-ledger`; ET1 and ET2 read only the operating system's time zone data. Money is `decimal` or integer pico-USD, never `double`, and expected text is compared exactly.
@@ -12475,6 +14387,12 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 15 | XR11, XR12, EC13 | EC8 (a tool call for the old request) | 1,392 |
 | 16 | XR13 | — | 1,393 |
 | 17 | TL11, TL12 (2), TL13, EA4 | TL7 (175 ticks, at levels 0–3) | 1,398 |
+| 18 | EP7 (5 more cases) | — | 1,403 |
+| 19 | EC14 (2), EC15 (2), EC16, EC17 | — | 1,409 |
+| 20 | EC18 | XR12 (the earliest link of any kind), EC13 (its note and name) | 1,410 |
+| 21 | XR14 | — | 1,411 |
+| 22 | TL14 | — | 1,412 |
+| 23 | EC19, EC20 | — | 1,414 |
 
 Exact values used across tasks:
 
@@ -12491,14 +14409,15 @@ Exact values used across tasks:
 | `(root folder)` | How a drive, share, or file-system root shows without `--include-local-paths` | EP7 |
 | `2026-11-21T13:00:00.0000000+00:00` | EC13's tool call, the earliest one kept once the links before 11-21 are deleted | EC13 |
 | `2.826` | `minWidth` over 29.5 days: twice the widest gap between hourly ticks | TL13 |
+| `333.148` | `minWidth` over TL14's hour: twice a 10-minute gap | TL14 |
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 17, the orchestrator:
+After Task 23, the orchestrator:
 
-1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1398 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-8.md`, and the files the tasks list.
+1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1414 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-8.md`, and the files the tasks list.
 2. Exports a report from a temporary `COPILOT_LEDGER_HOME` with a few recorded spans and opens it in a browser with and without JavaScript: zoom (Ctrl or Command with the wheel, and a pinch), pan, a plain scroll over the timeline, the overview's range selection, reset, the lens switch, sorting, keyboard focus, the dark scheme, and reduced motion. The browser's console shows no Content Security Policy violation. Never point it at a real home directory.
-3. Pushes `swigerb-sprint-9-ledger-export-html-report` and opens one pull request titled exactly "Sprint 9: `gh ledger export`: self-contained offline HTML report & metadata-only bundle", whose body says `Closes #64`, lists the seventeen task commits, and has `## Changes`, `## Deviations` (D1–D19 and P1–P15 from "Design decisions", each with a one-line rationale), `## Review fixes` (the findings of "Review fixes (Tasks 13–17)", each with its task), and `## Verification`.
+3. Pushes `swigerb-sprint-9-ledger-export-html-report` and opens one pull request titled exactly "Sprint 9: `gh ledger export`: self-contained offline HTML report & metadata-only bundle", whose body says `Closes #64`, lists the twenty-three task commits, and has `## Changes`, `## Deviations` (D1–D19 and P1–P15 from "Design decisions", each with a one-line rationale), `## Review fixes` (the findings of both "Review fixes" sections, each with its task), and `## Verification`.
 4. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary's export.
 5. Asks `ledger-architect` to review the branch.
 
@@ -12517,3 +14436,6 @@ This sprint doesn't bump the version, tag, or release. When the sprint closes, `
 - **A record of the daemon's deletions** (R5): with the cutoff of its last deletion of tool calls in the ledger, tool history wouldn't start at the earliest tool call kept, which a quiet spell without tool calls moves later. It needs a schema change.
 - **Repository slugs recorded before Sprint 8's strict `owner/repo` rule** are shown as stored, by reports and by export; one from a remote URL with a query or fragment may hold it. A migration could clear the slugs that aren't strict.
 - **Axis lines at every zoom**: the axis draws lines only down to the level it labels unzoomed, so the finer labels the script shows when zoomed in have no line under them.
+- **A crash between moving the replaced ZIP aside and moving the new one in** leaves only `<zip>.<process ID>.bak`; copying the old ZIP aside, rather than moving it, would close that window at the cost of a copy.
+- **Requests at the very ends of the axis**: a request without a duration at either end shows only half of its 1-pixel stroke; a little padding around the range would show all of it.
+- **A Copilot usage record without `numToolCalls`** would be taken for a compaction, and its tool calls for complete. No observed Copilot version writes one (Sprint 8's census); telling the two apart needs the record's kind stored, which is a schema change.
