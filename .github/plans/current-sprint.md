@@ -832,6 +832,13 @@ private static Task<int> RemoveOwnedLinksAsync(SqliteTransaction, IReadOnlyList<
 
 **Prerequisite:** Task 14 is checked. If it isn't, stop and implement Task 14 first.
 
+**Merged tree (ledger-architect, 2026-11-24, at `b3f7201`).** Sprint 13 (`5d3bfbf`) is merged into this branch, so checks 2, 4, and 6 read as follows; these values supersede the ones below:
+
+- Check 2: **1,921** passed (1,879 from Sprint 12 + 42 from Sprint 13; +181 over the 1,740 baseline).
+- Check 4: run it against `5d3bfbf`, not `69ae671`, and add `src/CopilotLedger.Cli/Daemon src/CopilotLedger.Cli/Alerts src/CopilotLedger.Otlp/Breaker src/CopilotLedger.Storage/LedgerExportSnapshot.cs` → empty. Against `69ae671` it lists Sprint 13's own four files (`WindowsDetachedProcess.cs`, `ContextBloatRule.cs`, `ToolLoopRule.cs`, `SqliteLedgerStore.Export.cs`); that's expected.
+- Check 5: the same six hits as before the merge (`OtlpValueKind.Double`, its comment, and `DoubleAsNanoAiu`); Sprint 13 adds none.
+- Check 6: exactly one hit, `Process.Start(stopInfo)` in `tests/CopilotLedger.Tests/TestSupport/WindowsJobHarness.cs`, Sprint 13's sanctioned DJ7 exception (`.github/plans/archive/sprint-13.md`, D4). The same command against `5d3bfbf` instead of `69ae671` → no hits.
+
 No product change. Run and record each result in the task commit's body (the commit changes only this plan's checkbox).
 
 1. `dotnet build CopilotLedger.slnx` → 0 warnings, 0 errors.
