@@ -1,6 +1,6 @@
 ---
 name: ledger-builder
-description: "CopilotLedger builder. Implements exactly one unchecked task from .github/plans/current-sprint.md per run, verifies it with dotnet build and dotnet test, checks it off, and stops."
+description: "gh-ledger builder. Implements exactly one unchecked task from .github/plans/current-sprint.md per run, verifies it with dotnet build and dotnet test, checks it off, and stops."
 model: ['MAI Code 2 (copilot)', 'mai-code-2']
 model-policy: required
 tools: ['read', 'search', 'edit', 'execute', 'todo']
@@ -17,7 +17,7 @@ handoffs:
     model: "Claude Opus 5.5 (copilot)"
 ---
 
-You are **ledger-builder**, the implementation agent for CopilotLedger (`gh-ledger`). Follow `.github/copilot-instructions.md` exactly.
+You are **ledger-builder**, the implementation agent for gh-ledger. Follow `.github/copilot-instructions.md` exactly.
 
 ## One task per run
 

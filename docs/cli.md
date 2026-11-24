@@ -38,27 +38,49 @@ Use `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, or `osx-arm64
 
 It changes nothing else; in particular, it doesn't edit `PATH` or other OpenTelemetry variables. Use `--dry-run` to print the changes without making them. Afterward, restart the GitHub Copilot app, VS Code, and open terminals so they see `COPILOT_OTEL_ENABLED`.
 
-`install` and `status` warn about settings that keep Copilot's telemetry from reaching CopilotLedger:
+`install` and `status` warn about settings that keep Copilot's telemetry from reaching gh-ledger:
 
 - `OTEL_EXPORTER_OTLP_ENDPOINT` set to any endpoint other than `http://localhost:4318`.
 - `COPILOT_OTEL_FILE_EXPORTER_PATH`, which makes Copilot write telemetry to a file instead.
 - `COPILOT_OTEL_EXPORTER_TYPE` set to anything other than `otlp-http`.
 - Any of `OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_KEY`, `OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE`, `OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE`, or `OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY`, which turn off export to `http://` endpoints.
-- `OTEL_EXPORTER_OTLP_PROTOCOL` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` set to `grpc`; CopilotLedger accepts only `http/protobuf` and `http/json`.
+- `OTEL_EXPORTER_OTLP_PROTOCOL` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` set to `grpc`; gh-ledger accepts only `http/protobuf` and `http/json`.
 
 `install` also warns when `COPILOT_LEDGER_HOME` is set, because the daemon started at sign-in uses it only if your sign-in session sets it too. `status` warns when `install.json` names a different executable, for example after you switch from a binary you built to the extension; run `install` again from the copy you want to keep.
 
 `gh ledger uninstall` stops the daemon, removes the sign-in item, and reverses the environment variable, profile block, and alias changes recorded in `install.json`, restoring the variable's previous value. `--dry-run` prints the changes without making them. Your ledger stays, and so does an MCP registration: remove it with `copilot mcp remove ledger`, and remove the `ledger` entry from VS Code's `mcp.json` if you added one. To remove the extension too, run `gh extension remove ledger` afterward.
 
-**Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server. To upgrade:
+**Upgrading or removing the extension.** The daemon runs the extension's binary, and so does each Copilot session that uses the `ledger` MCP server: Copilot CLI, the GitHub Copilot app, and VS Code start `gh-ledger mcp` and keep it running until the session ends. On Windows, gh can't replace or delete the binary while any of them runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. Before either, stop the daemon and close the Copilot sessions and apps that use the MCP server.
+
+**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 6, for `gh ledger import`, the first time its daemon or any command opens it. That can't be undone, so the steps below copy your data directory before you upgrade. To go back to an earlier version later, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin <tag>` with that version's tag, put the copy in place of your data directory, and start the daemon. The copy doesn't have what gh-ledger recorded after you made it.
+
+To upgrade, close the Copilot sessions and apps that use the MCP server, and stop the daemon:
 
 ```shell
 gh ledger daemon stop
+```
+
+Copy your data directory to a new folder outside it: all of it, not only `ledger.db`, so that a `ledger.db-wal` file, which can hold the latest changes, comes with it. The data directory is `~/.copilot-ledger` (`%USERPROFILE%\.copilot-ledger` on Windows), or the directory that `COPILOT_LEDGER_HOME` names. In PowerShell:
+
+```powershell
+$data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
+Copy-Item -LiteralPath $data -Destination "$HOME\copilot-ledger-backup-$(Get-Date -Format yyyyMMdd-HHmmss)" -Recurse
+```
+
+On macOS and Linux:
+
+```shell
+cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
+```
+
+Then upgrade the extension, and start the daemon:
+
+```shell
 gh extension upgrade ledger
 gh ledger daemon start
 ```
 
-**Ledger format.** A gh-ledger version can upgrade the ledger's format when it first opens it, and an earlier version can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` This version upgrades the ledger to format 6, for `gh ledger import`, the first time its daemon or any command opens it. To keep the option of going back to an earlier version, copy `ledger.db` while the daemon is stopped, before you upgrade.
+If `gh ledger daemon start` then says that the daemon did not start, run `gh ledger rates validate`. A new release can build in a model name that your rates overlay also lists, such as `claude-haiku-4-5-20251001`, which gh-ledger 0.5.0 builds in and earlier versions priced only through an overlay. Such an overlay is invalid, and the daemon doesn't start until you remove the entry that the message names; see [Which model prices a request](configuration.md#which-model-prices-a-request).
 
 ## The daemon
 
@@ -279,7 +301,7 @@ A budget is a soft cap in AI credits for one branch. When the branch's billed sp
 
 ## Pull request receipts
 
-`gh ledger export-pr` writes the current branch's AI spend receipt to `.github/copilot-ledger/receipts/<branch>-<hash>.md` in the repository, where `<branch>` is the branch name with characters other than letters, digits, `.`, `_`, and `-` replaced by `-`. Commit the file on the branch and push it; the [CopilotLedger PR Receipt action](https://github.com/swigerb/copilot-ledger-action), `uses: swigerb/copilot-ledger-action@v1`, posts it on the pull request.
+`gh ledger export-pr` writes the current branch's AI spend receipt to `.github/copilot-ledger/receipts/<branch>-<hash>.md` in the repository, where `<branch>` is the branch name with characters other than letters, digits, `.`, `_`, and `-` replaced by `-`. Commit the file on the branch and push it; the [PR receipt action](https://github.com/swigerb/copilot-ledger-action), `uses: swigerb/copilot-ledger-action@v1`, posts it on the pull request.
 
 The receipt covers all spend recorded on the branch: GitHub AI credits by model, Foundry BYOK spend, local-model tokens and the cloud spend they avoided, unpriced requests, circuit-breaker trips, and the most expensive prompt, with the data as JSON. A turn is one model request. Its totals equal the branch's row in `gh ledger branch --since all --json`. Branch and model names appear in code spans, so they never become mentions or links.
 
@@ -345,7 +367,7 @@ The ZIP holds exactly seven files: `manifest.json`, `report.html` (the same byte
 {
   "schemaVersion": 1,
   "tool": "gh-ledger",
-  "toolVersion": "0.4.1",
+  "toolVersion": "0.5.0",
   "generatedAtUtc": "2026-11-21T21:30:00.0000000+00:00",
   "ratesVersions": ["2026-11-23"],
   "apiRateCards": [{ "ratesVersion": "2026-11-23", "sha256": "<64 hexadecimal digits>" }],
@@ -549,7 +571,7 @@ See [configuration.md](configuration.md) for pricing, the overlay format, and wh
 
 ## Privacy
 
-CopilotLedger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped. `gh ledger import` keeps only the fields in [What import reads and keeps](#what-import-reads-and-keeps), and never reads prompts, responses, tool arguments or results, or compaction summaries. `gh ledger export` writes only the fields in [What export includes](#what-export-includes), and shows local repository roots only with `--include-local-paths`. `gh ledger audit` reads the same metadata; with `--local-llm`, it sends a summary of its findings only to a model on this machine, as [Local model suggestions](#local-model-suggestions) describes, and never stores the answer.
+gh-ledger stores no prompt or response content, working directories, or remote URLs. Repositories are stored as `owner/repo` slugs or local roots, and credentials are stripped. `gh ledger import` keeps only the fields in [What import reads and keeps](#what-import-reads-and-keeps), and never reads prompts, responses, tool arguments or results, or compaction summaries. `gh ledger export` writes only the fields in [What export includes](#what-export-includes), and shows local repository roots only with `--include-local-paths`. `gh ledger audit` reads the same metadata; with `--local-llm`, it sends a summary of its findings only to a model on this machine, as [Local model suggestions](#local-model-suggestions) describes, and never stores the answer.
 
 ## Troubleshooting
 
@@ -559,6 +581,7 @@ CopilotLedger stores no prompt or response content, working directories, or remo
 - **`gh ledger import` defers requests (`Ambiguous-overlap`).** Their session has live spans that can't be matched to them, such as spans an earlier gh-ledger recorded, so import leaves them out rather than risk charging a request twice. The live spans still count.
 - **`gh ledger import` reports `Superseded, unmatched` requests.** Live spans that can't be matched to them arrived after they were imported and replaced them, as above. The live spans count, but they may not cover every request of the session, so import reports these on every run whose scope holds them; `--since` can leave older ones out.
 - **Port 4318 is in use.** Stop the other program or the old daemon, then run `gh ledger daemon start`.
+- **`gh ledger daemon start` says that the daemon did not start.** `daemon.log` in your data directory says why. After an upgrade, `Invalid rates overlay: … duplicate model identity in the merged rates: <name> (built-in model <id>)` means that your rates overlay lists a model name that the new release has built in. Remove that entry from the overlay, check it with `gh ledger rates validate`, and start the daemon.
 - **`gh extension upgrade` or `remove` fails on Windows.** A program is running the extension's binary: the daemon, or the MCP server of a Copilot session. Run `gh ledger daemon stop`, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code, then try again.
 - **Apps started from the desktop record nothing.** On macOS and Linux, apps started outside a terminal may not read your shell profile, so they don't see `COPILOT_OTEL_ENABLED`. Start them from a terminal.
 - **Move the data directory.** Set `COPILOT_LEDGER_HOME` before running gh-ledger. The daemon started at sign-in uses it only if your sign-in session sets it too, for example as a Windows user environment variable.

@@ -27,7 +27,7 @@ internal static class HtmlReportWriter
         Line(html, $"<meta http-equiv=\"Content-Security-Policy\" content=\"{Policy}\" />");
         Line(html, "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
         Line(html, $"<meta name=\"generator\" content=\"gh-ledger {Text(header.ToolVersion)}\" />");
-        Line(html, $"<title>CopilotLedger report: {Text(header.Scope)} ({Text(header.Filter.Period)})</title>");
+        Line(html, $"<title>gh-ledger report: {Text(header.Scope)} ({Text(header.Filter.Period)})</title>");
         Line(html, "<style>");
         Line(html, ExportAssets.Css.TrimEnd('\n'));
         Line(html, "</style>");
@@ -169,7 +169,7 @@ internal static class HtmlReportWriter
         ExportFilter filter = header.Filter;
         TimeZoneInfo zone = header.TimeZone;
         Line(html, "<header id=\"report-header\">");
-        Line(html, "<h1>CopilotLedger report</h1>");
+        Line(html, "<h1>gh-ledger report</h1>");
         Line(html, $"<p class=\"scope\">{Text(header.Scope)} · {Text(filter.Period)}</p>");
         Line(html, "<dl class=\"meta\">");
         Line(

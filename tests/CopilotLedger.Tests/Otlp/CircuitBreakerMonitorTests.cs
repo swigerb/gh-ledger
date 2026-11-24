@@ -46,7 +46,7 @@ public sealed class CircuitBreakerMonitorTests
         Assert.Equal(1, alert.TripId);
         Assert.Equal("swigerb/copilot-ledger", alert.Repository);
         Assert.Equal("feature/ledger", alert.Branch);
-        Assert.Equal("CopilotLedger circuit breaker tripped", alert.Title);
+        Assert.Equal("gh-ledger circuit breaker tripped", alert.Title);
         Assert.Equal(
             "swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status",
             alert.Body);
@@ -473,7 +473,7 @@ public sealed class CircuitBreakerMonitorTests
         Assert.Equal(id, alert.TripId);
         Assert.Equal("swigerb/copilot-ledger", alert.Repository);
         Assert.Equal("feature/ledger", alert.Branch);
-        Assert.Equal("CopilotLedger circuit breaker tripped", alert.Title);
+        Assert.Equal("gh-ledger circuit breaker tripped", alert.Title);
         Assert.Equal(body, alert.Body);
         Assert.True(alert.ShowNotification);
     }
@@ -484,7 +484,7 @@ public sealed class CircuitBreakerMonitorTests
         Assert.Null(alert.TripId);
         Assert.Equal("swigerb/copilot-ledger", alert.Repository);
         Assert.Equal("feature/ledger", alert.Branch);
-        Assert.Equal("CopilotLedger branch budget exceeded", alert.Title);
+        Assert.Equal("gh-ledger branch budget exceeded", alert.Title);
         Assert.Equal(body, alert.Body);
         Assert.True(alert.ShowNotification);
     }

@@ -7,7 +7,7 @@ public static class LedgerMcpServer
 {
     public const string ServerName = "copilot-ledger";
     public const string Instructions =
-        "CopilotLedger reports the AI spend that Copilot recorded on this machine, by Git branch. " +
+        "gh-ledger reports the AI spend that Copilot recorded on this machine, by Git branch. " +
         "Tools use the current repository and branch unless you pass repository and branch. " +
         "When a result starts with WARNING, stop and tell the user before doing more work.";
 

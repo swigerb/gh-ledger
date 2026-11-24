@@ -72,7 +72,7 @@ public static class ReceiptMarkdown
         LedgerRollupRow[] unpriced = Rows(receipt, BillingChannel.Unpriced);
         StringBuilder text = new();
         text.Append(Marker).Append('\n');
-        text.Append("### CopilotLedger receipt for ").Append(Code(receipt.Branch)).Append("\n\n");
+        text.Append("### gh-ledger receipt for ").Append(Code(receipt.Branch)).Append("\n\n");
 
         text.Append("- **GitHub AI Credits:** ");
         if (github.Length == 0)

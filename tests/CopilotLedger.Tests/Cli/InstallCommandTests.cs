@@ -40,7 +40,7 @@ public sealed class InstallCommandTests
             Warning: GitHub CLI needs sh.exe from Git for Windows to run shell aliases, so gh ledger won't work until Git for Windows is installed. Run gh-ledger directly.
             gh-ledger will start when you sign in.
             gh-ledger daemon started (pid {Environment.ProcessId}) on http://localhost:4318.
-            CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
+            gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
 
             """),
             run.Out);
@@ -99,7 +99,7 @@ public sealed class InstallCommandTests
             Set gh alias: gh ledger runs C:\tools\gh-ledger.exe.
             gh-ledger will start when you sign in.
             gh-ledger daemon started (pid {Environment.ProcessId}) on http://localhost:4318.
-            CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
+            gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
 
             """),
             run.Out);
@@ -395,7 +395,7 @@ public sealed class InstallCommandTests
             Assert.Contains("Removed gh alias: ledger.", uninstall.Out);
             Assert.False(File.Exists(ManifestPath(temp.Path)));
             Assert.EndsWith(
-                $"CopilotLedger is uninstalled. Your ledger data is still in {Path.Combine(temp.Path, "data")}.\n",
+                $"gh-ledger is uninstalled. Your ledger data is still in {Path.Combine(temp.Path, "data")}.\n",
                 uninstall.Out);
         }
         else if (caseName == "after-unix")
@@ -418,7 +418,7 @@ public sealed class InstallCommandTests
         else if (caseName == "no-manifest")
         {
             Assert.Equal(
-                "CopilotLedger is not installed; nothing to undo.\n",
+                "gh-ledger is not installed; nothing to undo.\n",
                 uninstall.Out);
         }
         else if (caseName == "no-such-alias")
@@ -456,8 +456,8 @@ public sealed class InstallCommandTests
             """
             [Desktop Entry]
             Type=Application
-            Name=CopilotLedger
-            Comment=Starts the CopilotLedger daemon
+            Name=gh-ledger
+            Comment=Starts the gh-ledger daemon
             Exec="/opt/bin/gh-ledger" daemon start
             Terminal=false
             """.ReplaceLineEndings("\n") + "\n",
@@ -693,7 +693,7 @@ public sealed class InstallCommandTests
                 uninstall.Out);
             Assert.True(platform.StartupCommands.ContainsKey("CopilotLedger"));
             Assert.EndsWith(
-                $"CopilotLedger is uninstalled. Your ledger data is still in {Path.Combine(temp.Path, "data")}.\n",
+                $"gh-ledger is uninstalled. Your ledger data is still in {Path.Combine(temp.Path, "data")}.\n",
                 uninstall.Out);
             return;
         }
@@ -768,7 +768,7 @@ public sealed class InstallCommandTests
             "gh ledger runs this GitHub CLI extension, so no alias is needed.\n" +
             "gh-ledger will start when you sign in.\n" +
             $"gh-ledger daemon started (pid {Environment.ProcessId}) on http://localhost:4318.\n" +
-            "CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n",
+            "gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n",
             run.Out);
         Assert.Equal(string.Empty, run.Error);
         Assert.Empty(platform.ProcessRuns);
@@ -802,7 +802,7 @@ public sealed class InstallCommandTests
             "gh ledger runs this GitHub CLI extension, so no alias is needed.\n" +
             "gh-ledger will start when you sign in.\n" +
             $"gh-ledger daemon started (pid {Environment.ProcessId}) on http://localhost:4318.\n" +
-            "CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n",
+            "gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n",
             run.Out);
         Assert.Equal(string.Empty, run.Error);
         Assert.Empty(platform.ProcessRuns);
@@ -810,8 +810,8 @@ public sealed class InstallCommandTests
             """
             [Desktop Entry]
             Type=Application
-            Name=CopilotLedger
-            Comment=Starts the CopilotLedger daemon
+            Name=gh-ledger
+            Comment=Starts the gh-ledger daemon
             Exec="/home/me/.local/share/gh/extensions/gh-ledger/gh-ledger" daemon start
             Terminal=false
             """.ReplaceLineEndings("\n") + "\n",

@@ -60,12 +60,12 @@ public sealed class ReportCommandTests
     public static TheoryData<string, string, string, bool> Warnings => new()
     {
         { "OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318/", "", true },
-        { "OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.contoso.com:4318", "OTEL_EXPORTER_OTLP_ENDPOINT is https://collector.contoso.com:4318; Copilot exports there instead of to CopilotLedger at http://localhost:4318.", false },
-        { "COPILOT_OTEL_FILE_EXPORTER_PATH", "/tmp/x.jsonl", "COPILOT_OTEL_FILE_EXPORTER_PATH is set; Copilot writes telemetry to that file instead of exporting it to CopilotLedger.", false },
+        { "OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.contoso.com:4318", "OTEL_EXPORTER_OTLP_ENDPOINT is https://collector.contoso.com:4318; Copilot exports there instead of to gh-ledger at http://localhost:4318.", false },
+        { "COPILOT_OTEL_FILE_EXPORTER_PATH", "/tmp/x.jsonl", "COPILOT_OTEL_FILE_EXPORTER_PATH is set; Copilot writes telemetry to that file instead of exporting it to gh-ledger.", false },
         { "COPILOT_OTEL_EXPORTER_TYPE", "file", "COPILOT_OTEL_EXPORTER_TYPE is file; remove it or set it to otlp-http.", false },
         { "COPILOT_OTEL_EXPORTER_TYPE", "OTLP-HTTP", "", false },
         { "OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY", "/k.pem", "OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY is set; Copilot turns off export to http:// endpoints while TLS settings are set.", false },
-        { "OTEL_EXPORTER_OTLP_PROTOCOL", "grpc", "OTEL_EXPORTER_OTLP_PROTOCOL is grpc; CopilotLedger accepts only http/protobuf and http/json.", false },
+        { "OTEL_EXPORTER_OTLP_PROTOCOL", "grpc", "OTEL_EXPORTER_OTLP_PROTOCOL is grpc; gh-ledger accepts only http/protobuf and http/json.", false },
         { "OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf", "", false },
     };
 
@@ -420,7 +420,7 @@ public sealed class ReportCommandTests
             """);
         await FileRetry.ReadAllTextAsync(manifest);
         const string Warning =
-            "CopilotLedger was installed from /opt/old/gh-ledger; run gh-ledger install to use this copy instead.";
+            "gh-ledger was installed from /opt/old/gh-ledger; run gh-ledger install to use this copy instead.";
 
         CliRun text = await harness.RunAsync("status");
         CliRun json = await harness.RunAsync("status", "--json");
@@ -645,7 +645,7 @@ public sealed class ReportCommandTests
 
     private static string StatusText(string root) =>
         Normalize($"""
-        gh-ledger 0.4.1
+        gh-ledger 0.5.0
         Daemon:  not running; start it with: gh-ledger daemon start
         Ledger:  {Path.Combine(root, "data", "ledger.db")}
         Rates:   2026-11-23

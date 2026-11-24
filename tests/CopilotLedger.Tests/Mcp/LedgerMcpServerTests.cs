@@ -190,7 +190,7 @@ public sealed class LedgerMcpServerTests
                 tool,
                 "set_branch_budget",
                 "Set branch budget",
-                "Sets a soft AI-credit budget for one Git branch. CopilotLedger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
+                "Sets a soft AI-credit budget for one Git branch. gh-ledger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
                 BudgetSchema,
                 readOnly: false,
                 destructive: false,
@@ -272,7 +272,7 @@ public sealed class LedgerMcpServerTests
             expected["circuitBreaker"] = JsonNode.Parse(
                 """{"state":"open","openTrips":[{"id":1,"rule":"retry_churn","repository":"swigerb/copilot-ledger","branch":"feature/ledger","traceId":"55555555555555555555555555555555","conversationId":"conv-5","currentSession":false,"trippedAt":"2026-11-21T15:00:05.0000000+00:00","detail":"5 failed tool calls in a row","resetCommand":"gh-ledger breaker reset --id 1"}]}""");
             expected["warnings"] = JsonNode.Parse(
-                """["WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1","WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget."]""");
+                """["WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1","WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget."]""");
             await AssertResultAsync(
                 await CallAsync(harness, "get_branch_ledger", "{}"),
                 expected);
@@ -287,7 +287,7 @@ public sealed class LedgerMcpServerTests
         expectedSession["circuitBreaker"] = JsonNode.Parse(
             """{"state":"open","openTrips":[{"id":1,"rule":"retry_churn","repository":"swigerb/copilot-ledger","branch":"feature/ledger","traceId":"55555555555555555555555555555555","conversationId":"conv-5","currentSession":true,"trippedAt":"2026-11-21T15:00:05.0000000+00:00","detail":"5 failed tool calls in a row","resetCommand":"gh-ledger breaker reset --id 1"},{"id":3,"rule":"retry_churn","repository":"swigerb/copilot-ledger","branch":"main","traceId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","conversationId":"conv-5","currentSession":true,"trippedAt":"2026-11-21T14:30:00.0000000+00:00","detail":"6 failed tool calls in a row","resetCommand":"gh-ledger breaker reset --id 3"}]}""");
         expectedSession["warnings"] = JsonNode.Parse(
-            """["WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1","WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ main: 6 failed tool calls in a row on one prompt (trip 3). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 3","WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget."]""");
+            """["WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1","WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ main: 6 failed tool calls in a row on one prompt (trip 3). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 3","WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget."]""");
         await AssertResultAsync(
             await CallAsync(session, "get_branch_ledger", "{}"),
             expectedSession);
@@ -718,7 +718,7 @@ public sealed class LedgerMcpServerTests
         const string Trip =
             """{"id":1,"rule":"retry_churn","repository":"swigerb/copilot-ledger","branch":"feature/ledger","traceId":"55555555555555555555555555555555","conversationId":"conv-5","currentSession":CURRENT,"trippedAt":"2026-11-21T15:00:05.0000000+00:00","detail":"5 failed tool calls in a row","resetCommand":"gh-ledger breaker reset --id 1"}""";
         const string TripWarning =
-            "WARNING: CopilotLedger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1";
+            "WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1";
         const string BudgetWarning =
             "WARNING: swigerb/copilot-ledger @ feature/ledger has spent 176.50 of its 150.00 AI credit budget.";
 

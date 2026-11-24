@@ -7,8 +7,8 @@ namespace CopilotLedger.Otlp.Breaker;
 
 public static class BreakerMessages
 {
-    public const string TripTitle = "CopilotLedger circuit breaker tripped";
-    public const string BudgetTitle = "CopilotLedger branch budget exceeded";
+    public const string TripTitle = "gh-ledger circuit breaker tripped";
+    public const string BudgetTitle = "gh-ledger branch budget exceeded";
 
     public static string Credits(decimal aiCredits) =>                          // decimal.Round(aiCredits, 2, MidpointRounding.AwayFromZero).ToString("N2", CultureInfo.InvariantCulture)
         decimal.Round(aiCredits, 2, MidpointRounding.AwayFromZero)

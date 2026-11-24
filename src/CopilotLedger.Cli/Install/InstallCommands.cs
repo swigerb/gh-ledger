@@ -318,7 +318,7 @@ internal static class InstallCommands
 
         context.Out.WriteLine(dryRun
             ? "Dry run: no changes made."
-            : "CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.");
+            : "gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.");
         return exitCode;
     }
 
@@ -333,7 +333,7 @@ internal static class InstallCommands
             cancellationToken);
         if (manifest is null)
         {
-            context.Out.WriteLine("CopilotLedger is not installed; nothing to undo.");
+            context.Out.WriteLine("gh-ledger is not installed; nothing to undo.");
             return 0;
         }
 
@@ -456,13 +456,13 @@ internal static class InstallCommands
                 }
 
                 context.Out.WriteLine(dryRun
-                    ? $"Would remove the CopilotLedger block from {profile}."
-                    : $"Removed the CopilotLedger block from {profile}.");
+                    ? $"Would remove the gh-ledger block from {profile}."
+                    : $"Removed the gh-ledger block from {profile}.");
             }
             else
             {
                 context.Out.WriteLine(
-                    $"Warning: no complete CopilotLedger block in {profile}; edit it by hand.");
+                    $"Warning: no complete gh-ledger block in {profile}; edit it by hand.");
             }
         }
 
@@ -506,7 +506,7 @@ internal static class InstallCommands
         {
             File.Delete(manifestPath);
             context.Out.WriteLine(
-                $"CopilotLedger is uninstalled. Your ledger data is still in {context.DataDirectory}.");
+                $"gh-ledger is uninstalled. Your ledger data is still in {context.DataDirectory}.");
         }
 
         return 0;

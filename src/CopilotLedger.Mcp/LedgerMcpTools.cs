@@ -159,7 +159,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         {
             Name = "set_branch_budget",
             Title = "Set branch budget",
-            Description = "Sets a soft AI-credit budget for one Git branch. CopilotLedger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
+            Description = "Sets a soft AI-credit budget for one Git branch. gh-ledger alerts once when the branch's billed spend exceeds it; nothing is blocked. Uses the current repository and branch unless you pass both.",
             InputSchema = BudgetSchema.Clone(),
             Annotations = new ToolAnnotations
             {
@@ -953,7 +953,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 ["resetCommand"] = $"gh-ledger breaker reset --id {trip.Id}",
             });
             warningText.Add(
-                $"WARNING: CopilotLedger circuit breaker is open for {trip.Repository} @ {trip.Branch}: {trip.Detail} on one prompt (trip {trip.Id}). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id {trip.Id}");
+                $"WARNING: gh-ledger circuit breaker is open for {trip.Repository} @ {trip.Branch}: {trip.Detail} on one prompt (trip {trip.Id}). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id {trip.Id}");
         }
 
         JsonObject? budgetObject = null;

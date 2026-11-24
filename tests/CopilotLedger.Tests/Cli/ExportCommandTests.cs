@@ -115,7 +115,7 @@ public sealed class ExportCommandTests
         XDocument page = ExportFiles.Load(Path.Combine(temp.Path, Report));
         Assert.Equal("2026-11-20 00:00 to 2026-11-20 22:00", ExportFiles.Meta(page, "Window"));
         Assert.Equal("Test/New_York", ExportFiles.Meta(page, "Time zone"));
-        Assert.Equal("2026-11-20 22:00 by gh-ledger 0.4.1", ExportFiles.Meta(page, "Generated"));
+        Assert.Equal("2026-11-20 22:00 by gh-ledger 0.5.0", ExportFiles.Meta(page, "Generated"));
     }
 
     [Fact]
@@ -208,7 +208,7 @@ public sealed class ExportCommandTests
         Assert.Contains(
             "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:\" />",
             html);
-        Assert.Equal("CopilotLedger report: all repositories (last 30 days)", page.Root!.Element("head")!.Element("title")!.Value);
+        Assert.Equal("gh-ledger report: all repositories (last 30 days)", page.Root!.Element("head")!.Element("title")!.Value);
         Assert.Equal("section", ExportFiles.ById(page, "summary").Name.LocalName);
         Assert.Equal("section", ExportFiles.ById(page, "coverage").Name.LocalName);
         Assert.DoesNotContain(page.Descendants(), element => (string?)element.Attribute("id") == "audit-findings");

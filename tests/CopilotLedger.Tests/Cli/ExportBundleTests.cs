@@ -53,7 +53,7 @@ public sealed class ExportBundleTests
 
         using JsonDocument manifest = Json(temp.Path, "manifest.json");
         JsonElement root = manifest.RootElement;
-        Assert.Equal((1, "gh-ledger", "0.4.1"), (root.GetProperty("schemaVersion").GetInt32(), root.GetProperty("tool").GetString(), root.GetProperty("toolVersion").GetString()));
+        Assert.Equal((1, "gh-ledger", "0.5.0"), (root.GetProperty("schemaVersion").GetInt32(), root.GetProperty("tool").GetString(), root.GetProperty("toolVersion").GetString()));
         Assert.Equal(
             Telemetry.Select(name => $"{name}|{Entry(temp.Path, name).Length.ToString(CultureInfo.InvariantCulture)}|{Convert.ToHexStringLower(SHA256.HashData(Entry(temp.Path, name)))}"),
             root.GetProperty("files").EnumerateArray().Select(file =>

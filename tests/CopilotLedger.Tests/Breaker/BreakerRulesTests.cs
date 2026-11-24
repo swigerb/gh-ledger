@@ -97,7 +97,7 @@ public sealed class BreakerRulesTests
         Assert.Equal(7, trip.TripId);
         Assert.Equal("swigerb/copilot-ledger", trip.Repository);
         Assert.Equal("feature/ledger", trip.Branch);
-        Assert.Equal("CopilotLedger circuit breaker tripped", trip.Title);
+        Assert.Equal("gh-ledger circuit breaker tripped", trip.Title);
         Assert.Equal(
             "swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt. Run: gh-ledger breaker status",
             trip.Body);
@@ -116,7 +116,7 @@ public sealed class BreakerRulesTests
         Assert.Null(budget.TripId);
         Assert.Equal("contoso/api", budget.Repository);
         Assert.Equal("main", budget.Branch);
-        Assert.Equal("CopilotLedger branch budget exceeded", budget.Title);
+        Assert.Equal("gh-ledger branch budget exceeded", budget.Title);
         Assert.Equal(
             "contoso/api @ main: 31.50 of 40.50 AI credits spent. Run: gh-ledger budget list",
             budget.Body);

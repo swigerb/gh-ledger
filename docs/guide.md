@@ -1,10 +1,10 @@
-# CopilotLedger user guide
+# gh-ledger user guide
 
-CopilotLedger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
+gh-ledger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
 
 The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). After setup and backfill, every sample starts from the same state: a month of spend, a rates overlay with Foundry BYOK prices, a budget for `feature/search`, and an open circuit-breaker trip, so early samples show things that later sections explain. The [weekly waste review](#weekly-waste-review) uses a day of agent activity instead. A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
 
-- [Set up CopilotLedger](#set-up-copilotledger)
+- [Set up gh-ledger](#set-up-gh-ledger)
 - [Backfill history after installing](#backfill-history-after-installing)
 - [See what you spent](#see-what-you-spent)
 - [Find the most expensive prompts](#find-the-most-expensive-prompts)
@@ -20,7 +20,7 @@ The samples come from one example: gh-ledger installed as the GitHub CLI extensi
 - [Update rates](#update-rates)
 - [Upgrade or uninstall](#upgrade-or-uninstall)
 
-## Set up CopilotLedger
+## Set up gh-ledger
 
 **Goal:** record what Copilot spends from now on.
 
@@ -38,7 +38,7 @@ Set COPILOT_OTEL_ENABLED=true for your user account.
 gh ledger runs this GitHub CLI extension, so no alias is needed.
 gh-ledger will start when you sign in.
 gh-ledger daemon started (pid 4242) on http://localhost:4318.
-CopilotLedger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
+gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.
 ```
 <!-- /sample -->
 
@@ -50,7 +50,7 @@ gh ledger status
 ```
 
 ```text
-gh-ledger 0.4.1 (GitHub CLI extension)
+gh-ledger 0.5.0 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 16:20
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
 Rates:   2026-11-23
@@ -77,9 +77,9 @@ If no spans appear, fix any warnings that `status` shows, and see [Troubleshooti
 
 ## Backfill history after installing
 
-**Goal:** add the Copilot requests you made before you installed CopilotLedger.
+**Goal:** add the Copilot requests you made before you installed gh-ledger.
 
-CopilotLedger records requests from the moment its daemon runs, but Copilot CLI and the GitHub Copilot app also keep a log of each session on your machine. `gh ledger import` records the requests in those logs, prices each one for the date it was made, and attributes it to the branch its session was on. See what it would record for this repository first:
+gh-ledger records requests from the moment its daemon runs, but Copilot CLI and the GitHub Copilot app also keep a log of each session on your machine. `gh ledger import` records the requests in those logs, prices each one for the date it was made, and attributes it to the branch its session was on. See what it would record for this repository first:
 
 <!-- sample: import-dry-run -->
 ```shell
@@ -113,7 +113,7 @@ Dry run: nothing was written.
 ```
 <!-- /sample -->
 
-Two sessions from yesterday hold five requests, including one by the `explore` subagent and a compaction, the request that summarizes a long conversation. A session in `contoso/api` is out of scope, and the session you're in now is still open, so it's skipped: CopilotLedger records it live. Import the five:
+Two sessions from yesterday hold five requests, including one by the `explore` subagent and a compaction, the request that summarizes a long conversation. A session in `contoso/api` is out of scope, and the session you're in now is still open, so it's skipped: gh-ledger records it live. Import the five:
 
 <!-- sample: import -->
 ```shell
@@ -158,7 +158,7 @@ gh ledger status
 ```
 
 ```text
-gh-ledger 0.4.1 (GitHub CLI extension)
+gh-ledger 0.5.0 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 08:02
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
 Rates:   2026-11-23+contoso-2026-11
@@ -413,7 +413,7 @@ Budgets count Foundry BYOK spend at $0.01 per AI credit, so the branch's 617.75 
 
 <!-- sample: budget-alert -->
 ```text
-2026-11-21T21:30:00.0000000+00:00 ALERT CopilotLedger branch budget exceeded: contoso/webapp @ feature/search: 766.75 of 750.00 AI credits spent. Run: gh-ledger budget list
+2026-11-21T21:30:00.0000000+00:00 ALERT gh-ledger branch budget exceeded: contoso/webapp @ feature/search: 766.75 of 750.00 AI credits spent. Run: gh-ledger budget list
 ```
 <!-- /sample -->
 
@@ -462,7 +462,7 @@ To change the limits, or to have the daemon write a flag file that a wrapper scr
 Add this workflow to the repository as `.github/workflows/copilot-ledger-receipt.yml`:
 
 ```yaml
-name: CopilotLedger receipt
+name: gh-ledger receipt
 
 on:
   pull_request:
@@ -492,13 +492,13 @@ gh ledger export-pr
 
 ```text
 Wrote .github/copilot-ledger/receipts/feature-search-38e7a3a2.md for feature/search.
-Commit it on the branch and push; the CopilotLedger action posts it on the pull request.
+Commit it on the branch and push; the PR receipt action posts it on the pull request.
 ```
 <!-- /sample -->
 
 ```shell
 git add .github/copilot-ledger/receipts
-git commit -m "Add CopilotLedger receipt"
+git commit -m "Add gh-ledger receipt"
 git push
 ```
 
@@ -506,7 +506,7 @@ The action posts the receipt as a comment on the pull request:
 
 <!-- sample: receipt -->
 > <!-- copilot-ledger-receipt -->
-> ### CopilotLedger receipt for `feature/search`
+> ### gh-ledger receipt for `feature/search`
 >
 > - **GitHub AI Credits:** 617.75 credits ($6.18) across 6 turns: `claude-opus-5.5` 599.00, `mai-code-2` 18.75
 > - **Foundry BYOK:** $0.49 across 1 turn: `gpt-6.1-sol` $0.49
@@ -524,7 +524,7 @@ The action posts the receipt as a comment on the pull request:
 > | GitHub AI Credits | `mai-code-2` | 1 | 0 | 300,000 | 15,000 | 18.75 credits ($0.19) | Unpriced | $0.00 |
 > | Local | `qwen3.8-27b` | 1 | 0 | 300,000 | 9,000 | $0.00 | Unpriced | $0.17 |
 >
-> Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.4.1
+> Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.5.0
 >
 > To check these totals, run `gh ledger branch --since all --json` in the repository and compare the `feature/search` row.
 >
@@ -535,7 +535,7 @@ The action posts the receipt as a comment on the pull request:
 >   "branch": "feature/search",
 >   "commit": "4f9c2e1d8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d",
 >   "generatedAt": "2026-11-21T21:30:00.0000000+00:00",
->   "generator": "gh-ledger 0.4.1",
+>   "generator": "gh-ledger 0.5.0",
 >   "totals": {
 >     "spans": 8,
 >     "unpricedSpans": 0,
@@ -662,7 +662,7 @@ See [Export a report](cli.md#export-a-report) for every option and the bundle's 
 
 **Goal:** see what your Microsoft Foundry BYOK models cost, and what local models save you.
 
-CopilotLedger records requests to local runtimes, such as Foundry Local and Ollama, at $0.00 and estimates what they saved. Foundry bills BYOK requests to you directly, not through GitHub, so CopilotLedger records them unpriced until you add your prices. Create a rates overlay:
+gh-ledger records requests to local runtimes, such as Foundry Local and Ollama, at $0.00 and estimates what they saved. Foundry bills BYOK requests to you directly, not through GitHub, so gh-ledger records them unpriced until you add your prices. Create a rates overlay:
 
 ```shell
 gh ledger rates init
@@ -724,7 +724,7 @@ Then ask Copilot, for example, "How much has this branch cost so far?" Copilot c
 
 <!-- sample: mcp -->
 ```text
-WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1
+WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1
 {
   "repository": "contoso/webapp",
   "branch": "feature/search",
@@ -769,7 +769,7 @@ WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/sear
     ]
   },
   "warnings": [
-    "WARNING: CopilotLedger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1"
+    "WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1"
   ]
 }
 ```
@@ -796,7 +796,7 @@ Restart the daemon as it says. Requests already recorded keep the prices they we
 
 ## Upgrade or uninstall
 
-**Goal:** move to a new gh-ledger release, or remove CopilotLedger.
+**Goal:** move to a new gh-ledger release, or remove gh-ledger.
 
 The daemon runs the extension's binary, and so does every Copilot session that uses the `ledger` MCP server. Windows can't replace that file while either runs it, so before you upgrade, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code if they use the MCP server, and stop the daemon:
 
@@ -809,6 +809,21 @@ gh ledger daemon stop
 gh-ledger daemon stopped.
 ```
 <!-- /sample -->
+
+A new release can upgrade the ledger's format the first time it opens the ledger, and that can't be undone: an earlier release can't open the ledger afterward. So before you upgrade, copy your data directory to a new folder outside it: all of it, not only `ledger.db`, so that a `ledger.db-wal` file, which can hold the latest changes, comes with it. The data directory is `C:\Users\you\.copilot-ledger` here, or `~/.copilot-ledger` on macOS and Linux, unless `COPILOT_LEDGER_HOME` names another one. In PowerShell:
+
+```powershell
+$data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
+Copy-Item -LiteralPath $data -Destination "$HOME\copilot-ledger-backup-$(Get-Date -Format yyyyMMdd-HHmmss)" -Recurse
+```
+
+On macOS and Linux:
+
+```shell
+cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
+```
+
+Keep the copy until you're sure you'll stay on the new release; [Upgrading or removing the extension](cli.md#install-and-uninstall) says how to go back with it. Upgrade the extension:
 
 ```shell
 gh extension upgrade ledger
@@ -826,7 +841,21 @@ gh-ledger daemon started (pid 4242) on http://localhost:4318.
 ```
 <!-- /sample -->
 
-To remove CopilotLedger, undo `install`:
+If it says instead that the daemon did not start, check your rates overlay:
+
+<!-- sample: rates-validate-upgrade -->
+```shell
+gh ledger rates validate
+```
+
+```text
+Invalid rates overlay: C:\Users\you\.copilot-ledger\rates.json: githubAiCredits.models[0].id: duplicate model identity in the merged rates: claude-haiku-4-5-20251001 (built-in model claude-haiku-4.5)
+```
+<!-- /sample -->
+
+A new release can build in a model name that your overlay also lists, and the daemon doesn't start until the overlay is valid. Here, the overlay prices `claude-haiku-4-5-20251001`, the name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5: gh-ledger 0.4.1 didn't know it, so you may have added it yourself, and gh-ledger 0.5.0 builds it in. Remove the entry that the message names, run `gh ledger rates validate` again, and start the daemon. See [Which model prices a request](configuration.md#which-model-prices-a-request).
+
+To remove gh-ledger, undo `install`:
 
 <!-- sample: uninstall -->
 ```shell
@@ -837,7 +866,7 @@ gh ledger uninstall
 gh-ledger daemon stopped.
 gh-ledger will no longer start when you sign in.
 Removed COPILOT_OTEL_ENABLED from your user account.
-CopilotLedger is uninstalled. Your ledger data is still in C:\Users\you\.copilot-ledger.
+gh-ledger is uninstalled. Your ledger data is still in C:\Users\you\.copilot-ledger.
 ```
 <!-- /sample -->
 

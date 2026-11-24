@@ -14,7 +14,7 @@ public sealed class ReceiptCommandTests
 
     private const string FeatureReceipt = """
         <!-- copilot-ledger-receipt -->
-        ### CopilotLedger receipt for `feature/ledger`
+        ### gh-ledger receipt for `feature/ledger`
 
         - **GitHub AI Credits:** 342.00 credits ($3.42) across 3 turns, 1 unpriced: `claude-opus-5.5` 286.00, `mai-code-2` 56.00, `gpt-unknown` 0.00
         - **Foundry BYOK:** $0.32 across 1 turn: `gpt-6.1-sol` $0.32
@@ -178,7 +178,7 @@ public sealed class ReceiptCommandTests
 
     private const string EmptyReceipt = """
         <!-- copilot-ledger-receipt -->
-        ### CopilotLedger receipt for `fix/@octocat-#7`
+        ### gh-ledger receipt for `fix/@octocat-#7`
 
         - **GitHub AI Credits:** none
         - **Foundry BYOK:** none
@@ -245,7 +245,7 @@ public sealed class ReceiptCommandTests
         Assert.Equal(0, run.ExitCode);
         Assert.Equal(
             $"Wrote {FeatureFile} for feature/ledger.\n" +
-            "Commit it on the branch and push; the CopilotLedger action posts it on the pull request.\n",
+            "Commit it on the branch and push; the PR receipt action posts it on the pull request.\n",
             run.Out);
         Assert.Equal(string.Empty, run.Error);
         string[] files = Directory.GetFiles(Path.Combine(repo, ".github", "copilot-ledger", "receipts"));
@@ -344,7 +344,7 @@ public sealed class ReceiptCommandTests
         Assert.Equal(0, run.ExitCode);
         Assert.Equal(
             "Wrote .github/copilot-ledger/receipts/fix--octocat--7-98e51822.md for fix/@octocat-#7.\n" +
-            "Commit it on the branch and push; the CopilotLedger action posts it on the pull request.\n",
+            "Commit it on the branch and push; the PR receipt action posts it on the pull request.\n",
             run.Out);
         Assert.Equal(
             Expected(EmptyReceipt),
@@ -465,8 +465,10 @@ public sealed class ReceiptCommandTests
             new LedgerEntry(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), GitFixture.Feature(temp.Path)),
         ]);
         string repo = Path.Combine(temp.Path, "repo");
-        const string Error =
-            "The receipt for feature/ledger is 68094 bytes; a receipt can be at most 65536 bytes.\n";
+        // The receipt shows the version twice, so its size depends on the version's length: 68,090 bytes for a version of
+        // five characters.
+        string error =
+            $"The receipt for feature/ledger is {68_080 + (2 * GhLedgerCli.Version.Length)} bytes; a receipt can be at most 65536 bytes.\n";
 
         CliRun file = await harness.RunInAsync(repo, "export-pr");
         CliRun stdout = await harness.RunInAsync(repo, "export-pr", "--stdout");
@@ -474,10 +476,10 @@ public sealed class ReceiptCommandTests
 
         Assert.Equal(1, file.ExitCode);
         Assert.Equal(string.Empty, file.Out);
-        Assert.Equal(Error, file.Error);
+        Assert.Equal(error, file.Error);
         Assert.Equal(1, stdout.ExitCode);
         Assert.Equal(string.Empty, stdout.Out);
-        Assert.Equal(Error, stdout.Error);
+        Assert.Equal(error, stdout.Error);
         Assert.Equal(0, json.ExitCode);
         Assert.Equal(string.Empty, json.Error);
         Assert.False(Directory.Exists(Path.Combine(repo, ".github")));

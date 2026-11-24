@@ -379,7 +379,7 @@ internal static class ReportCommands
                 context.Platform.IsWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         {
             warnings.Add(
-                $"CopilotLedger was installed from {manifest.ExecutablePath}; run {command} install to use this copy instead.");
+                $"gh-ledger was installed from {manifest.ExecutablePath}; run {command} install to use this copy instead.");
         }
 
         if (rates.Warning is not null)

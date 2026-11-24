@@ -42,9 +42,9 @@ public sealed partial class GuideSamplesTests
         ["uninstall"] = GuideState.Month,
     };
 
-    // The samples that GS3 to GS7 check, and the overlay that the Month state uses.
+    // The samples that GS3 to GS8 check, and the overlay that the Month state uses.
     private static readonly string[] OtherSamples =
-        ["daemon-start", "rates-update", "budget-alert", "receipt", "mcp", "rates-overlay"];
+        ["daemon-start", "rates-update", "budget-alert", "receipt", "mcp", "rates-overlay", "rates-validate-upgrade"];
 
     private static readonly Lazy<IReadOnlyDictionary<string, GuideSample>> Samples = new(ReadSamples);
 
@@ -187,6 +187,40 @@ public sealed partial class GuideSamplesTests
         int json = text.LastIndexOf('\n') + 1;
         Assert.Equal(sample.Text, text[..json] + Indent(text[json..]));
     }
+
+    [Fact]
+    public async Task GS8_RatesValidateUpgradeSampleNamesTheOverlayEntry()
+    {
+        GuideSample sample = Samples.Value["rates-validate-upgrade"];
+        Assert.Equal("gh ledger rates validate", sample.Command);
+        using TempDirectory temp = new();
+        await using GuideWorld world = await GuideWorld.CreateAsync(temp.Path, GuideState.Month, Overlay);
+        string path = world.Harness.Context.RatesOverlayPath;
+        await File.WriteAllTextAsync(path, HaikuOverlay);
+        _ = await FileRetry.ReadAllTextAsync(path);
+        CliRun run = await world.RunAsync(sample.Command!);
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal(string.Empty, run.Out);
+        Assert.Equal(sample.Text + "\n", world.Display(run.Error));
+    }
+
+    // An overlay that prices claude-haiku-4-5-20251001, the name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5, as a
+    // user of gh-ledger 0.4.1, which didn't know the name, could have written it. gh-ledger 0.5.0 builds the name in.
+    private const string HaikuOverlay = """
+        {
+          "schemaVersion": 1,
+          "githubAiCredits": {
+            "models": [
+              {
+                "id": "claude-haiku-4-5-20251001",
+                "windows": [
+                  { "tiers": [ { "name": "default", "inputPer1M": 1.00, "cachedInputPer1M": 0.10, "cacheWritePer1M": 1.25, "outputPer1M": 5.00 } ] }
+                ]
+              }
+            ]
+          }
+        }
+        """;
 
     // A sample is "<!-- sample: <id> -->", then a shell block holding one gh ledger command and a text block holding
     // its output, or a single text or json block, or a quoted receipt, then "<!-- /sample -->".

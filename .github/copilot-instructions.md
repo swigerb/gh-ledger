@@ -1,6 +1,6 @@
-# CopilotLedger: Copilot instructions
+# gh-ledger: Copilot instructions
 
-CopilotLedger (`gh-ledger`) is a free, local-first .NET 10 utility. It attributes AI spend to repository, branch, model, and agent from OpenTelemetry `gen_ai.*` spans. Spend is tracked across three billing channels: GitHub AI Credits, Microsoft Foundry BYOK (USD), and local models such as Foundry Local and Ollama ($0.00 billed, with estimated cloud savings).
+gh-ledger is a free, local-first .NET 10 utility. It attributes AI spend to repository, branch, model, and agent from OpenTelemetry `gen_ai.*` spans. Spend is tracked across three billing channels: GitHub AI Credits, Microsoft Foundry BYOK (USD), and local models such as Foundry Local and Ollama ($0.00 billed, with estimated cloud savings).
 
 The `ledger-architect` agent plans work in `.github/plans/current-sprint.md`. The `ledger-builder` agent implements it one task at a time.
 
