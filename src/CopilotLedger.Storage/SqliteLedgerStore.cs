@@ -879,7 +879,17 @@ public sealed partial class SqliteLedgerStore
     {
         EnsureInitialized();
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        return await ReadBreakerSettingsAsync(connection, null, cancellationToken);
+    }
+
+    // GetBreakerSettingsAsync's query on connection, in transaction when it isn't null.
+    internal static async Task<BreakerSettings> ReadBreakerSettingsAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT velocity_threshold_usd_pico, velocity_window_minutes, churn_failures, flag_file, notifications FROM breaker_settings WHERE id = 1;
             """;
