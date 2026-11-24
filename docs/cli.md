@@ -395,7 +395,7 @@ The ZIP holds exactly seven files: `manifest.json`, `report.html` (the same byte
 {
   "schemaVersion": 1,
   "tool": "gh-ledger",
-  "toolVersion": "0.5.0",
+  "toolVersion": "0.6.0",
   "generatedAtUtc": "2026-11-21T21:30:00.0000000+00:00",
   "ratesVersions": ["2026-11-23"],
   "apiRateCards": [{ "ratesVersion": "2026-11-23", "sha256": "<64 hexadecimal digits>" }],

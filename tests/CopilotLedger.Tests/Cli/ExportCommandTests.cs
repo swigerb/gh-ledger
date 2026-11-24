@@ -115,7 +115,7 @@ public sealed class ExportCommandTests
         XDocument page = ExportFiles.Load(Path.Combine(temp.Path, Report));
         Assert.Equal("2026-11-20 00:00 to 2026-11-20 22:00", ExportFiles.Meta(page, "Window"));
         Assert.Equal("Test/New_York", ExportFiles.Meta(page, "Time zone"));
-        Assert.Equal("2026-11-20 22:00 by gh-ledger 0.5.0", ExportFiles.Meta(page, "Generated"));
+        Assert.Equal("2026-11-20 22:00 by gh-ledger 0.6.0", ExportFiles.Meta(page, "Generated"));
     }
 
     [Fact]

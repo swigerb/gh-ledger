@@ -23,8 +23,8 @@ Releases are GitHub Releases of this repository. They make `gh extension install
 4. Tag the merged commit and push the tag:
 
    ```shell
-   git tag v0.5.0
-   git push origin v0.5.0
+   git tag v0.6.0
+   git push origin v0.6.0
    ```
 
 When a `v*` tag is pushed, the Release workflow checks that the tag equals `v` plus the project version, builds a single-file binary for each platform, smoke-tests the same three, checks `ratesVersion` against the latest release's rates, and creates the release with these assets:

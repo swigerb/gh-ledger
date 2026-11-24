@@ -50,7 +50,7 @@ gh ledger status
 ```
 
 ```text
-gh-ledger 0.5.0 (GitHub CLI extension)
+gh-ledger 0.6.0 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 16:20
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
 Rates:   2026-11-23
@@ -166,7 +166,7 @@ gh ledger status
 ```
 
 ```text
-gh-ledger 0.5.0 (GitHub CLI extension)
+gh-ledger 0.6.0 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 08:02
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
 Rates:   2026-11-23+contoso-2026-11
@@ -533,7 +533,7 @@ The action posts the receipt as a comment on the pull request:
 > | GitHub AI Credits | `mai-code-2` | 1 | 0 | 300,000 | 15,000 | 18.75 credits ($0.19) | Unpriced | $0.00 |
 > | Local | `qwen3.8-27b` | 1 | 0 | 300,000 | 9,000 | $0.00 | Unpriced | $0.17 |
 >
-> Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.5.0
+> Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.6.0
 >
 > To check these totals, run `gh ledger branch --since all --json` in the repository and compare the `feature/search` row.
 >
@@ -544,7 +544,7 @@ The action posts the receipt as a comment on the pull request:
 >   "branch": "feature/search",
 >   "commit": "4f9c2e1d8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d",
 >   "generatedAt": "2026-11-21T21:30:00.0000000+00:00",
->   "generator": "gh-ledger 0.5.0",
+>   "generator": "gh-ledger 0.6.0",
 >   "totals": {
 >     "spans": 8,
 >     "unpricedSpans": 0,
