@@ -84,6 +84,7 @@ internal sealed record ExportCoverage
     public required ExportToolHistoryStart ToolHistoryStart { get; init; }
     public required long SpansBeforeToolHistory { get; init; }
     public required long ImportedToolCallsWithoutDetail { get; init; }
+    public required long ImportedRequestsWithoutToolData { get; init; } // imported requests whose logs record no tool calls, as Codex's
     public required long ToolCalls { get; init; }                       // CountToolCallsAsync
     public required int MaxTimelineSpans { get; init; }
     public required long TimelineSpans { get; init; }                   // drawn requests
@@ -92,7 +93,8 @@ internal sealed record ExportCoverage
     // Imports that the ledger couldn't account for (deferred, unfinished, or replaced without a match) may hide requests.
     public bool RequestsComplete =>
         LedgerAmbiguousImportRecords == 0 && LedgerIncompleteImportLogs == 0 && SupersededUnmatchedImportSpans == 0;
-    public bool ToolHistoryComplete => SpansBeforeToolHistory == 0 && ImportedToolCallsWithoutDetail == 0;
+    public bool ToolHistoryComplete =>
+        SpansBeforeToolHistory == 0 && ImportedToolCallsWithoutDetail == 0 && ImportedRequestsWithoutToolData == 0;
 
     // The limitations that apply, ordinal.
     public IReadOnlyList<string> Warnings =>
@@ -105,6 +107,7 @@ internal sealed record ExportCoverage
             (LedgerAmbiguousImportRecords > 0, "import-ambiguous"),
             (LedgerIncompleteImportLogs > 0, "import-incomplete"),
             (SupersededUnmatchedImportSpans > 0, "import-superseded-unmatched"),
+            (ImportedRequestsWithoutToolData > 0, "imported-requests-without-tool-data"),
             (ImportedToolCallsWithoutDetail > 0, "imported-tool-calls-without-detail"),
             (TimelineTruncated, "timeline-truncated"),
             (SpansBeforeToolHistory > 0, "tool-history-retention"),

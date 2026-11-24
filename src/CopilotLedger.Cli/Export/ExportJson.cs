@@ -146,6 +146,7 @@ internal static class ExportJson
         LedgerFormat.WriteTime(writer, "retainedFromUtc", coverage.ToolHistoryFromUtc);
         writer.WriteNumber("spansBeforeRetention", coverage.SpansBeforeToolHistory);
         writer.WriteNumber("importedToolCallsWithoutDetail", coverage.ImportedToolCallsWithoutDetail);
+        writer.WriteNumber("importedRequestsWithoutToolData", coverage.ImportedRequestsWithoutToolData);
         writer.WriteEndObject();
         writer.WriteStartObject("timeline");
         writer.WriteBoolean("truncated", coverage.TimelineTruncated);

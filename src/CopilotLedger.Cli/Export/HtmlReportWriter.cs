@@ -121,6 +121,14 @@ internal static class HtmlReportWriter
                 : $"{LedgerFormat.Count(withoutDetail)} tool calls of imported requests are counted without detail.";
         }
 
+        long withoutToolData = coverage.ImportedRequestsWithoutToolData;
+        if (withoutToolData > 0)
+        {
+            yield return withoutToolData == 1
+                ? "1 imported request has no tool-call data in its session log, so its tool calls are unknown."
+                : $"{LedgerFormat.Count(withoutToolData)} imported requests have no tool-call data in their session logs, so their tool calls are unknown.";
+        }
+
         long unpriced = coverage.UnpricedSpans;
         if (unpriced > 0)
         {

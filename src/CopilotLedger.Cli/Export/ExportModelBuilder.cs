@@ -103,6 +103,7 @@ internal static class ExportModelBuilder
                 ToolHistoryStart = toolHistoryStart,
                 SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
                 ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
+                ImportedRequestsWithoutToolData = coverage.ImportedRequestsWithoutToolData,
                 ToolCalls = await snapshot.CountToolCallsAsync(filter, cancellationToken),
                 MaxTimelineSpans = inputs.MaxTimelineSpans,
                 TimelineSpans = drawnSpans.Length,

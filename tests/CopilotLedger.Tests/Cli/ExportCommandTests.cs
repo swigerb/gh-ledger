@@ -447,6 +447,68 @@ public sealed class ExportCommandTests
         Assert.Contains("The ledger keeps no tool history, so the 8 requests may be missing their tool calls.", Notes(page));
     }
 
+    // A Codex rollout records no tool calls, so a recent request imported from one leaves tool history incomplete, and the page,
+    // the manifest, and the summary say so.
+    [Fact]
+    public async Task EC19_ACodexImportLeavesToolHistoryIncomplete()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        await store.RecordImportedAsync([ImportEntries.Copilot("k7", "conv-codex", null) with { Source = ImportSourceKind.Codex }], null);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos", "--bundle");
+
+        IReadOnlyList<(string Name, byte[] Bytes)> entries = ExportFiles.ReadZip(Path.Combine(temp.Path, "copilot-ledger-report.zip"));
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        using JsonDocument manifest = JsonDocument.Parse(entries.Single(entry => entry.Name == "manifest.json").Bytes);
+        using JsonDocument summary = JsonDocument.Parse(entries.Single(entry => entry.Name == "telemetry/summary.json").Bytes);
+        JsonDocument[] documents = [data, manifest, summary];
+        foreach (JsonElement coverage in documents.Select(document => document.RootElement.GetProperty("coverage")))
+        {
+            JsonElement history = coverage.GetProperty("toolHistory");
+            Assert.Equal(
+                (false, 1, 0, 0),
+                (history.GetProperty("complete").GetBoolean(),
+                 history.GetProperty("importedRequestsWithoutToolData").GetInt32(),
+                 history.GetProperty("spansBeforeRetention").GetInt32(),
+                 history.GetProperty("importedToolCallsWithoutDetail").GetInt32()));
+            Assert.Contains(
+                "imported-requests-without-tool-data",
+                coverage.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()));
+        }
+
+        Assert.Equal("Tool calls: partial; see the notes.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Contains("1 imported request has no tool-call data in its session log, so its tool calls are unknown.", Notes(page));
+    }
+
+    // A Copilot import that reported 0 tool calls has tool data, and a Copilot compaction, whose row has no count, makes no
+    // tool calls, so tool history stays complete.
+    [Fact]
+    public async Task EC20_CopilotImportsKeepToolHistoryComplete()
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        const string compaction = "33333333-3333-4333-8333-333333333333";
+        await store.RecordImportedAsync(
+        [
+            ImportEntries.Copilot("k8", "conv-zero", null) with { ToolCallCount = 0 },
+            ImportEntries.Copilot(compaction, "conv-zero", compaction, ImportedRecordKind.Compaction),
+        ],
+            null);
+
+        XDocument page = await ExportAsync(Harness(temp.Path), temp.Path, "--all-repos");
+
+        using JsonDocument data = ExportFiles.LedgerData(ExportFiles.ReadReport(Path.Combine(temp.Path, Report)));
+        JsonElement history = data.RootElement.GetProperty("coverage").GetProperty("toolHistory");
+        Assert.Equal((true, 0), (history.GetProperty("complete").GetBoolean(), history.GetProperty("importedRequestsWithoutToolData").GetInt32()));
+        Assert.Equal("Tool calls: complete for this window.", ExportFiles.ById(page, "coverage-tool-calls").Value);
+        Assert.Equal(
+            2L,
+            await LedgerSql.ScalarAsync(
+                Path.Combine(temp.Path, "data", "ledger.db"),
+                "SELECT COUNT(*) FROM spans WHERE conversation_id = 'conv-zero' AND accounting_state = 'effective';"));
+    }
+
     // A harness at ExportSeeds.GeneratedAt in ManualTimeProvider.UtcMinus5, with the test time zones.
     private static CliHarness Harness(string root)
     {
