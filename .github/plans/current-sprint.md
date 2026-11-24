@@ -9,7 +9,7 @@
 | Branch | `swigerb-sprint-14-import-speed-routed-audits` |
 | Requirements | Issue [#82](https://github.com/swigerb/gh-ledger/issues/82) remainder (quadratic import lookup; oversized events import never reads), issue [#80](https://github.com/swigerb/gh-ledger/issues/80) remainder (`premium_model_trivial_turn` and routed requests), issue [#77](https://github.com/swigerb/gh-ledger/issues/77) (release provenance attestations), the 0.6.0 version bump and its 0.5.0 → 0.6.0 upgrade docs |
 | Status | Current sprint. Sprint 12's plan is archived verbatim at `.github/plans/archive/sprint-12.md`. Sprint 13's is at `.github/plans/archive/sprint-13.md`. |
-| Amended | 2026-11-24, after Task 1 (`30dd55e`): Task 3's oversized rule follows import's normal-size rule instead of a two-type allowlist. See "Plan amendments". |
+| Amended | 2026-11-24, after Task 1 (`30dd55e`): Task 3's oversized rule follows import's normal-size rule instead of a two-type allowlist. 2026-11-24, after Task 2 (`36f8c27`): Task 3's test vectors repaired (PA2). See "Plan amendments". |
 
 ## How to use this plan
 
@@ -141,6 +141,7 @@ Global rules for every task:
 ## Plan amendments
 
 - **PA1 (2026-11-24, after Task 1 at `30dd55e`; coordinator-approved).** Task 3 no longer special-cases `model.model_call_success` and `model.messages_snapshot`. An oversized line whose complete top-level `type`, read from the 64 KiB prefix, isn't one of the event types import reads counts as a skipped event, and the log can complete. An oversized line of a type import reads, or whose type can't be read from the prefix, stays malformed. Changed: the Requirements row, the Task 3 summary line, A1, D4, Task 3's title, contracts, Copilot `OnOversized` algorithm, tests (CS20 becomes a theory, CS21 gains two heads, CS22, CS24, and OV1 renamed, CS25–CS27 added), docs text, and acceptance; Task 8's wording; Task 9's privacy list; "Tests added this sprint"; S14-5. Task 1 and its completed text, including F11, are unchanged. Unchanged: the 64 KiB prefix, "the first `type` decides", the after-`session.start` condition, unterminated last lines, hashing, line numbers and offsets, Codex, D1–D3, D5–D9, and the task order.
+- **PA2 (2026-11-24, after Task 2 at `36f8c27`; plan-text repair, no behavior change).** Task 3's tests now agree with PA1's rule and the code. CS5 (an oversized `user.message`, a type import doesn't read) expects MalformedLines 0, SkippedEvents 2, and no diagnostics, instead of PA1's leftover "unchanged" malformed expectation. CS19, CS25, CS26, and OV1 use valid service request IDs (`R1`, `R2`) instead of `"r-1"`/`"r-2"`, which `UsageIdentity.NormalizeServiceRequestId` rejects. `O`, `R1`, `R2`, CX18's fixture, OV1's harness and assertions, the nested reader class names in the contracts, CS18's precondition note, the acceptance text, and "Tests added this sprint" are made explicit. Task 2's LX6 text is left as committed.
 
 ## Task 1: Import Benchmark Script and Baseline
 
@@ -327,11 +328,11 @@ internal static void Read(
 // or that value isn't a string. The first top-level "type" decides; a later duplicate isn't seen.
 internal static int? ReadTypePrefix(ReadOnlySpan<byte> prefix, IReadOnlyList<string> types);
 
-// CopilotSessionLogSource (the per-log reader class that has OnOversized today). It uses the existing static Types list,
-// the event types import reads, unchanged. No other list of types is added.
+// CopilotSessionLogSource.Session (the nested per-log reader class that has OnOversized today). It uses the existing
+// private static CopilotSessionLogSource.Types list, the event types import reads, unchanged. No other list of types is added.
 internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset);
 
-// CodexSessionLogSource
+// CodexSessionLogSource.Rollout (the nested per-rollout reader class that has OnOversized today)
 internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset);   // ignores prefix; behavior unchanged
 ```
 
@@ -371,25 +372,37 @@ internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset); 
 
 **Tests:**
 
-`O(head)` is a test helper in `CopilotSessionGateTests`: `head + new string('x', ImportLimits.MaxLineBytes + 1 - head.Length - 3) + "\"}}"`, an ASCII line exactly `MaxLineBytes + 1` bytes long. `C` is `CopilotSessionLogs.Canary`. Each test also calls `AssertNoCanary(result)`.
+`O(head)` is a private static test helper: `head + new string('x', ImportLimits.MaxLineBytes + 1 - head.Length - 3) + "\"}}"`, an ASCII line exactly `MaxLineBytes + 1` bytes long. Add it to `CopilotSessionGateTests`, and add an identical private copy to `ImportOversizedTests` (OV1). CX18 inlines the same formula. `C` is `CopilotSessionLogs.Canary`. Each `CopilotSessionGateTests` test also calls `AssertNoCanary(result)`.
+
+`R1` is `"11111111-1111-4111-8111-111111111111"` and `R2` is `"22222222-2222-4222-8222-222222222222"`, the same values as `ImportCommandTests.S1` and `S2`. Declare them as private constants in each test class that uses them. A `Usage` record needs a service request ID that `UsageIdentity.NormalizeServiceRequestId` accepts (a non-empty UUID); with anything else, such as `"r-1"`, it's an unsupported usage shape, no record is created, and the log never completes.
 
 | ID | Log (after `session.start` unless stated) | Expected |
 |---|---|---|
-| CS5 (unchanged) | oversized `user.message`, then `UserMessage()` | MalformedLines 1, SkippedEvents 1, one `OversizedLine` diagnostic at line 2 |
+| CS5 `CS5_ALineLongerThan8MiBIsDiscardedUnread` (name and log unchanged; assertions change, see below) | oversized `user.message` (head `"{\"type\":\"user.message\",\"data\":{\"content\":\"" + C`, as today), then `UserMessage()` | MalformedLines 0, SkippedEvents 2, Diagnostics empty. Still asserts the oversized line is exactly `MaxLineBytes + 1` bytes, and `AssertNoCanary(result)` |
 | CS18 `CS18_AnOversizedMessagesSnapshot_IsSkipped` | `Raw(O("{\"type\":\"model.messages_snapshot\",\"data\":{\"messages\":\"" + C))`, then `UserMessage()` | Status Read, MalformedLines 0, SkippedEvents 2, Diagnostics empty |
-| CS19 `CS19_AnOversizedModelCallSuccess_IsSkipped_WhereverItsTypeIs` | `Raw(O("{\"id\":\"00000000-0000-4000-8000-000000000002\",\"data\":{\"model\":\"m\",\"nested\":[1,{\"a\":true},null]},\"type\":\"model.model_call_success\",\"response\":\"" + C))`, then `Usage("u-1", "r-1")` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
+| CS19 `CS19_AnOversizedModelCallSuccess_IsSkipped_WhereverItsTypeIs` | `Raw(O("{\"id\":\"00000000-0000-4000-8000-000000000002\",\"data\":{\"model\":\"m\",\"nested\":[1,{\"a\":true},null]},\"type\":\"model.model_call_success\",\"response\":\"" + C))`, then `Usage("u-1", R1)` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
 | CS20 `CS20_AnOversizedEventThatImportReads_StaysMalformed` (theory) | Two heads, each `Raw(O(head))`: `"{\"type\":\"session.usage_record\",\"data\":{\"usage\":{\"model\":\"" + C`; `"{\"type\":\"session.usage\\u005frecord\",\"data\":{\"usage\":{\"model\":\"" + C` (escaped, still a type import reads) | Each: MalformedLines 1, SkippedEvents 0, Records.Count 0, one `OversizedLine` diagnostic at line 2 |
 | CS21 `CS21_ATypeBeyondThePrefixOrUnreadable_StaysMalformed` (theory) | Seven heads, each with `O(head)`: `"{\"pad\":\"" + new string('y', 65_508) + "\",\"type\":\"model.messages_snapshot\",\"x\":\""` (the prefix ends inside the `type` value, after `"type":"model.mess`: the value starts at byte 65,526, and the prefix is bytes 0–65,535); `"{\"data\":{\"messages\":\"" + new string('y', 70_000) + "\"},\"type\":\"model.messages_snapshot\",\"x\":\""` (type past 65,536 bytes); `"{\"x\":\""` (no `type` at all); `"{\"type\":7,\"x\":\""`; `"{\"type\":null,\"x\":\""`; `"[{\"type\":\"model.messages_snapshot\",\"x\":\""`; `"{type:\"model.messages_snapshot\",\"x\":\""` | Each: MalformedLines 1, SkippedEvents 0, one `OversizedLine` diagnostic at line 2 |
 | CS22 `CS22_AnEscapedUnreadType_IsSkipped` | `Raw(O("{\"type\":\"model.messages\\u005fsnapshot\",\"x\":\""))` | MalformedLines 0, SkippedEvents 1 |
 | CS23 `CS23_AnOversizedUnterminatedLastLine_StaysMalformed` | `WriteAsync(home, new CopilotSessionLogs(SessionId).Text() + O("{\"type\":\"model.messages_snapshot\",\"x\":\""))`, with no trailing `\n` | MalformedLines 1, one `OversizedLine` diagnostic at line 2 |
 | CS24 `CS24_AnOversizedUnreadLineBeforeSessionStart_StaysMalformed` | `WriteAsync(home, O("{\"type\":\"model.messages_snapshot\",\"x\":\"") + "\n" + new CopilotSessionLogs(SessionId).Text())` | Status Read, MalformedLines 1, one `OversizedLine` diagnostic at line 1 |
-| CS25 `CS25_AnOversizedBinaryAsset_IsSkipped` | `Raw(O("{\"type\":\"session.binary_asset\",\"data\":{\"bytes\":\"" + C))`, then `Usage("u-1", "r-1")` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
-| CS26 `CS26_AnOversizedLineOfAnUnknownFutureType_IsSkipped` | `Raw(O("{\"type\":\"future.unknown_event\",\"data\":{\"blob\":\"" + C))`, then `Usage("u-1", "r-1")` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
+| CS25 `CS25_AnOversizedBinaryAsset_IsSkipped` | `Raw(O("{\"type\":\"session.binary_asset\",\"data\":{\"bytes\":\"" + C))`, then `Usage("u-1", R1)` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
+| CS26 `CS26_AnOversizedLineOfAnUnknownFutureType_IsSkipped` | `Raw(O("{\"type\":\"future.unknown_event\",\"data\":{\"blob\":\"" + C))`, then `Usage("u-1", R1)` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
 | CS27 `CS27_AnOversizedAssistantMessage_StaysMalformed` | `Raw(O("{\"type\":\"assistant.message\",\"data\":{\"content\":\"" + C))` | MalformedLines 1, SkippedEvents 0, one `OversizedLine` diagnostic at line 2 |
-| CX18 `CX18_AnOversizedRolloutLine_StaysMalformed_WhateverItsType` (`CodexRolloutTests`) | A valid rollout plus `Raw` of `{"type":"model.messages_snapshot","payload":{"x":"` padded to `MaxLineBytes + 1` as `O` does | MalformedLines 1, one `OversizedLine` diagnostic |
-| OV1 `OV1_ALogWhoseOversizedLinesAreUnread_CompletesAndIsSkippedNextTime` (`ImportOversizedTests`, `CliHarness`) | Write `CopilotSessionLogs("s-ov")` with `Usage("u-1", "r-1")`, `Raw(O("{\"type\":\"model.messages_snapshot\",\"x\":\""))`, `Raw(O("{\"type\":\"model.model_call_success\",\"x\":\""))`, `Usage("u-2", "r-2")` to `harness.Context.CopilotHome`. Run `import --all --json` twice. | Run 1: exit 0; copilot source `recorded` 2, `malformedLines` 0, `skippedEvents` 2. Run 2: exit 0; `sessionsSkippedUnchanged` 1, `recorded` 0, `duplicate` 0. Neither stdout contains `C` or `xxxxxxxx`. |
+| CX18 `CX18_AnOversizedRolloutLine_StaysMalformed_WhateverItsType` (`CodexRolloutTests`) | `new CodexRollouts(Thread).Raw(head + new string('x', ImportLimits.MaxLineBytes + 1 - head.Length - 3) + "\"}}")`, with `head` = `"{\"type\":\"model.messages_snapshot\",\"payload\":{\"x\":\""` | Status Read, MalformedLines 1, one `OversizedLine` diagnostic at line 2 |
+| OV1 `OV1_ALogWhoseOversizedLinesAreUnread_CompletesAndIsSkippedNextTime` (`ImportOversizedTests`, `CliHarness` built as `ImportCommandTests.Harness` builds it, with `ManualTimeProvider(new DateTimeOffset(2026, 11, 23, 12, 0, 0, TimeSpan.Zero))`) | Write `new CopilotSessionLogs("s-ov").Usage("u-1", R1).Raw(O("{\"type\":\"model.messages_snapshot\",\"x\":\"")).Raw(O("{\"type\":\"model.model_call_success\",\"x\":\"")).Usage("u-2", R2)` to `harness.Context.CopilotHome` (not active). Run `import --all --json` twice. | Run 1: exit 0, stderr empty; `sources[0]` (copilot) `recorded` 2, `malformedLines` 0, `unsupportedUsageShapes` 0, `skippedEvents` 2, `coverage` `"complete"`. Run 2: exit 0, stderr empty; `sessionsSkippedUnchanged` 1, `recorded` 0, `duplicate` 0. Neither stdout contains `C` or `xxxxxxxx`. |
 
-Before relying on CS18's "SkippedEvents 2", check that `UserMessage()` counts as one skipped event (CS5 shows it does). If an existing exit-code rule makes run 1's exit code differ from 0 with no malformed lines, stop and report it.
+Before relying on CS18's "SkippedEvents 2", check that `UserMessage()` counts as one skipped event (CS2 shows it does: `{not json` then `UserMessage()` gives SkippedEvents 1). If an existing exit-code rule makes run 1's exit code differ from 0 with no malformed lines, stop and report it.
+
+**CS5's changed assertions.** `user.message` isn't in `Types`, so under D4 its oversized line is skipped. In `CS5_ALineLongerThan8MiBIsDiscardedUnread`, keep the name, the log, the byte-length assertion, and `AssertNoCanary(result)`. Replace every statement between the byte-length assertion and `AssertNoCanary(result)` with exactly:
+
+```csharp
+Assert.Equal(0, result.MalformedLines);
+Assert.Equal(2, result.SkippedEvents);
+Assert.Empty(result.Diagnostics);
+```
+
+(They were `MalformedLines` 1, `SkippedEvents` 1, and one `OversizedLine` diagnostic at line 2. CS20 and CS27 now cover the malformed path.)
 
 **Docs (`docs/cli.md`):**
 
@@ -397,7 +410,7 @@ Before relying on CS18's "SkippedEvents 2", check that `UserMessage()` counts as
 - In the JSON field list, change `` `skippedEvents` (events of other types) `` to `` `skippedEvents` (events of other types, including those longer than 8 MiB whose type shows in their first 64 KiB) ``.
 - In "Repairs" or "The import report", wherever the docs say a log with malformed lines is read again, add no new text. The behavior there is unchanged.
 
-**Acceptance:** CS5 and all existing import tests still pass unchanged. CS18–CS27, CX18, and OV1 pass. The reader's hash test vectors, if any, are unchanged. `git grep -n "Action<long, long> onOversized"` and `git grep -n "IgnoredOversizedTypes" -- src tests` find nothing, and `src/` names neither `model.model_call_success` nor `model.messages_snapshot`. `CopilotSessionLogSource.Types` is unchanged.
+**Acceptance:** CS5 passes with exactly the changed assertions above. All other existing tests pass unchanged. CS18–CS27, CX18, and OV1 pass. The reader's hash test vectors, if any, are unchanged. `git grep -n "Action<long, long> onOversized"` and `git grep -n "IgnoredOversizedTypes" -- src tests` find nothing, and `src/` names neither `model.model_call_success` nor `model.messages_snapshot`. `CopilotSessionLogSource.Types` is unchanged.
 
 ## Task 4: `premium_model_trivial_turn` Skips Routed Requests
 
@@ -684,6 +697,8 @@ Changed, with assertions unchanged:
 
 - the format-downgrade fixtures (Task 2);
 - the four version tests (Task 5).
+
+Changed assertions: `CS5_ALineLongerThan8MiBIsDiscardedUnread` (Task 3, PA2): an oversized `user.message` is now a skipped event.
 
 ## After Task 9 (orchestrator)
 
