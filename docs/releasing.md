@@ -8,8 +8,12 @@ Releases are GitHub Releases of this repository. They make `gh extension install
    - `<Version>` in `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`;
    - in `src/CopilotLedger.Cli/GhLedgerCli.cs`, the `AssemblyInformationalVersionAttribute` comment and the fallback after `??`;
    - the version that the smoke test in `.github/workflows/ci.yml` compares with;
-   - the tests that expect it: `DaemonCommandTests.DM1` and `ReportCommandTests.StatusText`;
-   - the samples in `docs/guide.md` that show it: both `status` samples and the receipt. `GuideSamplesTests` fails until they match.
+   - the tests that expect it: `DaemonCommandTests.DM1`, `ReportCommandTests.StatusText`, `ExportCommandTests.EC5`, and `ExportBundleTests.EB2`;
+   - the samples in `docs/guide.md` that show it: `status-first`, `status`, and the receipt, which shows it twice. `GuideSamplesTests` fails until they match;
+   - the manifest sample under "The bundle" in `docs/cli.md`, as `"toolVersion"`;
+   - the tag in step 4.
+
+   `VersionPlacesTests.VR1` fails until the comment, the fallback, the smoke test, the manifest sample, and the tag show the `<Version>`. Everything else reads the version as it runs: `--version`, `status`, `daemon.json` and the daemon's log, receipts, exports, the MCP server, and the `User-Agent` that `rates update` and `audit --local-llm` send. Leave the earlier versions that the docs and tests name on purpose: "gh-ledger 0.4.1 and earlier" in `docs/configuration.md` and in the table of assets below, the comments in `ModelResolutionTests` and `RatesUpdateTests`, and the earlier daemon's `daemon.json` in `ImportCommandTests`.
 2. If `src/CopilotLedger.Core/Pricing/rates.json` changed since the latest release, set its `ratesVersion` to the date of the change (`yyyy-MM-dd`), later than the latest release's. `gh ledger rates update` only takes rates with a later version, and the Release workflow fails when `rates.json` changed but its `ratesVersion` didn't move forward; it compares `rates.json` with the latest release's `rates.v2.json`, or with its `rates.json` when it has none. In the same change, replace the old date wherever it's shown:
    - the samples in `docs/guide.md` that show it: `status-first`, `status`, `rates-validate`, and `rates-update`. The `rates-update` sample and `GuideSamplesTests.GS4` download version `2026-12-15`; if that isn't later than the new date, change it in both;
    - the tests that expect it: in `ReportCommandTests` (including `StatusText`), `RatesCommandTests`, `RatesUpdateTests`, `RateOverlayTests`, and `JsonRateCardCalculatorTests`, and in `TestSupport/PublishedRates.cs`. `RatesUpdateTests` downloads versions before, equal to, and after the old date; keep each in the same place relative to the new one.
@@ -19,8 +23,8 @@ Releases are GitHub Releases of this repository. They make `gh extension install
 4. Tag the merged commit and push the tag:
 
    ```shell
-   git tag v0.4.1
-   git push origin v0.4.1
+   git tag v0.5.0
+   git push origin v0.5.0
    ```
 
 When a `v*` tag is pushed, the Release workflow checks that the tag equals `v` plus the project version, builds a single-file binary for each platform, smoke-tests the same three, checks `ratesVersion` against the latest release's rates, and creates the release with these assets:
