@@ -1404,7 +1404,7 @@ internal static class ReportCommands
         writer.WriteEndArray();
     }
 
-    private static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
+    internal static LedgerRollupRow Sum(IReadOnlyList<LedgerRollupRow> rows) =>
         new()
         {
             SpanCount = rows.Sum(row => row.SpanCount),

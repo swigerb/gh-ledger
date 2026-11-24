@@ -46,13 +46,17 @@ internal static class LedgerFormat
         TimeZoneInfo.ConvertTime(value, zone)
             .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
+    // value with every digit it has, as WriteMoney writes it.
+    public static string Exact(decimal value) =>
+        value.ToString("0.############", CultureInfo.InvariantCulture);
+
     public static void WriteMoney(
         Utf8JsonWriter writer,
         string name,
         decimal value)
     {
         writer.WritePropertyName(name);
-        writer.WriteRawValue(value.ToString("0.############", CultureInfo.InvariantCulture));
+        writer.WriteRawValue(Exact(value));
     }
 
     // The API-equivalent fields that report rows have after WriteTotals.
