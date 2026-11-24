@@ -11,7 +11,7 @@
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–14 are sequential, and each builds on the ones before it.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification section, runs the verification commands, changes the line to `- [x]`, and stops. Tasks 1–15 are sequential, and each builds on the ones before it.
 
 This sprint ships as one pull request. The orchestrator commits this plan first, together with `.github/plans/archive/sprint-9.md`, then each task as its own commit, `Sprint 10 Task N: <Title>`, on branch `swigerb-sprint-10-ledger-audit`, and opens one pull request titled exactly "Sprint 10: `gh ledger audit`: telemetry anomaly & loop audit with optional local-LLM recommendations", with `Closes #65`. After every task, `dotnet build CopilotLedger.slnx` reports 0 warnings and 0 errors (warnings are errors), and `dotnet test CopilotLedger.slnx` passes exactly the number of tests the task gives, with 0 failed and 0 skipped.
 
@@ -50,6 +50,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 12: Privacy, Determinism, and Culture (tests). The local model's answer is shown and never stored; output is the same in every culture and on every run; and the audit code uses no binary floating point.
 - [x] Task 13: The Reference (docs & tests). `docs/cli.md` documents the command, the rules, the output, the recommendations, and the local model's payload, whose tables tests compare with the code; `docs/configuration.md` and the README gain their audit notes.
 - [x] Task 14: The Weekly Waste Review, and CI (docs, CI & tests). `docs/guide.md` gains "Weekly waste review" with a checked sample in its own guide state, and CI smoke-tests `audit --json`, `--show-llm-payload`, and `get_audit_findings`.
+- [ ] Task 15: `velocity_near_breaker` Defers Only to a Recorded Trip (CopilotLedger.Core, CopilotLedger.Storage, docs & tests). Review findings S1 and M1–M3: the rule leaves out only the prompt chains that have a recorded `credit_velocity` trip, so a chain that the daemon never tripped, such as an imported one, is reported even above the breaker's threshold; `docs/cli.md` states `failed_tool_retry`'s trigger exactly; and tests reach the two clamps that keep repriced impacts from going negative.
 
 ## Starting point
 
@@ -164,6 +165,8 @@ Each `githubAiCredits` model with a window covering the instant contributes its 
 | D23 | Thresholds | Defaults in `AuditThresholds` and in the JSON's `thresholds`, with the effective failed_tool_retry trigger and the breaker settings used; no option changes them | The issue proposes none; JSON consumers can reproduce findings |
 | D24 | context_growth and cache_miss_streak sequences | Partitioned by (repository, branch, PR, trace, agent invocation, model) | Matches `status --cache --turns` growth |
 | D25 | failed_tool_retry: "interleaved tools, agents, unknown outcomes, and successes break the streak"; "partition sequences by … agent identity" | Another identified invocation's calls never join or end this invocation's run or streak: A F, B F, A F gives nothing, no streak spans two invocations, and A `bash` F, B `view` S, A `bash` F, A `bash` F is a streak of 3 for A. A tool call of unknown invocation may belong to any invocation of its trace with the same agent name (ordinal; null matches null), so one that starts between two calls of such an invocation ends that run or streak, as an unknown outcome would, for tool_loop and failed_tool_retry; one with another agent name doesn't, so an imported named sub-agent's calls never end the main agent's | Partitioning by agent identity catches a sub-agent's retry loop while a parallel sub-agent works; a call that may be the invocation's own mustn't be skipped as if it weren't |
+| D26 | `velocity_near_breaker`: "Windows reaching ≥ 80% of the `BreakerSettings` velocity threshold without tripping" | "Without tripping" means without a recorded `credit_velocity` trip for the trace, reset or not. The rule reports the peak window, with the breaker's ordering, window, and current settings, from 80% of the threshold for every trace without one, above 100% included (`breakerFraction` above 1); a trace with a recorded trip gives nothing, whatever its spend under today's settings | Only the daemon's `CircuitBreakerMonitor` trips the breaker, and only on live spans; `LedgerImporter` never does. Testing today's settings instead left a chain that went over the threshold, such as an imported one or one recorded before the breaker or under other settings, with no finding and no trip on record, while a smaller burst was reported (S1) |
+| D27 | "The payload is built from a typed DTO (`AuditLlmSummary`)"; "`AuditLlmSummary` is serialized with System.Text.Json, using an explicit DTO" | There's no `AuditLlmSummary` type: `AuditLlmPayload` writes the summary with System.Text.Json's `Utf8JsonWriter`, one call per allowlisted property, in a fixed order, from the findings shown, with no dictionary of arbitrary strings. AD2 compares the property names it writes with `docs/cli.md`'s allowlist, the issue's property-name snapshot | The writer is the allowlist: no property reaches the body because a type gained a member or a serializer option changed, and aliases and label cuts apply as each value is written (M3) |
 
 ### Changes from the design, made while building
 
@@ -203,7 +206,7 @@ Each `githubAiCredits` model with a window covering the instant contributes its 
 
 | #65 criterion | Tasks | Tests or deviation |
 |---|---|---|
-| Each rule: `TheoryData` below / at / exact `Metrics` and `EstimatedImpactUsd` | 2–4 | AR1, AR2, AR3, AR5, AR6, AR7, AR9, AR10 |
+| Each rule: `TheoryData` below / at / exact `Metrics` and `EstimatedImpactUsd` | 2–4, 15 | AR1, AR2, AR3, AR5, AR6, AR7, AR9, AR10; D26 |
 | cache_miss_streak: no finding with `absent` or `legacy_unknown` counters; the summary counts them | 1, 2, 5, 6 | AR3 (absent and legacy rows, with the summary's counts), AA2, AQ8, AO6 |
 | Unpriced spans give `EstimatedImpactUsd == null`, never 0 | 2–4 | AR3, AR5, AR7, AR9, AR10 (their unpriced rows; AR3 and AR7 with a known model too); D9, P24 |
 | failed_tool_retry at three; interleaved tools, agents, unknown outcomes, and successes break it; breaker tests unchanged | 4 | AR10 (with another invocation's and unknown-invocation calls between); `BreakerRulesTests` untouched; D5, D25 |
@@ -212,9 +215,9 @@ Each `githubAiCredits` model with a window covering the instant contributes its 
 | `--fail-on high` exit code | 7, 9 | AC3, LA14; D14 |
 | `LocalEndpointPolicy` accepts and rejects, `additionalHosts` included | 8, 9 | LE1, LE2, LA2; D17 |
 | `UseProxy == false`, `AllowAutoRedirect == false`; a 302 isn't followed | 8, 9 | LE3 (with no certificate downloads), LA6; P22 |
-| Payload privacy: property-name snapshot, seeded scan, aliases, `--show-llm-payload` sends nothing | 9, 13 | AD2, LA12, LA4, LA5, LA13, LA16; D18, P23 |
+| Payload privacy: property-name snapshot, seeded scan, aliases, `--show-llm-payload` sends nothing | 9, 13 | AD2, LA12, LA4, LA5, LA13, LA16; D18, D27, P23 |
 | Response handling: stripped, 16 KB bound, no database writes, canary absent from logs, JSON, MCP, HTML, ZIP | 8, 9, 12 | LT1, LT2, LA3, LA15, AV1, AV5; D19 (and the table's ledger strings: AC9, P27) |
-| Cache-rate difference non-negative, / 1,000,000m, one lens; zero output, overlaps, unknown rates, local $0 | 2, 6 | AR3 (local 0, no cached rate 0, unpriced null), AR1 (zero output), AO3 (the overlap line), AuditJson has no total |
+| Cache-rate difference non-negative, / 1,000,000m, one lens; zero output, overlaps, unknown rates, local $0 | 2, 6, 15 | AR3 (local 0, no cached rate 0, cached above input 0, unpriced null), AR7 (economy model pricier 0), AR1 (zero output), AO3 (the overlap line), AuditJson has no total |
 | Timeout or HTTP 500: a warning; findings and exit code unchanged | 9 | LA7, LA8, LA9, LA14 |
 | MCP: validates, read-only, matches `audit --json`, `McpTestHarness`, `WARNING:` | 10 | MC1, MC8, MC11, AM1–AM5 |
 | No `double`, `float`, or `REAL`; invariant output under `de-DE` | 12 | AV3, AV2 |
@@ -224,6 +227,17 @@ Each `githubAiCredits` model with a window covering the instant contributes its 
 | #61: one labeled lens; unpriced means unknown, never 0 | 2–4, 6 | `impactLens` in AO1; AR3, AR7, AR9, AR10; D9 |
 | #63: effective rows and links; coverage limits; imported tool calls only within 7 days | 5–7 | AQ1, AQ5, AQ6, AQ8, AQ11, AQ12, AO6, AO9; P26, P29 |
 | #64: findings in the report, a bundle entry hashed by the manifest, the same coverage as the export's, never the local model's text | 11, 12 | EF1–EF6, EB1, EB2, EL1, EP7, AV1; D21, P18, P26, P29 |
+
+### Review fixes (Task 15)
+
+An independent review of Tasks 1–14, as committed on `swigerb-sprint-10-ledger-audit` at `9b21194`, found one problem that should be fixed (S1) and three minor ones (M1–M3). Task 15 fixes them on top of Task 14; where it and the earlier tasks differ, it wins. S1's and M2's tests fail without the fix: the old rule gives nothing for the three chains above the threshold and a finding for the chain whose trip is on record at 80%, and without the clamps AR3 and AR7 give −0.2 and −0.588. Task 15 was built like Tasks 1–14, in the scratch repository, whose Task 14 tree is the same as `9b21194`'s apart from the plans, with its blocks generated from its commit there. A script applied them (`reapply.ps1 -FromTask 15`) to a fresh `git archive 9b21194` with every text file converted to CRLF; it built with 0 warnings, passed 1731 tests, and gave, line endings aside, the same files.
+
+| Finding | Problem | Fix | Task |
+|---|---|---|---|
+| S1 | `velocity_near_breaker` skipped a trace whenever `BreakerRules.FindVelocityTrip`, with today's settings, tripped on it, as if the breaker had. Only the daemon's `CircuitBreakerMonitor` evaluates traces, and only live ones, so an imported prompt chain that went over the threshold had no finding and no trip on record, while a smaller burst was reported: five `import:copilot` requests 30 s apart gave a finding at $0.25 each and none at $0.40 | "Without tripping" means without a recorded `credit_velocity` trip (D26). `GetAuditInputAsync` reads the selected chains' recorded velocity trips, reset or not, into `AuditInput.VelocityTrippedTraces` in its snapshot; the rule skips those chains and reports every other chain's peak window from 80% of the threshold, above 100% included | 15 |
+| M1 | `docs/cli.md` said `failed_tool_retry` triggers "always below the breaker's `--churn-failures`", but with `--churn-failures 2` the trigger is 2, because `AuditThresholds.FailedToolRetryTrigger` never goes below 2 | "3 failures in a row, or one less than `--churn-failures` when that's lower, but at least 2", in the docs and in the rule's comment | 15 |
+| M2 | No test reached the clamps that keep `cache_miss_streak`'s and `premium_model_trivial_turn`'s impacts from going negative, though a card may price cached input above input, and an economy model may cost more than the model it would replace | AR3 "cached above input" and AR7 "economy model pricier": an impact of 0, not −0.2 or −0.588 | 15 |
+| M3 | The issue asks for a typed `AuditLlmSummary` DTO serialized with System.Text.Json; `AuditLlmPayload` writes a fixed property list with `Utf8JsonWriter`, and AD2 pins its allowlist, but no deviation said so | D27 | 15 |
 
 ## Task 1 specification: Audit Contracts, the Analyzer Frame, and the Pricing Interface
 
@@ -11120,6 +11134,540 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
+## Task 15 specification: `velocity_near_breaker` Defers Only to a Recorded Trip
+
+Review finding S1: only the daemon's `CircuitBreakerMonitor` trips the circuit breaker, and only on live spans, so a prompt chain that went over the breaker's threshold without a trip on record, such as an imported one, got no finding at all. The rule now leaves out only the chains with a recorded `credit_velocity` trip (D26). The task also states `failed_tool_retry`'s trigger exactly (M1) and tests the two clamps that keep repriced impacts from going negative (M2); M3 is D27.
+
+### Files
+
+| File | Change |
+|---|---|
+| `src/CopilotLedger.Core/Audit/AuditInput.cs` | `VelocityTrippedTraces`: the traces with a recorded `credit_velocity` trip, an empty ordinal set by default |
+| `src/CopilotLedger.Core/Audit/VelocityNearBreakerRule.cs` | Skips the traces in `VelocityTrippedTraces` instead of those that `BreakerRules.FindVelocityTrip` trips with today's settings |
+| `src/CopilotLedger.Core/Audit/FailedToolRetryRule.cs` | Its comment states the trigger exactly (M1) |
+| `src/CopilotLedger.Storage/LedgerExportSnapshot.cs` | `GetAuditInputAsync` fills `VelocityTrippedTraces` from `GetBreakerTripsAsync` in its snapshot |
+| `docs/cli.md` | The rules table's `failed_tool_retry` trigger (M1) and `velocity_near_breaker` row |
+| `tests/CopilotLedger.Tests/Audit/VelocityRuleTests.cs` | AR6: "trips" records the chain's trip, and four new cases; AR7: "economy model pricier"; `Tripped` |
+| `tests/CopilotLedger.Tests/Audit/TokenRuleTests.cs` | AR3: "cached above input" |
+| `tests/CopilotLedger.Tests/Storage/AuditQueryTests.cs` | New: AQ13 |
+
+### Contracts and algorithm
+
+1. `AuditInput.VelocityTrippedTraces` (`IReadOnlySet<string>`) holds the trace IDs of the selected prompt chains that have a `breaker_trips` row with `rule = 'credit_velocity'`, reset or not. `GetAuditInputAsync` reads them in its snapshot through `GetBreakerTripsAsync(filter)`, the export's query, which selects the trips of the traces that have a span the filter selects. The default is an empty ordinal set, so an input that a test or a caller builds needs nothing new.
+2. For each trace, in ordinal order, `velocity_near_breaker` skips the trace when `VelocityTrippedTraces` holds it. Otherwise it finds the peak window as before (the breaker's ordering by end and span ID, the events that end after `end − window`, and the current settings) and reports it when the peak is at least `NearBreakerFraction × threshold`, above the threshold included, so `breakerFraction` can exceed 1. The severity (Info), the metrics, and the null impact don't change. The rule no longer calls `BreakerRules.FindVelocityTrip`.
+3. Nothing else changes. `AuditSeeds`' pinned JSON and table, the guide's `Audit` sample, and the export's findings stay as they were: none of their chains reaches the threshold, and the one with a recorded trip (`ExportSeeds`' A) stays below 80%.
+4. `docs/cli.md`: `failed_tool_retry` triggers at "3 failures in a row, or one less than `--churn-failures` when that's lower, but at least 2"; `velocity_near_breaker` finds "A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity, unless the breaker recorded a trip for it", which can be above 100% for a chain that the daemon never tripped.
+
+### Code (copy exactly)
+
+Edit 1 of 1 in `docs/cli.md`, replace:
+
+```markdown
+| `turn_velocity` | One agent invocation sending many requests within 5 minutes | 30 requests | 60 requests | The billed cost of the busiest 5 minutes, less the typical (lower median) 5-minute cost of the conversation |
+| `tool_loop` | One agent invocation calling the same tool again and again with the same outcome | 8 calls in a row | 16 calls | The billed cost of the invocation's requests between the first call and the last |
+| `failed_tool_retry` | One agent invocation retrying a failing tool call | 3 failures in a row, always below the breaker's `--churn-failures` | One less than `--churn-failures` | As `tool_loop` |
+| `context_bloat` | A request of at least 50,000 input tokens with at least 200 times as much input as output, or no output | Info only | | None |
+| `context_growth` | One agent invocation's requests to one model whose input grew at least 4 times over 10 or more requests | Info only | | None |
+| `cache_miss_streak` | Requests in a row, of one agent invocation and model, each with at least 20,000 input tokens and less than 10% of them read from the prompt cache | 5 requests | 10 requests | What the uncached input cost above the cached input price |
+| `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
+| `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity without tripping it | Info only | | None |
+<!-- /audit-rules -->
+
+- **One lens.** Estimated impacts are billed USD: GitHub AI credits at $0.01 each, and Foundry BYOK. Repriced impacts use the rates in use, your overlay included. A local request's impact is $0. An impact that would include a request without a billed price is unknown (`-` in the table, `null` in JSON), never $0. Findings can overlap, so their impacts aren't added together, and there's no total.
+```
+
+with:
+
+```markdown
+| `turn_velocity` | One agent invocation sending many requests within 5 minutes | 30 requests | 60 requests | The billed cost of the busiest 5 minutes, less the typical (lower median) 5-minute cost of the conversation |
+| `tool_loop` | One agent invocation calling the same tool again and again with the same outcome | 8 calls in a row | 16 calls | The billed cost of the invocation's requests between the first call and the last |
+| `failed_tool_retry` | One agent invocation retrying a failing tool call | 3 failures in a row, or one less than `--churn-failures` when that's lower, but at least 2 | One less than `--churn-failures` | As `tool_loop` |
+| `context_bloat` | A request of at least 50,000 input tokens with at least 200 times as much input as output, or no output | Info only | | None |
+| `context_growth` | One agent invocation's requests to one model whose input grew at least 4 times over 10 or more requests | Info only | | None |
+| `cache_miss_streak` | Requests in a row, of one agent invocation and model, each with at least 20,000 input tokens and less than 10% of them read from the prompt cache | 5 requests | 10 requests | What the uncached input cost above the cached input price |
+| `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
+| `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity, unless the breaker recorded a trip for it. Only the daemon trips the breaker, and only on live spans, so an imported chain, or one recorded before the breaker or under other settings, can be reported above 100% | Info only | | None |
+<!-- /audit-rules -->
+
+- **One lens.** Estimated impacts are billed USD: GitHub AI credits at $0.01 each, and Foundry BYOK. Repriced impacts use the rates in use, your overlay included. A local request's impact is $0. An impact that would include a request without a billed price is unknown (`-` in the table, `null` in JSON), never $0. Findings can overlap, so their impacts aren't added together, and there's no total.
+```
+
+Edit 1 of 2 in `src/CopilotLedger.Core/Audit/AuditInput.cs`, replace:
+
+```csharp
+namespace CopilotLedger.Core.Audit;
+
+// Everything the rules read. The storage query fills Spans, ToolCalls, Coverage, and Breaker; the caller adds the rest.
+public sealed record AuditInput
+{
+```
+
+with:
+
+```csharp
+namespace CopilotLedger.Core.Audit;
+
+// Everything the rules read. The storage query fills Spans, ToolCalls, Coverage, Breaker, and VelocityTrippedTraces; the
+// caller adds the rest.
+public sealed record AuditInput
+{
+```
+
+Edit 2 of 2 in `src/CopilotLedger.Core/Audit/AuditInput.cs`, replace:
+
+```csharp
+    public TimeZoneInfo TimeZone { get; init; } = TimeZoneInfo.Utc;   // premium_model_trivial_turn's days
+    public IReadOnlyList<string> Rules { get; init; } = AuditRuleIds.All;   // unknown IDs are ignored
+}
+```
+
+with:
+
+```csharp
+    public TimeZoneInfo TimeZone { get; init; } = TimeZoneInfo.Utc;   // premium_model_trivial_turn's days
+    public IReadOnlyList<string> Rules { get; init; } = AuditRuleIds.All;   // unknown IDs are ignored
+
+    // Traces with a recorded credit_velocity trip, reset or not: velocity_near_breaker leaves them to the breaker.
+    public IReadOnlySet<string> VelocityTrippedTraces { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+}
+```
+
+Edit 1 of 1 in `src/CopilotLedger.Core/Audit/FailedToolRetryRule.cs`, replace:
+
+```csharp
+namespace CopilotLedger.Core.Audit;
+
+// failed_tool_retry: one agent invocation retrying a failing tool call, below the circuit breaker's churn threshold. The
+// failure test is the breaker's (AuditToolOutcomes.Classify); a call of another tool, a success, or an unknown outcome ends
+// the streak.
+internal sealed class FailedToolRetryRule : IAuditRule
+{
+```
+
+with:
+
+```csharp
+namespace CopilotLedger.Core.Audit;
+
+// failed_tool_retry: one agent invocation retrying a failing tool call, from 3 failures in a row, or one less than the
+// circuit breaker's churn threshold when that's lower, but at least 2. The failure test is the breaker's
+// (AuditToolOutcomes.Classify); a call of another tool, a success, or an unknown outcome ends the streak.
+internal sealed class FailedToolRetryRule : IAuditRule
+{
+```
+
+Edit 1 of 3 in `src/CopilotLedger.Core/Audit/VelocityNearBreakerRule.cs`, replace:
+
+```csharp
+namespace CopilotLedger.Core.Audit;
+
+// velocity_near_breaker: a prompt chain (trace) whose spend came close to the circuit breaker's credit velocity rule without
+// tripping it. It uses the breaker's own window, ordering, and stored settings.
+internal sealed class VelocityNearBreakerRule : IAuditRule
+{
+```
+
+with:
+
+```csharp
+namespace CopilotLedger.Core.Audit;
+
+// velocity_near_breaker: a prompt chain (trace) whose spend in the circuit breaker's credit velocity window reached
+// NearBreakerFraction of its threshold, unless the breaker recorded a credit_velocity trip for it. Only the daemon trips
+// the breaker, and only on live spans, so an imported chain, or one recorded before the breaker or under other settings,
+// can be above the threshold: breakerFraction is then above 1. It uses the breaker's own window, ordering, and stored
+// settings.
+internal sealed class VelocityNearBreakerRule : IAuditRule
+{
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Core/Audit/VelocityNearBreakerRule.cs`, replace:
+
+```csharp
+            .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            AuditSpan first = AuditMath.ByStart(trace)[0];
+            List<AuditSpan> events =
+```
+
+with:
+
+```csharp
+            .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            if (input.VelocityTrippedTraces.Contains(trace.Key))
+            {
+                continue;
+            }
+
+            AuditSpan first = AuditMath.ByStart(trace)[0];
+            List<AuditSpan> events =
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Core/Audit/VelocityNearBreakerRule.cs`, replace:
+
+```csharp
+                    .ThenBy(span => span.SpanId, StringComparer.Ordinal),
+            ];
+            CostEvent[] costs = [.. events.Select(span => new CostEvent(span.SpanId, span.EndTime, span.CostUsd))];
+            if (BreakerRules.FindVelocityTrip(costs, threshold, window) is not null)
+            {
+                continue;
+            }
+
+            // The breaker's window: the events ending after end_j - window. The peak is the first window with the most spend.
+```
+
+with:
+
+```csharp
+                    .ThenBy(span => span.SpanId, StringComparer.Ordinal),
+            ];
+
+            // The breaker's window: the events ending after end_j - window. The peak is the first window with the most spend.
+```
+
+Edit 1 of 3 in `src/CopilotLedger.Storage/LedgerExportSnapshot.cs`, replace:
+
+```csharp
+        SqliteLedgerStore.ReadBreakerSettingsAsync(_connection, _transaction, cancellationToken);
+
+    // What an audit of the filter reads: its spans and tool calls, the coverage of GetCoverageAsync with export's tool history,
+    // and the breaker settings; AuditInput's defaults for the rest. Throws ArgumentNullException for a null filter.
+    public async Task<AuditInput> GetAuditInputAsync(
+        LedgerFilter filter,
+```
+
+with:
+
+```csharp
+        SqliteLedgerStore.ReadBreakerSettingsAsync(_connection, _transaction, cancellationToken);
+
+    // What an audit of the filter reads: its spans and tool calls, the coverage of GetCoverageAsync with export's tool history,
+    // the breaker settings, and the selected prompt chains' recorded credit_velocity trips, reset or not; AuditInput's
+    // defaults for the rest. Throws ArgumentNullException for a null filter.
+    public async Task<AuditInput> GetAuditInputAsync(
+        LedgerFilter filter,
+```
+
+Edit 2 of 3 in `src/CopilotLedger.Storage/LedgerExportSnapshot.cs`, replace:
+
+```csharp
+        ExportCoverageRow coverage = await GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
+        BreakerSettings breaker = await GetBreakerSettingsAsync(cancellationToken);
+        return new AuditInput
+        {
+```
+
+with:
+
+```csharp
+        ExportCoverageRow coverage = await GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
+        BreakerSettings breaker = await GetBreakerSettingsAsync(cancellationToken);
+        IReadOnlyList<BreakerTrip> trips = await GetBreakerTripsAsync(filter, cancellationToken);
+        return new AuditInput
+        {
+```
+
+Edit 3 of 3 in `src/CopilotLedger.Storage/LedgerExportSnapshot.cs`, replace:
+
+```csharp
+            },
+            Breaker = breaker,
+        };
+    }
+```
+
+with:
+
+```csharp
+            },
+            Breaker = breaker,
+            VelocityTrippedTraces = new HashSet<string>(
+                trips.Where(trip => trip.Rule == BreakerRule.CreditVelocity).Select(trip => trip.TraceId),
+                StringComparer.Ordinal),
+        };
+    }
+```
+
+Edit 1 of 3 in `tests/CopilotLedger.Tests/Audit/TokenRuleTests.cs`, replace:
+
+```csharp
+            0, 0
+        },
+    };
+
+    [Theory]
+```
+
+with:
+
+```csharp
+            0, 0
+        },
+        {
+            "cached above input",
+            "warning [requests=5 requests, inputTokens=200000 tokens, cacheReadInputTokens=0 tokens, uncachedInputTokens=200000 tokens, cacheHitRatio=0 ratio] 0 cache_miss_streak",
+            0, 0
+        },
+    };
+
+    [Theory]
+```
+
+Edit 2 of 3 in `tests/CopilotLedger.Tests/Audit/TokenRuleTests.cs`, replace:
+
+```csharp
+                : span)],
+            "no cached rate" => [.. Misses(5).Select(span => span with { Model = "claude-sonnet-5.5" })],
+            _ => throw new ArgumentOutOfRangeException(nameof(name)),
+        });
+```
+
+with:
+
+```csharp
+                : span)],
+            "no cached rate" => [.. Misses(5).Select(span => span with { Model = "claude-sonnet-5.5" })],
+            "cached above input" => [.. Misses(5).Select(span => span with { Model = "claude-sonnet-5.5" })],
+            _ => throw new ArgumentOutOfRangeException(nameof(name)),
+        });
+```
+
+Edit 3 of 3 in `tests/CopilotLedger.Tests/Audit/TokenRuleTests.cs`, replace:
+
+```csharp
+                Pricing = JsonRateCardCalculator.Parse(
+                    RateFixtures.ByokTestRatesJson.Replace("\"cachedInputPer1M\": 0.10", "\"cachedInputPer1M\": null", StringComparison.Ordinal)),
+            };
+        }
+```
+
+with:
+
+```csharp
+                Pricing = JsonRateCardCalculator.Parse(
+                    RateFixtures.ByokTestRatesJson.Replace("\"cachedInputPer1M\": 0.10", "\"cachedInputPer1M\": null", StringComparison.Ordinal)),
+            };
+        }
+
+        // A card may price cached input above input; the difference is never negative.
+        if (name == "cached above input")
+        {
+            audit = audit with
+            {
+                Pricing = JsonRateCardCalculator.Parse(
+                    RateFixtures.ByokTestRatesJson.Replace("\"cachedInputPer1M\": 0.10", "\"cachedInputPer1M\": 3.00", StringComparison.Ordinal)),
+            };
+        }
+```
+
+Edit 1 of 6 in `tests/CopilotLedger.Tests/Audit/VelocityRuleTests.cs`, replace:
+
+```csharp
+            "info [windowCostUsd=0.85 usd, windowAiCredits=85 ai_credits, breakerVelocityAiCredits=100 ai_credits, breakerFraction=0.85 ratio, windowMinutes=10 minutes] null velocity_near_breaker"
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(NearBreakerCases))]
+```
+
+with:
+
+```csharp
+            "info [windowCostUsd=0.85 usd, windowAiCredits=85 ai_credits, breakerVelocityAiCredits=100 ai_credits, breakerFraction=0.85 ratio, windowMinutes=10 minutes] null velocity_near_breaker"
+        },
+        { "tripped under other settings", "none" },
+        {
+            "imported trips",
+            "info [windowCostUsd=1.51 usd, windowAiCredits=151 ai_credits, breakerVelocityAiCredits=150 ai_credits, breakerFraction=1.0066666666666666666666666667 ratio, windowMinutes=5 minutes] null velocity_near_breaker"
+        },
+        {
+            "trips without a record",
+            "info [windowCostUsd=1.51 usd, windowAiCredits=151 ai_credits, breakerVelocityAiCredits=150 ai_credits, breakerFraction=1.0066666666666666666666666667 ratio, windowMinutes=5 minutes] null velocity_near_breaker"
+        },
+        {
+            "another chain's trip",
+            "info [windowCostUsd=1.51 usd, windowAiCredits=151 ai_credits, breakerVelocityAiCredits=150 ai_credits, breakerFraction=1.0066666666666666666666666667 ratio, windowMinutes=5 minutes] null velocity_near_breaker"
+        },
+    };
+
+    // A recorded credit_velocity trip leaves a chain to the breaker, even one below the threshold under today's settings. Without
+    // one, a chain above the threshold is reported too: an imported chain, which the daemon never sees, or a live one.
+    [Theory]
+    [MemberData(nameof(NearBreakerCases))]
+```
+
+Edit 2 of 6 in `tests/CopilotLedger.Tests/Audit/VelocityRuleTests.cs`, replace:
+
+```csharp
+            "at" => AuditFixtures.Input(Spend(4, 60, 0.30m)),
+            "exact" => AuditFixtures.Input(Spend(5, 50, 0.25m)),
+            "trips" => AuditFixtures.Input(Spend(4, 60, 0.3775m)),
+            "apart" => AuditFixtures.Input(Spend(2, 360, 0.70m)),
+            "custom settings" => AuditFixtures.Input(Spend(5, 120, 0.17m)) with
+```
+
+with:
+
+```csharp
+            "at" => AuditFixtures.Input(Spend(4, 60, 0.30m)),
+            "exact" => AuditFixtures.Input(Spend(5, 50, 0.25m)),
+            "trips" => Tripped(AuditFixtures.Input(Spend(4, 60, 0.3775m)), AuditFixtures.TraceId),
+            "apart" => AuditFixtures.Input(Spend(2, 360, 0.70m)),
+            "custom settings" => AuditFixtures.Input(Spend(5, 120, 0.17m)) with
+```
+
+Edit 3 of 6 in `tests/CopilotLedger.Tests/Audit/VelocityRuleTests.cs`, replace:
+
+```csharp
+                Breaker = new BreakerSettings { VelocityCredits = 100m, VelocityWindowMinutes = 10 },
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(name)),
+        };
+```
+
+with:
+
+```csharp
+                Breaker = new BreakerSettings { VelocityCredits = 100m, VelocityWindowMinutes = 10 },
+            },
+            "tripped under other settings" => Tripped(AuditFixtures.Input(Spend(4, 60, 0.30m)), AuditFixtures.TraceId),
+            "imported trips" => AuditFixtures.Input(
+                Spend(4, 60, 0.3775m).Select(span => span with { IngestSource = "import:copilot" })),
+            "trips without a record" => AuditFixtures.Input(Spend(4, 60, 0.3775m)),
+            "another chain's trip" => Tripped(AuditFixtures.Input(Spend(4, 60, 0.3775m)), "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1"),
+            _ => throw new ArgumentOutOfRangeException(nameof(name)),
+        };
+```
+
+Edit 4 of 6 in `tests/CopilotLedger.Tests/Audit/VelocityRuleTests.cs`, replace:
+
+```csharp
+        },
+        { "without pricing", "none" },
+    };
+
+    [Theory]
+```
+
+with:
+
+```csharp
+        },
+        { "without pricing", "none" },
+        {
+            "economy model pricier",
+            "warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0 premium_model_trivial_turn"
+        },
+    };
+
+    [Theory]
+```
+
+Edit 5 of 6 in `tests/CopilotLedger.Tests/Audit/VelocityRuleTests.cs`, replace:
+
+```csharp
+            "high" => AuditFixtures.Input(Trivial(20)),
+            "without pricing" => AuditFixtures.Input(Trivial(10)) with { Pricing = null },
+            _ => throw new ArgumentOutOfRangeException(nameof(name)),
+        };
+```
+
+with:
+
+```csharp
+            "high" => AuditFixtures.Input(Trivial(20)),
+            "without pricing" => AuditFixtures.Input(Trivial(10)) with { Pricing = null },
+            "economy model pricier" => AuditFixtures.Input(Trivial(10)) with { EconomyModel = "claude-fable-5" },
+            _ => throw new ArgumentOutOfRangeException(nameof(name)),
+        };
+```
+
+Edit 6 of 6 in `tests/CopilotLedger.Tests/Audit/VelocityRuleTests.cs`, replace:
+
+```csharp
+    private static AuditSpan[] Spend(int count, int everySeconds, decimal cost) => Burst(count, everySeconds * 1_000, cost);
+
+    // count short, tool-free claude-opus-5.5 requests 2 minutes apart from Start + offset: 30,000 input tokens (24,000 read
+    // from the cache) and 120 output tokens, billed $0.0312 each.
+```
+
+with:
+
+```csharp
+    private static AuditSpan[] Spend(int count, int everySeconds, decimal cost) => Burst(count, everySeconds * 1_000, cost);
+
+    // input with a recorded credit_velocity trip of trace.
+    private static AuditInput Tripped(AuditInput input, string trace) =>
+        input with { VelocityTrippedTraces = new HashSet<string>(StringComparer.Ordinal) { trace } };
+
+    // count short, tool-free claude-opus-5.5 requests 2 minutes apart from Start + offset: 30,000 input tokens (24,000 read
+    // from the cache) and 120 output tokens, billed $0.0312 each.
+```
+
+Edit 1 of 1 in `tests/CopilotLedger.Tests/Storage/AuditQueryTests.cs`, replace:
+
+```csharp
+                coverage.SpansBeforeToolHistory, coverage.InsufficientToolHistory, Assert.Single(input.Spans).ToolCallCount));
+    }
+}
+```
+
+with:
+
+```csharp
+                coverage.SpansBeforeToolHistory, coverage.InsufficientToolHistory, Assert.Single(input.Spans).ToolCallCount));
+    }
+
+    // The input holds the selected prompt chains' recorded credit_velocity trips, reset or not, read in its snapshot. In
+    // ExportSeeds, A's trip counts once reset; C's retry_churn trip is selected but doesn't count; E's trip has no selected
+    // request; and the main branch selects none of A's requests.
+    [Theory]
+    [InlineData(null, 2, ExportSeeds.A)]
+    [InlineData("main", 1, null)]
+    public async Task AQ13_TheInput_HoldsTheSelectedChainsRecordedVelocityTrips(string? branch, int selectedTrips, string? trace)
+    {
+        using TempDirectory temp = new();
+        SqliteLedgerStore store = await ExportSeeds.CreateAsync(temp.Path);
+        await store.ResetBreakerTripsAsync(BreakerTripFilter.All);
+
+        await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();
+        LedgerFilter filter = new() { Branch = branch };
+        AuditInput input = await snapshot.GetAuditInputAsync(filter, ExportSeeds.GeneratedAt);
+
+        string[] expected = trace is null ? [] : [trace];
+        Assert.Equal(expected, input.VelocityTrippedTraces.Order(StringComparer.Ordinal));
+        Assert.Equal(selectedTrips, (await snapshot.GetBreakerTripsAsync(filter)).Count);
+    }
+}
+```
+
+### Tests
+
+- **AR6** (4 more cases; 10 in all):
+  - "trips" now gives nothing because the input records the chain's trip;
+  - "tripped under other settings": a recorded trip hides a chain at 80% (`Spend(4, 60, 0.30m)`);
+  - "imported trips" (`IngestSource = "import:copilot"`), "trips without a record", and "another chain's trip" (a trip recorded for another trace) give `Spend(4, 60, 0.3775m)` a finding: `windowCostUsd` 1.51, `windowAiCredits` 151, `breakerVelocityAiCredits` 150, `breakerFraction` 1.0066666666666666666666666667 (`1.51m / 1.5m`), `windowMinutes` 5, impact null.
+- **AR3** (1 more case) "cached above input": five claude-sonnet-5.5 misses, priced by `RateFixtures.ByokTestRatesJson` with a cached rate of 3.00 above its input rate of 2.00, have an impact of 0; without the clamp, 200,000 uncached tokens × −1.00 / 1,000,000 = −0.2.
+- **AR7** (1 more case) "economy model pricier": with `claude-fable-5` as the economy model ($10 input, $1 cached, and $50 output per 1M tokens, against claude-opus-5.5's $4, $0.20, and $20), the impact is 0; without the clamp, 10 × (0.0312 − 0.09) = −0.588.
+- **AQ13** (2 cases) In `ExportSeeds`, with every trip reset, the input holds A's velocity trip; C's retry_churn trip is selected but doesn't count, and E's trip has no selected request (`GetBreakerTripsAsync` selects 2 trips). With `Branch = "main"`, which selects none of A's requests, it holds nothing (1 trip selected, C's).
+
+Without the fix, the three chains above the threshold give nothing and "tripped under other settings" gives a finding; without the clamps, AR3 and AR7 give −0.2 and −0.588.
+
+### Acceptance criteria
+
+- A chain without a recorded `credit_velocity` trip is reported from 80% of the breaker's threshold, above 100% included; a chain with one never is.
+- `dotnet test CopilotLedger.slnx` passes **1731** tests (1723 + 8).
+
+### Verify
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+```
+
 ## Test specifications
 
 Every test is hermetic: it uses `TempDirectory` for files and databases, `ManualTimeProvider` with fixed times, `FakeCliPlatform`, `CliHarness` for the CLI, `McpTestHarness` for MCP, and `FakeLlmHandler` for every local model. Ledgers are synthetic, written by `AuditSeeds`, `ExportSeeds`, `GuideWorld`, or the test itself. No test opens a socket, starts a process, runs `git`, uses the network, Node, Python, or Docker, or reads `~/.copilot`, `~/.codex`, `~/.claude`, or `~/.copilot-ledger`; `LocalLlmAdvisor.CreateDefaultHandler()` is only constructed. LA8 is the only test that waits on real time (one second). Money is `decimal` or integer pico-USD, never `double`, and expected text is compared exactly.
@@ -11141,6 +11689,7 @@ Every test is hermetic: it uses `TempDirectory` for files and databases, `Manual
 | 12 | AV1, AV2, AV3 (12 + 1), AV4, AV5 | — | 1,719 |
 | 13 | AD1–AD3 | — | 1,722 |
 | 14 | GS2 (1 more case) | GS1 (the new sample ID) | 1,723 |
+| 15 | AR3 (1 more case), AR6 (4 more cases), AR7 (1 more case), AQ13 (2) | AR6 ("trips" records the chain's trip) | 1,731 |
 
 Exact values used across tasks:
 
@@ -11159,11 +11708,11 @@ Exact values used across tasks:
 
 ## Final step: the pull request (orchestrator, not a builder task)
 
-After Task 14, the orchestrator:
+After Task 15, the orchestrator:
 
-1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1723 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-9.md`, and the files the tasks list.
+1. Runs `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors) and `dotnet test CopilotLedger.slnx` (1731 passed, 0 failed, 0 skipped), and checks with `git --no-pager diff --stat origin/main` that the branch changes only this plan, `.github/plans/archive/sprint-9.md`, and the files the tasks list.
 2. Runs the published binary's `gh ledger audit`, `--json`, and `--show-llm-payload` against a temporary `COPILOT_LEDGER_HOME` with a few recorded spans, and reads the payload. It never points `--local-llm` at a real model, local or remote, and never uses a real home directory.
-3. Pushes `swigerb-sprint-10-ledger-audit` and opens one pull request titled exactly "Sprint 10: `gh ledger audit`: telemetry anomaly & loop audit with optional local-LLM recommendations", whose body says `Closes #65` and has `## Changes` (the fourteen task commits and what each adds), `## Deviations` (D1–D25 and P1–P29 from "Design decisions", each with a one-line rationale), `## Verification` (the build, the test count, CI, and the hermetic tests), and `## Risks`: imported subagents without a name join the main agent (A2); a tool span exported after its agent could make a tool count 0 for one run (A1); a short compaction on a premium model counts as a short request without tool calls (P29); findings are heuristics that can overlap; and the payload's labels reach a local model, whose system prompt treats them as data.
+3. Pushes `swigerb-sprint-10-ledger-audit` and opens one pull request titled exactly "Sprint 10: `gh ledger audit`: telemetry anomaly & loop audit with optional local-LLM recommendations", whose body says `Closes #65` and has `## Changes` (the fifteen task commits and what each adds), `## Deviations` (D1–D27 and P1–P29 from "Design decisions", each with a one-line rationale), `## Review fixes` (the findings of "Review fixes (Task 15)", each with its task), `## Verification` (the build, the test count, CI, and the hermetic tests), and `## Risks`: imported subagents without a name join the main agent (A2); a tool span exported after its agent could make a tool count 0 for one run (A1); a short compaction on a premium model counts as a short request without tool calls (P29); findings are heuristics that can overlap; and the payload's labels reach a local model, whose system prompt treats them as data.
 4. Waits for CI on `ubuntu-latest` and `windows-latest`, including the smoke test of the published binary's audit and `get_audit_findings`. If a job fails only with the dry-run race that "How to use this plan" describes, it reruns the job. If AV5's byte comparison fails on Linux, it applies A6's fallback and records a P-row.
 5. Asks `ledger-architect` to review the branch.
 
