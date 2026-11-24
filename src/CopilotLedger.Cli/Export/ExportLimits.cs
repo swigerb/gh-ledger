@@ -11,5 +11,6 @@ internal static class ExportLimits
     public const int GrowthChains = 10;
     public const int GrowthTurns = 500;                 // points drawn per chain
     public const int ChartRows = 40;                    // bars per cost or cache chart
+    public const int AuditFindings = 100;               // audit findings the report shows; the bundle has them all
     public const int PageSize = 1_000;                  // rows per query when streaming the bundle
 }

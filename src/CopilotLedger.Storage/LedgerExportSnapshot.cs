@@ -1,10 +1,13 @@
+using CopilotLedger.Core.Audit;
+using CopilotLedger.Core.Breaker;
+using CopilotLedger.Storage.Import;
 using Microsoft.Data.Sqlite;
 
 namespace CopilotLedger.Storage;
 
 // One read transaction over the ledger that every query of gh ledger export shares, so its summaries and its details see the
 // same rows (SqliteLedgerStore.OpenExportSnapshotAsync). It never writes. Unlike LedgerSnapshot, import's dry run, it reads an
-// initialized ledger at the current schema version.
+// initialized ledger at the current schema version. gh ledger audit and MCP's get_audit_findings read their own snapshots.
 public sealed class LedgerExportSnapshot : IAsyncDisposable
 {
     private readonly SqliteConnection _connection;
@@ -148,6 +151,80 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
         LedgerFilter filter,
         CancellationToken cancellationToken = default) =>
         SqliteLedgerStore.ReadExportRepositoryRootsAsync(_transaction, filter, cancellationToken);
+
+    // The filter's spans as audit requests, ascending by (start time, trace ID, span ID). Throws ArgumentNullException for a
+    // null filter.
+    public Task<IReadOnlyList<AuditSpan>> GetAuditSpansAsync(
+        LedgerFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        return SqliteLedgerStore.ReadAuditSpansAsync(_transaction, filter, cancellationToken);
+    }
+
+    // GetToolCallsAsync's rows as audit tool calls, with their agent invocations and their prompt chains' scope. Throws
+    // ArgumentNullException for a null filter.
+    public Task<IReadOnlyList<AuditToolCall>> GetAuditToolCallsAsync(
+        LedgerFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        return SqliteLedgerStore.ReadAuditToolCallsAsync(_transaction, filter, cancellationToken);
+    }
+
+    // As SqliteLedgerStore.GetBreakerSettingsAsync.
+    public Task<BreakerSettings> GetBreakerSettingsAsync(CancellationToken cancellationToken = default) =>
+        SqliteLedgerStore.ReadBreakerSettingsAsync(_connection, _transaction, cancellationToken);
+
+    // What an audit of the filter reads: its spans and tool calls, the coverage of GetCoverageAsync with export's tool history,
+    // the breaker settings, and the selected prompt chains' recorded credit_velocity trips, reset or not; AuditInput's
+    // defaults for the rest. Throws ArgumentNullException for a null filter.
+    public async Task<AuditInput> GetAuditInputAsync(
+        LedgerFilter filter,
+        DateTimeOffset generatedAt,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        IReadOnlyList<AuditSpan> spans = await GetAuditSpansAsync(filter, cancellationToken);
+        IReadOnlyList<AuditToolCall> calls = await GetAuditToolCallsAsync(filter, cancellationToken);
+
+        // As export's coverage: tool history is the retention before generatedAt, but starts no earlier than the earliest span
+        // link the ledger keeps, because the daemon deletes links by its own clock; a ledger that keeps no link keeps no tool
+        // history.
+        DateTimeOffset retained = generatedAt - LedgerImporter.ToolLinkRetention;
+        DateTimeOffset? earliestLink = await GetEarliestLinkStartAsync(cancellationToken);
+        (DateTimeOffset toolHistoryFrom, AuditToolHistoryStart toolHistoryStart) = earliestLink switch
+        {
+            null => (generatedAt, AuditToolHistoryStart.NoLinks),
+            DateTimeOffset earliest when earliest > retained => (earliest, AuditToolHistoryStart.EarliestLink),
+            _ => (retained, AuditToolHistoryStart.Retention),
+        };
+        ExportCoverageRow coverage = await GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
+        BreakerSettings breaker = await GetBreakerSettingsAsync(cancellationToken);
+        IReadOnlyList<BreakerTrip> trips = await GetBreakerTripsAsync(filter, cancellationToken);
+        return new AuditInput
+        {
+            Spans = spans,
+            ToolCalls = calls,
+            Coverage = new AuditCoverage
+            {
+                ToolHistoryFrom = toolHistoryFrom,
+                ToolHistoryStart = toolHistoryStart,
+                ToolHistoryRetentionDays = LedgerImporter.ToolLinkRetention.Days,
+                SpansBeforeToolHistory = coverage.SpansBeforeToolHistory,
+                ImportedToolCallsWithoutDetail = coverage.ImportedToolCallsWithoutDetail,
+                ImportedRequestsWithoutToolData = coverage.ImportedRequestsWithoutToolData,
+                SupersededMatchedImportSpans = coverage.SupersededMatchedImportSpans,
+                SupersededUnmatchedImportSpans = coverage.SupersededUnmatchedImportSpans,
+                LedgerAmbiguousImportRecords = coverage.LedgerAmbiguousImportRecords,
+                LedgerIncompleteImportLogs = coverage.LedgerIncompleteImportLogs,
+            },
+            Breaker = breaker,
+            VelocityTrippedTraces = new HashSet<string>(
+                trips.Where(trip => trip.Rule == BreakerRule.CreditVelocity).Select(trip => trip.TraceId),
+                StringComparer.Ordinal),
+        };
+    }
 
     // Ends the read transaction, which never wrote, and closes the connection.
     public async ValueTask DisposeAsync()

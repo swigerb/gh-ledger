@@ -2,7 +2,7 @@
 
 CopilotLedger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
 
-The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). After setup and backfill, every sample starts from the same state: a month of spend, a rates overlay with Foundry BYOK prices, a budget for `feature/search`, and an open circuit-breaker trip, so early samples show things that later sections explain. A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
+The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). After setup and backfill, every sample starts from the same state: a month of spend, a rates overlay with Foundry BYOK prices, a budget for `feature/search`, and an open circuit-breaker trip, so early samples show things that later sections explain. The [weekly waste review](#weekly-waste-review) uses a day of agent activity instead. A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
 
 - [Set up CopilotLedger](#set-up-copilotledger)
 - [Backfill history after installing](#backfill-history-after-installing)
@@ -10,6 +10,7 @@ The samples come from one example: gh-ledger installed as the GitHub CLI extensi
 - [Find the most expensive prompts](#find-the-most-expensive-prompts)
 - [Compare agents](#compare-agents)
 - [Find context bloat](#find-context-bloat)
+- [Weekly waste review](#weekly-waste-review)
 - [Set a budget for a branch](#set-a-budget-for-a-branch)
 - [Catch a runaway loop](#catch-a-runaway-loop)
 - [Post a receipt on a pull request](#post-a-receipt-on-a-pull-request)
@@ -329,6 +330,61 @@ Growth is the change in input from the previous request by the same agent invoca
 
 Each request added 95,000 tokens of context. The cache served more of it each time, but every request still sent about 200,000 uncached tokens. Growth compares a request only with earlier requests of the same agent invocation and model, so a subagent's requests never mix with its parent's. To see every request of a Copilot session, use `--conversation <id>` instead of `--trace`, with the session ID that `--json` output shows as `conversationId`. For the columns and the JSON fields, see [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
 
+## Weekly waste review
+
+**Goal:** find the requests and tool calls that wasted AI credits this week, and what to change.
+
+`gh ledger audit` reviews the last 7 days of every repository with fixed rules: bursts of requests, tool loops, retried failing commands, bloated or growing context, prompt-cache misses, premium models on short requests without tool calls, and prompts near the circuit breaker. This section's sample uses a day of agent activity instead of the shared state:
+
+<!-- sample: audit -->
+```shell
+gh ledger audit
+```
+
+```text
+Audit of all repositories (last 7 days)
+6 findings: 1 high, 2 warning, 3 info.
+
+Severity  Rule                        Scope                                                     Window                  Key metrics                                          Est. impact
+High      failed_tool_retry           contoso/webapp @ feature/search, explore, bash            2026-11-21 10:00-10:01  4 failures in a row                                        $0.01
+Warning   premium_model_trivial_turn  contoso/webapp @ feature/search, (none), claude-opus-5.5  2026-11-21 09:00-09:22  12 tool-free requests of 200 or fewer output tokens        $0.33
+Warning   cache_miss_streak           contoso/webapp @ feature/search, (none), mai-code-2       2026-11-21 13:00-13:05  6 requests, 0.0% cache hits, 240,000 uncached              $0.11
+Info      context_bloat               contoso/webapp @ feature/search, (none), gpt-6.2-sol      2026-11-21 12:00        260,000 in, 1,000 out (260:1)                                  -
+Info      context_growth              contoso/webapp @ feature/search, (none), gpt-6.2-sol      2026-11-21 14:00-14:04  20,000 to 92,000 input in 10 requests (4.6x)                   -
+Info      velocity_near_breaker       contoso/webapp @ feature/search                           2026-11-21 15:00-15:03  125.00 of 150.00 AI credits in 5 min (83.3%)                   -
+
+Requests: 42 analyzed (42 live).
+Tool calls: 6 analyzed.
+Impacts: billed USD (GitHub AI credits and Foundry BYOK) at rates 2026-11-23, economy model mai-code-2. Findings can overlap, so don't add their impacts up.
+Tool history: complete for these requests (tool calls are kept for 7 days, since 2026-11-14 16:30).
+Rules: all 8.
+
+Recommendations:
+  failed_tool_retry: Fix the cause of the failing command, such as a missing dependency or a wrong path, before the agent retries it, because every retry costs another model request.
+  premium_model_trivial_turn: Consider a cheaper model or a local model for these short requests without tool calls; they're only candidates, because a short answer can still need a strong model.
+  cache_miss_streak: Keep the start of each prompt stable, such as instructions, tool definitions, and earlier messages, so the prompt cache can serve it, and avoid switching models in the middle of a task.
+  context_bloat: Send less context with each request: attach smaller files and tool results, trim long instructions, or start a new session for a new task.
+  context_growth: Start a new session or compact the conversation when the context keeps growing, and keep tool results short.
+  velocity_near_breaker: Check whether this burst of spend was expected; if it wasn't, make sure the circuit breaker's credit velocity, set with gh ledger breaker config, is low enough to trip on such a burst.
+```
+<!-- /sample -->
+
+Each finding is a review signal, not proof of waste. The explore subagent retried a failing `bash` command four times in a row, one less than the circuit breaker allows, and the three model requests between the failures cost about a cent; fixing the command's cause saves every retry. Twelve short questions without tool calls went to claude-opus-5.5, whose output price is in the top quarter of the rates; at mai-code-2's prices they would have cost $0.33 less. The estimates are billed USD at the rates in use, and findings can overlap, so they aren't added up.
+
+To see one rule, use `--rule`, and repeat it for more; to see only the findings that matter most, use `--min-severity warning`. `--json` writes the findings with their metrics, scope, and thresholds. In a script, `--fail-on high` exits with code 2 when a High finding appears:
+
+```shell
+gh ledger audit --since 1d --fail-on high
+```
+
+To ask a local model for suggestions, pass the OpenAI-compatible endpoint of a server on this machine, such as Ollama or Foundry Local. gh-ledger sends it only a summary of the findings, with aliases instead of repository and branch names, and never stores the answer:
+
+```shell
+gh ledger audit --local-llm http://127.0.0.1:11434/v1 --local-llm-model llama3.3
+```
+
+Add `--show-llm-payload` to see exactly what it would send, without sending it. For the rules, the JSON fields, and what the local model receives, see [Audit for wasted spend](cli.md#audit-for-wasted-spend).
+
 ## Set a budget for a branch
 
 **Goal:** get an alert when a branch spends more than you planned.
@@ -589,7 +645,7 @@ gh ledger export --branch feature/search --bundle
 
 ```text
 Wrote copilot-ledger-report.html: 8 requests in contoso/webapp, branch feature/search (last 30 days).
-Wrote copilot-ledger-report.zip: report.html, manifest.json, and 4 telemetry files.
+Wrote copilot-ledger-report.zip: report.html, manifest.json, and 5 telemetry files.
 ```
 <!-- /sample -->
 

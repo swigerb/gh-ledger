@@ -85,6 +85,10 @@ public sealed class CliHarness : IAsyncDisposable
     public Task<CliRun> RunWithHttpAsync(HttpMessageHandler handler, params string[] args) =>
         InvokeAsync(Context with { CreateHttpHandler = () => handler }, args);
 
+    // audit --local-llm sends through the handler that createHandler returns.
+    public Task<CliRun> RunWithLocalLlmAsync(Func<HttpMessageHandler> createHandler, params string[] args) =>
+        InvokeAsync(Context with { CreateLocalLlmHandler = createHandler }, args);
+
     public async Task<CliRun> StartInProcessDaemonAsync()
     {
         _daemon = InvokeAsync(Context with

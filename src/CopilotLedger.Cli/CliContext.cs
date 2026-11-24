@@ -19,6 +19,7 @@ public sealed record CliContext
     public Stream? StandardOutput { get; init; }           // mcp: null uses Console.OpenStandardOutput()
     public Action<IWebHostBuilder>? ConfigureWebHost { get; init; }                     // tests: builder => builder.UseTestServer()
     public Func<HttpMessageHandler>? CreateHttpHandler { get; init; }                   // rates update; tests: a fake handler; null: RatesUpdate.CreateDefaultHandler()
+    public Func<HttpMessageHandler>? CreateLocalLlmHandler { get; init; }               // audit --local-llm; tests: a fake handler; null: LocalLlmAdvisor.CreateDefaultHandler()
     public TimeSpan DaemonPollInterval { get; init; } = TimeSpan.FromMilliseconds(500);
     public TimeSpan DaemonStartTimeout { get; init; } = TimeSpan.FromSeconds(15);
     public TimeSpan DaemonStopTimeout { get; init; } = TimeSpan.FromSeconds(15);

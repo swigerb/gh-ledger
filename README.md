@@ -15,6 +15,7 @@ It runs on your machine as the `gh ledger` GitHub CLI extension, with no Docker 
 - API-equivalent USD: what the same requests would cost at each model's API list prices, or at prices you supply, beside what Copilot billed
 - `gh ledger import`: backfill the requests in your Copilot CLI and GitHub Copilot app session logs, and in Codex's, from before you installed CopilotLedger
 - `gh ledger export`: a self-contained, offline HTML cost report with a timeline and charts, and an optional bundle of its data with SHA-256 hashes, to attach to a pull request or audit ticket
+- `gh ledger audit`: ranked signs of wasted spend, such as request bursts, tool loops, retried failing commands, context bloat, prompt-cache misses, and premium models on trivial requests, with estimated costs, and optional suggestions from a model on your machine
 
 ## Requirements
 
@@ -41,7 +42,7 @@ The [user guide](docs/guide.md) shows the everyday tasks with sample output: bac
 
 ## Privacy
 
-The ledger stays on your machine, and CopilotLedger never stores prompt or response content. `gh ledger import` reads Copilot's and Codex's session logs in place and keeps only what pricing, attribution, and later imports need: session IDs; models and providers; token counts and times; agent names; the repository root, branch, commit, and `owner/repo` slug that a session recorded; tool names, outcomes, exit codes, and counts; SHA-256 hashes of request and tool call IDs; and each log's size, last-write time, and SHA-256 hash. It never reads prompts, responses, tool arguments or results, or compaction summaries, and it doesn't read Claude Code's logs. See [What import reads and keeps](docs/cli.md#what-import-reads-and-keeps). `gh ledger export` writes only the fields in [What export includes](docs/cli.md#what-export-includes): never prompts, responses, tool arguments or results, or file contents, and local repository roots only with `--include-local-paths`.
+The ledger stays on your machine, and CopilotLedger never stores prompt or response content. `gh ledger import` reads Copilot's and Codex's session logs in place and keeps only what pricing, attribution, and later imports need: session IDs; models and providers; token counts and times; agent names; the repository root, branch, commit, and `owner/repo` slug that a session recorded; tool names, outcomes, exit codes, and counts; SHA-256 hashes of request and tool call IDs; and each log's size, last-write time, and SHA-256 hash. It never reads prompts, responses, tool arguments or results, or compaction summaries, and it doesn't read Claude Code's logs. See [What import reads and keeps](docs/cli.md#what-import-reads-and-keeps). `gh ledger export` writes only the fields in [What export includes](docs/cli.md#what-export-includes): never prompts, responses, tool arguments or results, or file contents, and local repository roots only with `--include-local-paths`. `gh ledger audit --local-llm` sends a summary of its findings, never content or identifiers, only to a model on this machine, and never stores the answer.
 
 ## Documentation
 

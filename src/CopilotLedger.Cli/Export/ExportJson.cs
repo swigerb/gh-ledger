@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using CopilotLedger.Cli.Receipts;
 using CopilotLedger.Cli.Reporting;
+using CopilotLedger.Core.Audit;
 using CopilotLedger.Core.Breaker;
 using CopilotLedger.Storage;
 
@@ -294,6 +295,9 @@ internal static class ExportJson
 
         writer.WriteEndArray();
     });
+
+    // telemetry/audit-findings.json: the export's audit as gh ledger audit --json writes it, with every finding.
+    public static byte[] AuditFindings(ExportReportModel model) => Document(writer => AuditJson.WriteProperties(writer, model.Audit));
 
     // telemetry/spans.json: every selected request, read and written a page at a time.
     public static async Task WriteSpansAsync(

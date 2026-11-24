@@ -1,4 +1,5 @@
 using CopilotLedger.Cli.Reporting;
+using CopilotLedger.Core.Audit;
 using CopilotLedger.Storage;
 using CopilotLedger.Storage.Import;
 
@@ -47,6 +48,17 @@ internal static class ExportModelBuilder
             _ => (retained, ExportToolHistoryStart.Retention),
         };
         ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
+        AuditReport audit = await AuditAsync(snapshot, inputs, shown, cancellationToken);
+        audit = audit with
+        {
+            Findings =
+            [
+                .. audit.Findings.Select(finding => finding with
+                {
+                    Scope = finding.Scope with { Repository = Shown(finding.Scope.Repository) },
+                }),
+            ],
+        };
         IReadOnlyList<LedgerRollupRow> byModel = await snapshot.GetRollupAsync(LedgerGrouping.Model, filter, cancellationToken);
 
         // The timeline draws the latest MaxTimelineSpans requests and, separately, tool calls, in start order.
@@ -109,7 +121,13 @@ internal static class ExportModelBuilder
                 TimelineSpans = drawnSpans.Length,
                 TimelineToolCalls = drawnToolCalls.Length,
             },
-            AuditFindings = [],
+            AuditFindings =
+            [
+                .. audit.Findings
+                    .Take(ExportLimits.AuditFindings)
+                    .Select(finding => ExportRecords.AuditFinding(finding, audit.Thresholds, inputs.TimeZone)),
+            ],
+            Audit = audit,
             ByModel = byModel,
             ByAgent = await snapshot.GetRollupAsync(LedgerGrouping.Agent, filter, cancellationToken),
             ByBranch =
@@ -143,6 +161,38 @@ internal static class ExportModelBuilder
         };
 
         string Shown(string key) => ExportRecords.Repository(key, roots, inputs.IncludeLocalPaths);
+    }
+
+    // gh ledger audit of the export's window with the default thresholds, every rule, and the rates' baseline as the economy
+    // model; without rates (an invalid overlay), premium_model_trivial_turn isn't evaluated and repriced impacts are null.
+    private static async Task<AuditReport> AuditAsync(
+        LedgerExportSnapshot snapshot,
+        ExportInputs inputs,
+        ExportFilter shown,
+        CancellationToken cancellationToken)
+    {
+        AuditInput input = await snapshot.GetAuditInputAsync(inputs.Filter, inputs.GeneratedAt, cancellationToken);
+        return AuditAnalyzer.Report(
+            input with
+            {
+                Pricing = inputs.AuditPricing,
+                EconomyModel = inputs.AuditPricing?.BaselineModel,
+                TimeZone = inputs.TimeZone,
+            },
+            inputs.GeneratedAt,
+            new AuditReportFilter
+            {
+                Repository = shown.Repository,
+                Branch = shown.Branch,
+                PullRequestNumber = shown.PullRequest,
+                Conversation = shown.Conversation,
+                Since = shown.Since,
+                Period = shown.Period,
+                FromUtc = shown.FromUtc,
+                ToUtc = shown.ToUtc,
+            },
+            AuditSeverity.Info,
+            null);
     }
 
     // The requests, in the export's window, of the first GrowthChains prompt chains, in cost order, that have at least two
