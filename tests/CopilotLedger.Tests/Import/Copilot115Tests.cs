@@ -174,6 +174,7 @@ public sealed class Copilot115Tests
             .Write(CopilotHome(temp));
 
         ImportReport report = await RunAsync(temp);
+        SqliteConnection.ClearAllPools();
 
         Assert.DoesNotContain(
             CopilotSessionLogs.Canary,

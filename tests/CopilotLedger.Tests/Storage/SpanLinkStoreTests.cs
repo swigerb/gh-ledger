@@ -530,6 +530,9 @@ public sealed class SpanLinkStoreTests
                 """);
         }
 
+        // A new process starts with no pooled connections; see SL8.
+        SqliteConnection.ClearAllPools();
+
         await using SqliteConnection holder = await OpenAsync(DatabasePath(temp));
         SqliteTransaction held = holder.BeginTransaction(deferred: false);
         Task init = Task.Run(
