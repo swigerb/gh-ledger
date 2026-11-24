@@ -8,9 +8,12 @@ public static class AuditAnalyzer
     // The implemented rules, in AuditRuleIds.All order.
     public static IReadOnlyList<IAuditRule> Rules { get; } =
     [
+        new TurnVelocityRule(),
         new ContextBloatRule(),
         new ContextGrowthRule(),
         new CacheMissStreakRule(),
+        new PremiumModelTrivialTurnRule(),
+        new VelocityNearBreakerRule(),
     ];
 
     // Rules whose ID input.Rules names; premium_model_trivial_turn only with input.Pricing. AuditRuleIds.All order.
