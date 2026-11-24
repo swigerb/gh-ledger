@@ -195,6 +195,8 @@ These are the only fields import keeps, and where each comes from. Fields in no 
 | `spans.canonical_usage_id` | SHA-256 of `data.usage.serviceRequestId`, or of a compaction's `data.serviceRequestId`; none for BYOK | — |
 | `spans.imported_tool_call_count` | `data.usage.numToolCalls`, or none when it's missing or invalid; 0 for a compaction, which makes no tool calls | — |
 | `spans.model_id`, `spans.rate_card_model_id`, `spans.tier_name`, `spans.billing_channel`, `spans.pricing_status`, `spans.rates_version`, `spans.cost_usd_pico`, `spans.saved_usd_pico`, `spans.api_equivalent_usd_pico`, `spans.api_equivalent_status`, `spans.api_rate_card_model_id`, `spans.api_rates_version`, `spans.api_rate_card_sha256` | Priced from the fields above, as for live spans | Priced from the fields above, as for live spans |
+| `spans.list_cost_usd_pico` | The rate card's price, from the fields above | Priced from the fields above |
+| `spans.charge_source` | `rate_card` | `rate_card` |
 | `spans.id`, `spans.recorded_at_unix_ms`, `spans.accounting_state`, `spans.superseded_by` | Kept by the ledger | Kept by the ledger |
 | `span_links.trace_id`, `span_links.conversation_id`, `span_links.owner_span_row_id` | The usage record whose response asked for the tool: the latest one of the tool's agent | — |
 | `span_links.span_id` | SHA-256 of the session ID and `data.toolCallId` | — |
@@ -205,7 +207,7 @@ These are the only fields import keeps, and where each comes from. Fields in no 
 | `span_links.recorded_at_unix_ms` | Kept by the ledger | — |
 | `import_sessions.source`, `import_sessions.log_id` | `copilot`, and the session folder's name | `codex`, and the IDs in the rollout's file name, after `archived/` for an archived rollout |
 | `import_sessions.log_size_bytes`, `import_sessions.log_last_write_unix_ms`, `import_sessions.log_sha256` | The log file's size and last-write time, and the SHA-256 hash of its bytes up to that size | The rollout file's size and last-write time, and the SHA-256 hash of its bytes up to that size |
-| `import_sessions.complete`, `import_sessions.records_recorded`, `import_sessions.records_duplicate`, `import_sessions.records_overlap`, `import_sessions.records_ambiguous`, `import_sessions.imported_at_unix_ms` | The import's own results | The import's own results |
+| `import_sessions.complete`, `import_sessions.records_recorded`, `import_sessions.records_duplicate`, `import_sessions.records_overlap`, `import_sessions.records_ambiguous`, `import_sessions.imported_at_unix_ms`, `import_sessions.import_revision` | The import's own results | The import's own results |
 | `import_record_aliases.source`, `import_record_aliases.record_key_sha256` | `copilot`, and SHA-256 of the record's usage ID, or of a compaction's service request ID | `codex`, and SHA-256 of `payload.response_id` |
 | `import_record_aliases.span_row_id`, `import_record_aliases.resolution`, `import_record_aliases.recorded_at_unix_ms` | Kept by the ledger | Kept by the ledger |
 <!-- /import-allowlist -->

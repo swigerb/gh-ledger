@@ -57,6 +57,10 @@ public sealed class SchemaVersion6Tests
             },
         ]);
         await LedgerSql.ExecuteAsync(path, """
+            ALTER TABLE spans DROP COLUMN list_cost_usd_pico;
+            ALTER TABLE spans DROP COLUMN charge_source;
+            ALTER TABLE import_sessions DROP COLUMN import_revision;
+            DROP INDEX ix_span_links_import_span;
             DROP TABLE import_record_aliases;
             DROP TABLE import_sessions;
             DROP INDEX ux_spans_effective_import_usage;
@@ -75,7 +79,7 @@ public sealed class SchemaVersion6Tests
         SqliteConnection.ClearAllPools();
         await new SqliteLedgerStore(path).InitializeAsync();
 
-        Assert.Equal(6L, await LedgerSql.ScalarAsync(path, "PRAGMA user_version;"));
+        Assert.Equal(7L, await LedgerSql.ScalarAsync(path, "PRAGMA user_version;"));
         Assert.Equal(2, before.Count);
         Assert.Equal(before, await LedgerSql.RowsAsync(path, $"SELECT {Version5Columns} FROM spans ORDER BY id;"));
         Assert.Equal(

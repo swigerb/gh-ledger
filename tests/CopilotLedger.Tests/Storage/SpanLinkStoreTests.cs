@@ -22,6 +22,9 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                DROP INDEX ix_span_links_import_span;
+                ALTER TABLE spans DROP COLUMN list_cost_usd_pico;
+                ALTER TABLE spans DROP COLUMN charge_source;
                 DROP TABLE import_record_aliases;
                 DROP TABLE import_sessions;
                 DROP INDEX ux_spans_effective_import_usage;
@@ -55,7 +58,7 @@ public sealed class SpanLinkStoreTests
         SqliteConnection.ClearAllPools();
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(6L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(7L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(
             "span_links",
             await ScalarAsync(
@@ -380,6 +383,9 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                DROP INDEX ix_span_links_import_span;
+                ALTER TABLE spans DROP COLUMN list_cost_usd_pico;
+                ALTER TABLE spans DROP COLUMN charge_source;
                 DROP TABLE import_record_aliases;
                 DROP TABLE import_sessions;
                 DROP INDEX ux_spans_effective_import_usage;
@@ -416,7 +422,7 @@ public sealed class SpanLinkStoreTests
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(6L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(7L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM spans;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM span_links;"));
         Assert.Equal(
@@ -513,7 +519,13 @@ public sealed class SpanLinkStoreTests
         await StoreAsync(temp);
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
-            await ExecuteAsync(connection, "PRAGMA user_version = 5;");
+            await ExecuteAsync(connection, """
+                DROP INDEX ix_span_links_import_span;
+                ALTER TABLE spans DROP COLUMN list_cost_usd_pico;
+                ALTER TABLE spans DROP COLUMN charge_source;
+                ALTER TABLE import_sessions DROP COLUMN import_revision;
+                PRAGMA user_version = 5;
+                """);
         }
 
         await using SqliteConnection holder = await OpenAsync(DatabasePath(temp));
@@ -534,7 +546,7 @@ public sealed class SpanLinkStoreTests
         await init;
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(6L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(7L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(1L, await ScalarAsync(check, "SELECT COUNT(*) FROM breaker_settings;"));
         Assert.Equal(
             1L,
@@ -569,6 +581,9 @@ public sealed class SpanLinkStoreTests
         await using (SqliteConnection connection = await OpenAsync(DatabasePath(temp)))
         {
             await ExecuteAsync(connection, """
+                DROP INDEX ix_span_links_import_span;
+                ALTER TABLE spans DROP COLUMN list_cost_usd_pico;
+                ALTER TABLE spans DROP COLUMN charge_source;
                 DROP TABLE import_record_aliases;
                 DROP TABLE import_sessions;
                 DROP INDEX ux_spans_effective_import_usage;
@@ -598,7 +613,7 @@ public sealed class SpanLinkStoreTests
         await new SqliteLedgerStore(DatabasePath(temp)).InitializeAsync();
 
         await using SqliteConnection check = await OpenAsync(DatabasePath(temp));
-        Assert.Equal(6L, await ScalarAsync(check, "PRAGMA user_version;"));
+        Assert.Equal(7L, await ScalarAsync(check, "PRAGMA user_version;"));
         Assert.Equal(
             "ix_spans_conversation_start",
             await ScalarAsync(

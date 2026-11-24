@@ -175,7 +175,8 @@ public sealed class LedgerSnapshot : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(logId);
         return SchemaVersion < 6
             ? null
-            : await UsageAuthority.ReadCheckpointAsync(_connection!, _transaction, source, logId, cancellationToken);
+            : await UsageAuthority.ReadCheckpointAsync(
+                _connection!, _transaction, source, logId, SchemaVersion >= 7, cancellationToken);
     }
 
     // As SqliteLedgerStore.GetUnmatchedSupersessionsAsync; none before schema version 6.

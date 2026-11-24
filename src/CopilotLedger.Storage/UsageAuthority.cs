@@ -249,9 +249,10 @@ internal static class UsageAuthority
         command.CommandText = """
             INSERT INTO import_sessions (
                 source, log_id, log_size_bytes, log_last_write_unix_ms, log_sha256, complete, records_recorded,
-                records_duplicate, records_overlap, records_ambiguous, imported_at_unix_ms
+                records_duplicate, records_overlap, records_ambiguous, import_revision, imported_at_unix_ms
             ) VALUES (
-                @source, @log, @size, @time, @sha256, @complete, @recorded, @duplicate, @overlap, @ambiguous, @now
+                @source, @log, @size, @time, @sha256, @complete, @recorded, @duplicate, @overlap, @ambiguous,
+                @import_revision, @now
             ) ON CONFLICT (source, log_id) DO UPDATE SET
                 log_size_bytes = excluded.log_size_bytes,
                 log_last_write_unix_ms = excluded.log_last_write_unix_ms,
@@ -261,6 +262,7 @@ internal static class UsageAuthority
                 records_duplicate = excluded.records_duplicate,
                 records_overlap = excluded.records_overlap,
                 records_ambiguous = excluded.records_ambiguous,
+                import_revision = excluded.import_revision,
                 imported_at_unix_ms = excluded.imported_at_unix_ms;
             """;
         command.Parameters.AddWithValue("@source", ImportIds.SourceName(checkpoint.Source));
@@ -273,6 +275,7 @@ internal static class UsageAuthority
         command.Parameters.AddWithValue("@duplicate", checkpoint.Duplicates);
         command.Parameters.AddWithValue("@overlap", checkpoint.OverlapSkipped);
         command.Parameters.AddWithValue("@ambiguous", checkpoint.AmbiguousOverlap);
+        command.Parameters.AddWithValue("@import_revision", checkpoint.ImportRevision);
         command.Parameters.AddWithValue("@now", importedAtUnixMs);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -283,16 +286,26 @@ internal static class UsageAuthority
         SqliteTransaction? transaction,
         ImportSourceKind source,
         string logId,
+        bool hasImportRevision,
         CancellationToken cancellationToken)
     {
         await using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             SELECT log_size_bytes, log_last_write_unix_ms, complete, records_recorded, records_duplicate, records_overlap,
-                   records_ambiguous, imported_at_unix_ms, log_sha256
+                   records_ambiguous, imported_at_unix_ms, log_sha256, import_revision
             FROM import_sessions
             WHERE source = @source AND log_id = @log;
             """;
+        if (!hasImportRevision)
+        {
+            command.CommandText = """
+                SELECT log_size_bytes, log_last_write_unix_ms, complete, records_recorded, records_duplicate, records_overlap,
+                       records_ambiguous, imported_at_unix_ms, log_sha256, 0
+                FROM import_sessions
+                WHERE source = @source AND log_id = @log;
+                """;
+        }
         command.Parameters.AddWithValue("@source", ImportIds.SourceName(source));
         command.Parameters.AddWithValue("@log", logId);
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -314,6 +327,7 @@ internal static class UsageAuthority
             OverlapSkipped = reader.GetInt64(5),
             AmbiguousOverlap = reader.GetInt64(6),
             ImportedAt = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(7)),
+            ImportRevision = reader.GetInt32(9),
         };
     }
 }

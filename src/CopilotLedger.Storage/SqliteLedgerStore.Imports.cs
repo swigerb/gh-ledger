@@ -126,7 +126,7 @@ public sealed partial class SqliteLedgerStore
         ArgumentNullException.ThrowIfNull(logId);
         EnsureInitialized();
         await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
-        return await UsageAuthority.ReadCheckpointAsync(connection, null, source, logId, cancellationToken);
+        return await UsageAuthority.ReadCheckpointAsync(connection, null, source, logId, true, cancellationToken);
     }
 
     // The source's imported rows that started at or after since (all when it's null) and that live rows superseded without
@@ -235,6 +235,7 @@ public sealed partial class SqliteLedgerStore
             checkpoint.LogSizeBytes < 0 ||
             checkpoint.LogSha256 is not { Length: 64 } ||
             !checkpoint.LogSha256.All(character => char.IsAsciiDigit(character) || character is >= 'a' and <= 'f') ||
+            checkpoint.ImportRevision < 0 ||
             checkpoint.Recorded < 0 ||
             checkpoint.Duplicates < 0 ||
             checkpoint.OverlapSkipped < 0 ||
