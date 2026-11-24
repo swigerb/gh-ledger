@@ -200,6 +200,129 @@ public sealed class ScopedQueryPerfTests(ITestOutputHelper output)
             bounded: false);
     }
 
+    [Fact]
+    public async Task SQ3_UnscopedToolCallPaging_IsExactAndLinear()
+    {
+        using TempDirectory temp = new();
+        string path = Path.Combine(temp.Path, "ledger.db");
+        SqliteLedgerStore store = await LargeLedger.CreateAsync(path);
+
+        LedgerFilter[] filters =
+        [
+            LedgerFilter.All,
+            new LedgerFilter { Repository = LargeLedger.GhLedgerRepository },
+            new LedgerFilter { ConversationId = LargeLedger.Conversation },
+        ];
+        string[] scopes =
+        [
+            "1 = 1",
+            $"repo_slug = '{LargeLedger.GhLedgerRepository}'",
+            $"conversation_id = '{LargeLedger.Conversation}'",
+        ];
+        int[] expectedRows = [75_000, 37_500, 300];
+
+        List<List<(string TraceId, string SpanId)>> references = new();
+        await using (SqliteConnection connection = new($"Data Source={path}"))
+        {
+            await connection.OpenAsync();
+            for (int i = 0; i < scopes.Length; i++)
+            {
+                await using SqliteCommand command = connection.CreateCommand();
+                command.CommandText =
+                    $"""
+                    SELECT trace_id, span_id FROM span_links
+                    WHERE operation_name = 'execute_tool'
+                      AND trace_id IN (SELECT trace_id FROM spans WHERE accounting_state = 'effective' AND {scopes[i]})
+                    ORDER BY start_time_unix_ms, trace_id, span_id;
+                    """;
+                await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+                List<(string TraceId, string SpanId)> rows = new();
+                while (await reader.ReadAsync())
+                {
+                    rows.Add((reader.GetString(0), reader.GetString(1)));
+                }
+
+                references.Add(rows);
+            }
+        }
+
+        await using LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync();
+        int[] order = [0, 1, 2, 0];
+        foreach (int i in order)
+        {
+            List<(string TraceId, string SpanId)> actual = await PageToolCallsAsync(snapshot, filters[i]);
+            Assert.Equal(references[i], actual);
+            Assert.Equal(references[i].Count, await snapshot.CountToolCallsAsync(filters[i]));
+            Assert.Equal(expectedRows[i], actual.Count);
+        }
+
+        long firstSpans = 0;
+        long firstTools = 0;
+        long secondSpans = 0;
+        long secondTools = 0;
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        List<(string TraceId, string SpanId)> spans = await PageSpansAsync(snapshot);
+        firstSpans = stopwatch.ElapsedMilliseconds;
+        stopwatch.Restart();
+        List<(string TraceId, string SpanId)> tools = await PageToolCallsAsync(snapshot, LedgerFilter.All);
+        firstTools = stopwatch.ElapsedMilliseconds;
+        stopwatch.Restart();
+        spans = await PageSpansAsync(snapshot);
+        secondSpans = stopwatch.ElapsedMilliseconds;
+        stopwatch.Restart();
+        tools = await PageToolCallsAsync(snapshot, LedgerFilter.All);
+        secondTools = stopwatch.ElapsedMilliseconds;
+        long spansMs = Math.Min(firstSpans, secondSpans);
+        long toolsMs = Math.Min(firstTools, secondTools);
+
+        output.WriteLine($"{"page spans unscoped",-28} {spansMs} ms");
+        output.WriteLine($"{"page tool calls unscoped",-28} {toolsMs} ms");
+        Assert.Equal(50_000, spans.Count);
+        Assert.Equal(75_000, tools.Count);
+        Assert.True(toolsMs <= 2 * spansMs + 250);
+    }
+
+    private static async Task<List<(string TraceId, string SpanId)>> PageSpansAsync(
+        LedgerExportSnapshot snapshot)
+    {
+        List<(string TraceId, string SpanId)> rows = new();
+        ExportCursor? after = null;
+        while (true)
+        {
+            IReadOnlyList<ExportSpanRow> page =
+                await snapshot.GetSpansAsync(LedgerFilter.All, after, 1000);
+            rows.AddRange(page.Select(row => (row.TraceId, row.SpanId)));
+            if (page.Count < 1000)
+            {
+                return rows;
+            }
+
+            ExportSpanRow last = page[^1];
+            after = new ExportCursor(last.StartTime.ToUnixTimeMilliseconds(), last.TraceId, last.SpanId);
+        }
+    }
+
+    private static async Task<List<(string TraceId, string SpanId)>> PageToolCallsAsync(
+        LedgerExportSnapshot snapshot,
+        LedgerFilter filter)
+    {
+        List<(string TraceId, string SpanId)> rows = new();
+        ExportCursor? after = null;
+        while (true)
+        {
+            IReadOnlyList<ExportToolCallRow> page =
+                await snapshot.GetToolCallsAsync(filter, after, 1000);
+            rows.AddRange(page.Select(row => (row.TraceId, row.SpanId)));
+            if (page.Count < 1000)
+            {
+                return rows;
+            }
+
+            ExportToolCallRow last = page[^1];
+            after = new ExportCursor(last.StartTime.ToUnixTimeMilliseconds(), last.TraceId, last.SpanId);
+        }
+    }
+
     private static async Task AssertReadAsync(
         LedgerExportSnapshot snapshot,
         LedgerFilter filter,
