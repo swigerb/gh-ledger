@@ -40,7 +40,7 @@ The final section, "Final step: the pull request", isn't a builder task. It has 
 - [x] Task 8: The Script (CopilotLedger.Cli & tests). An embedded script that adds the timeline's zoom, pan, and range selection, the lens switch, and table sorting, through `textContent` and attributes only, with no network, storage, or code-evaluation API.
 - [x] Task 9: The Bundle (CopilotLedger.Cli & tests). `--bundle` writes a deterministic ZIP of `manifest.json`, `report.html`, and four telemetry JSON files from the same snapshot, with SHA-256 hashes, replay inputs, and rate provenance; requests and tool calls stream in pages, so `spans.json` has every request whatever the timeline cap.
 - [x] Task 10: Privacy, XSS, Paths, Determinism, and Culture (tests). Canary content through the real ingest path and the daemon's failure log, hostile branch and agent names, local paths, byte-identical repeats and replays, the `de-DE` culture, and a check that the repository gains no packages or tooling.
-- [ ] Task 11: The Reference and the Allowlist (docs & tests). `docs/cli.md` documents the command, the report, the bundle, and the allowlist of every JSON object export writes, which tests compare with the files written.
+- [x] Task 11: The Reference and the Allowlist (docs & tests). `docs/cli.md` documents the command, the report, the bundle, and the allowlist of every JSON object export writes, which tests compare with the files written.
 - [ ] Task 12: The Walkthrough, README, and CI (docs, CI & tests). `docs/guide.md` gains "Attach a cost report to a pull request" with a checked sample, the README a feature line and a privacy sentence, and CI a smoke test of `export --bundle` with an IANA time zone on Linux and Windows.
 
 ## Starting point
