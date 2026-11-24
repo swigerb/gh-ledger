@@ -1,4 +1,5 @@
 using CopilotLedger.Core.Import;
+using CopilotLedger.Core.Pricing;
 using Microsoft.Data.Sqlite;
 
 namespace CopilotLedger.Storage;
@@ -13,6 +14,23 @@ namespace CopilotLedger.Storage;
 // Live rows are always effective (a CHECK constraint), so "live" below means ingest_source = 'otlp'.
 internal static class UsageAuthority
 {
+    internal readonly record struct StoredPricing(
+        string BillingChannel,
+        string PricingStatus,
+        string RatesVersion,
+        string? ModelId,
+        string? RateCardModelId,
+        string? TierName,
+        long CostPico,
+        long SavedPico,
+        long ListCostPico,
+        string ChargeSource,
+        long? ApiEquivalentPico,
+        string? ApiEquivalentStatus,
+        string? ApiRateCardModelId,
+        string? ApiRatesVersion,
+        string? ApiRateCardSha256);
+
     internal enum CanonicalOwner
     {
         None,
@@ -61,6 +79,153 @@ internal static class UsageAuthority
             ? ImportResolution.AmbiguousOverlap                            // I2
             : ImportResolution.Recorded;
     }
+
+    internal static StoredPricing PricingOf(CreditCalculationResult calculation)
+    {
+        ApiEquivalentCost retail = calculation.ApiEquivalent;
+        return new StoredPricing(
+            SqliteLedgerStore.ToDatabaseString(calculation.Channel),
+            SqliteLedgerStore.ToDatabaseString(calculation.Status),
+            calculation.RatesVersion,
+            calculation.ModelId,
+            calculation.RateCardModelId,
+            calculation.TierName,
+            PicoUsd.FromUsd(calculation.UsdCost),
+            PicoUsd.FromUsd(calculation.EstimatedCloudSavedUsd),
+            PicoUsd.FromUsd(calculation.ListUsdCost),
+            SqliteLedgerStore.ChargeSourceName(calculation.ChargeSource),
+            retail.UsdCost is decimal retailUsd ? PicoUsd.FromUsd(retailUsd) : null,
+            SqliteLedgerStore.ToDatabaseString(retail.Status),
+            retail.RateCardModelId,
+            retail.RatesVersion,
+            retail.RateCardSha256);
+    }
+
+    internal static async Task<StoredPricing> ReadPricingAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        long rowId,
+        int schemaVersion,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = schemaVersion < 7
+            ? """
+              SELECT billing_channel, pricing_status, rates_version, model_id, rate_card_model_id, tier_name,
+                     cost_usd_pico, saved_usd_pico, cost_usd_pico, 'rate_card',
+                     api_equivalent_usd_pico, api_equivalent_status, api_rate_card_model_id, api_rates_version,
+                     api_rate_card_sha256
+                FROM spans WHERE id = @id;
+              """
+            : """
+              SELECT billing_channel, pricing_status, rates_version, model_id, rate_card_model_id, tier_name,
+                     cost_usd_pico, saved_usd_pico, COALESCE(list_cost_usd_pico, cost_usd_pico),
+                     charge_source, api_equivalent_usd_pico, api_equivalent_status, api_rate_card_model_id,
+                     api_rates_version, api_rate_card_sha256
+                FROM spans WHERE id = @id;
+              """;
+        command.Parameters.AddWithValue("@id", rowId);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            throw new InvalidOperationException($"Span row {rowId} no longer exists.");
+        }
+
+        return new StoredPricing(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.IsDBNull(4) ? null : reader.GetString(4),
+            reader.IsDBNull(5) ? null : reader.GetString(5),
+            reader.GetInt64(6),
+            reader.GetInt64(7),
+            reader.GetInt64(8),
+            reader.GetString(9),
+            reader.IsDBNull(10) ? null : reader.GetInt64(10),
+            reader.IsDBNull(11) ? null : reader.GetString(11),
+            reader.IsDBNull(12) ? null : reader.GetString(12),
+            reader.IsDBNull(13) ? null : reader.GetString(13),
+            reader.IsDBNull(14) ? null : reader.GetString(14));
+    }
+
+    internal static async Task<int> RewritePricingAsync(
+        SqliteTransaction transaction,
+        long rowId,
+        StoredPricing pricing,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = transaction.Connection!.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE spans
+               SET billing_channel = @billing_channel,
+                   pricing_status = @pricing_status,
+                   rates_version = @rates_version,
+                   model_id = @model_id,
+                   rate_card_model_id = @rate_card_model_id,
+                   tier_name = @tier_name,
+                   cost_usd_pico = @cost_usd_pico,
+                   saved_usd_pico = @saved_usd_pico,
+                   list_cost_usd_pico = @list_cost_usd_pico,
+                   charge_source = @charge_source,
+                   api_equivalent_usd_pico = @api_equivalent_usd_pico,
+                   api_equivalent_status = @api_equivalent_status,
+                   api_rate_card_model_id = @api_rate_card_model_id,
+                   api_rates_version = @api_rates_version,
+                   api_rate_card_sha256 = @api_rate_card_sha256
+             WHERE id = @id AND ingest_source <> 'otlp';
+            """;
+        AddPricingParameters(command, pricing);
+        command.Parameters.AddWithValue("@id", rowId);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    internal static async Task<int> ApplyReportedToLiveAsync(
+        SqliteTransaction transaction,
+        long rowId,
+        long costPico,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = transaction.Connection!.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE spans
+               SET list_cost_usd_pico = COALESCE(list_cost_usd_pico, cost_usd_pico),
+                   cost_usd_pico = @cost,
+                   charge_source = 'reported'
+             WHERE id = @id AND ingest_source = 'otlp'
+               AND billing_channel = 'github_ai_credits' AND pricing_status = 'priced'
+               AND charge_source <> 'reported';
+            """;
+        command.Parameters.AddWithValue("@cost", costPico);
+        command.Parameters.AddWithValue("@id", rowId);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    internal static void AddPricingParameters(SqliteCommand command, StoredPricing pricing)
+    {
+        command.Parameters.AddWithValue("@billing_channel", pricing.BillingChannel);
+        command.Parameters.AddWithValue("@pricing_status", pricing.PricingStatus);
+        command.Parameters.AddWithValue("@rates_version", pricing.RatesVersion);
+        command.Parameters.AddWithValue("@model_id", OrDbNull(pricing.ModelId));
+        command.Parameters.AddWithValue("@rate_card_model_id", OrDbNull(pricing.RateCardModelId));
+        command.Parameters.AddWithValue("@tier_name", OrDbNull(pricing.TierName));
+        command.Parameters.AddWithValue("@cost_usd_pico", pricing.CostPico);
+        command.Parameters.AddWithValue("@saved_usd_pico", pricing.SavedPico);
+        command.Parameters.AddWithValue("@list_cost_usd_pico", pricing.ListCostPico);
+        command.Parameters.AddWithValue("@charge_source", pricing.ChargeSource);
+        command.Parameters.AddWithValue("@api_equivalent_usd_pico", OrDbNull(pricing.ApiEquivalentPico));
+        command.Parameters.AddWithValue("@api_equivalent_status", OrDbNull(pricing.ApiEquivalentStatus));
+        command.Parameters.AddWithValue("@api_rate_card_model_id", OrDbNull(pricing.ApiRateCardModelId));
+        command.Parameters.AddWithValue("@api_rates_version", OrDbNull(pricing.ApiRatesVersion));
+        command.Parameters.AddWithValue("@api_rate_card_sha256", OrDbNull(pricing.ApiRateCardSha256));
+    }
+
+    private static object OrDbNull<T>(T? value) where T : class => (object?)value ?? DBNull.Value;
+
+    private static object OrDbNull<T>(T? value) where T : struct => value is T item ? item : DBNull.Value;
 
     internal static async Task<ImportFacts> GatherAsync(
         SqliteTransaction transaction,

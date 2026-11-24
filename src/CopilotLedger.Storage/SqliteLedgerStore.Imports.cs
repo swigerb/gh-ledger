@@ -1,4 +1,5 @@
 using CopilotLedger.Core.Import;
+using CopilotLedger.Core.Pricing;
 using CopilotLedger.Core.Telemetry;
 using Microsoft.Data.Sqlite;
 
@@ -34,6 +35,8 @@ public sealed partial class SqliteLedgerStore
         long now = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
         List<ImportResolution> resolutions = new(entries.Count);
         int links = 0;
+        int repriced = 0;
+        int liveRepriced = 0;
         foreach (ImportedLedgerEntry entry in entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -95,14 +98,36 @@ public sealed partial class SqliteLedgerStore
                     cancellationToken);
             }
             else if (resolution == ImportResolution.Duplicate &&
-                     entry.ToolLinks.Count > 0 &&
                      await UsageAuthority.RecordedRowAsync(transaction, source, entry, cancellationToken) is long ownRowId)
             {
-                // The record's own effective row, read again from its log: tool calls that completed since then get links.
-                foreach (GenAiSpanLink link in entry.ToolLinks)
+                UsageAuthority.StoredPricing stored =
+                    await UsageAuthority.ReadPricingAsync(connection, transaction, ownRowId, 7, cancellationToken);
+                UsageAuthority.StoredPricing wanted = UsageAuthority.PricingOf(entry.Calculation);
+                if (stored != wanted)
                 {
-                    links += await InsertOwnedLinkAsync(transaction, link, ownRowId, now, cancellationToken);
+                    repriced += await UsageAuthority.RewritePricingAsync(
+                        transaction, ownRowId, wanted, cancellationToken);
                 }
+
+                // The record's own effective row, read again from its log: tool calls that completed since then get links.
+                if (entry.ToolLinks.Count > 0)
+                {
+                    foreach (GenAiSpanLink link in entry.ToolLinks)
+                    {
+                        links += await InsertOwnedLinkAsync(transaction, link, ownRowId, now, cancellationToken);
+                    }
+                }
+            }
+
+            if (canonical is not null &&
+                facts.Owner == UsageAuthority.CanonicalOwner.Live &&
+                entry.Calculation.ChargeSource == ChargeSource.Reported)
+            {
+                liveRepriced += await UsageAuthority.ApplyReportedToLiveAsync(
+                    transaction,
+                    facts.OwnerRowId!.Value,
+                    PicoUsd.FromUsd(entry.Calculation.UsdCost),
+                    cancellationToken);
             }
 
             resolutions.Add(resolution);
@@ -114,7 +139,13 @@ public sealed partial class SqliteLedgerStore
         }
 
         await transaction.CommitAsync(cancellationToken);
-        return new ImportRecordResult { Resolutions = resolutions, ToolLinksRecorded = links };
+        return new ImportRecordResult
+        {
+            Resolutions = resolutions,
+            ToolLinksRecorded = links,
+            Repriced = repriced,
+            LiveRepriced = liveRepriced,
+        };
     }
 
     // The checkpoint of a log, or null when none was written.

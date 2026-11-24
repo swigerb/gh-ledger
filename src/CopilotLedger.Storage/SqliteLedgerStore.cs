@@ -1966,14 +1966,19 @@ public sealed partial class SqliteLedgerStore
         await using SqliteCommand command = transaction.Connection!.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = InsertSql;
-        AddInsertParameters(command, span, calculation, provenance, recordedAtUnixMs);
+        AddInsertParameters(
+            command,
+            span,
+            UsageAuthority.PricingOf(calculation),
+            provenance,
+            recordedAtUnixMs);
         return await command.ExecuteScalarAsync(cancellationToken) is long id ? id : null;
     }
 
     private static void AddInsertParameters(
         SqliteCommand command,
         NormalizedGenAiSpan span,
-        CreditCalculationResult calculation,
+        UsageAuthority.StoredPricing pricing,
         RowProvenance provenance,
         long recordedAtUnixMs)
     {
@@ -1986,9 +1991,6 @@ public sealed partial class SqliteLedgerStore
         command.Parameters.AddWithValue("@provider_name", OrDbNull(span.ProviderName));
         command.Parameters.AddWithValue("@request_model", OrDbNull(span.RequestModel));
         command.Parameters.AddWithValue("@response_model", OrDbNull(span.ResponseModel));
-        command.Parameters.AddWithValue("@model_id", OrDbNull(calculation.ModelId));
-        command.Parameters.AddWithValue("@rate_card_model_id", OrDbNull(calculation.RateCardModelId));
-        command.Parameters.AddWithValue("@tier_name", OrDbNull(calculation.TierName));
         command.Parameters.AddWithValue("@server_address", OrDbNull(span.ServerAddress));
         command.Parameters.AddWithValue("@server_port", OrDbNull(span.ServerPort));
         command.Parameters.AddWithValue(
@@ -2005,19 +2007,6 @@ public sealed partial class SqliteLedgerStore
         command.Parameters.AddWithValue(
             "@cache_write_input_tokens",
             span.CacheWriteInputTokens);
-        command.Parameters.AddWithValue(
-            "@billing_channel",
-            ToDatabaseString(calculation.Channel));
-        command.Parameters.AddWithValue(
-            "@pricing_status",
-            ToDatabaseString(calculation.Status));
-        command.Parameters.AddWithValue("@rates_version", calculation.RatesVersion);
-        command.Parameters.AddWithValue(
-            "@cost_usd_pico",
-            PicoUsd.FromUsd(calculation.UsdCost));
-        command.Parameters.AddWithValue(
-            "@saved_usd_pico",
-            PicoUsd.FromUsd(calculation.EstimatedCloudSavedUsd));
         command.Parameters.AddWithValue("@repo_root", OrDbNull(provenance.RepositoryRoot));
         command.Parameters.AddWithValue("@repo_slug", OrDbNull(provenance.RepositorySlug));
         command.Parameters.AddWithValue("@branch_name", OrDbNull(provenance.BranchName));
@@ -2030,21 +2019,10 @@ public sealed partial class SqliteLedgerStore
         command.Parameters.AddWithValue(
             "@pull_request_number",
             OrDbNull(provenance.PullRequestNumber));
-        ApiEquivalentCost retail = calculation.ApiEquivalent;
-        command.Parameters.AddWithValue(
-            "@api_equivalent_usd_pico",
-            OrDbNull(retail.UsdCost is decimal retailUsd ? PicoUsd.FromUsd(retailUsd) : (long?)null));
-        command.Parameters.AddWithValue("@api_equivalent_status", ToDatabaseString(retail.Status));
-        command.Parameters.AddWithValue("@api_rate_card_model_id", OrDbNull(retail.RateCardModelId));
-        command.Parameters.AddWithValue("@api_rates_version", retail.RatesVersion);
-        command.Parameters.AddWithValue("@api_rate_card_sha256", retail.RateCardSha256);
         command.Parameters.AddWithValue("@ingest_source", provenance.IngestSource);
         command.Parameters.AddWithValue("@canonical_usage_id", OrDbNull(provenance.CanonicalUsageId));
         command.Parameters.AddWithValue("@imported_tool_call_count", OrDbNull(provenance.ImportedToolCallCount));
-        command.Parameters.AddWithValue(
-            "@list_cost_usd_pico",
-            PicoUsd.FromUsd(calculation.ListUsdCost));
-        command.Parameters.AddWithValue("@charge_source", ChargeSourceName(calculation.ChargeSource));
+        UsageAuthority.AddPricingParameters(command, pricing);
     }
 
     // A rollup's group key: its SELECT expressions, and their aliases separated by ", ".
@@ -2104,7 +2082,7 @@ public sealed partial class SqliteLedgerStore
             """;
     }
 
-    private static string ToDatabaseString(BillingChannel channel) => channel switch
+    internal static string ToDatabaseString(BillingChannel channel) => channel switch
     {
         BillingChannel.GitHubAiCredits => "github_ai_credits",
         BillingChannel.FoundryByok => "foundry_byok",
@@ -2113,7 +2091,7 @@ public sealed partial class SqliteLedgerStore
         _ => throw new ArgumentOutOfRangeException(nameof(channel), channel, null),
     };
 
-    private static string ChargeSourceName(ChargeSource source) => source switch
+    internal static string ChargeSourceName(ChargeSource source) => source switch
     {
         ChargeSource.RateCard => "rate_card",
         ChargeSource.Reported => "reported",
@@ -2199,7 +2177,7 @@ public sealed partial class SqliteLedgerStore
         _ => throw new InvalidDataException($"Unknown billing channel '{value}'."),
     };
 
-    private static string ToDatabaseString(PricingStatus status) => status switch
+    internal static string ToDatabaseString(PricingStatus status) => status switch
     {
         PricingStatus.Priced => "priced",
         PricingStatus.LocalOffload => "local_offload",
@@ -2221,7 +2199,7 @@ public sealed partial class SqliteLedgerStore
         _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
     };
 
-    private static string ToDatabaseString(ApiEquivalentStatus status) => status switch
+    internal static string ToDatabaseString(ApiEquivalentStatus status) => status switch
     {
         ApiEquivalentStatus.Priced => "priced",
         ApiEquivalentStatus.Unpriced => "unpriced",

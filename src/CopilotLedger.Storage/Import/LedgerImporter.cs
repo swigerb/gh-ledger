@@ -10,6 +10,8 @@ namespace CopilotLedger.Storage.Import;
 // run decides the same way on a read-only snapshot (LedgerSnapshot) and writes nothing.
 public sealed class LedgerImporter
 {
+    public const int CurrentImportRevision = 1;
+
     // The daemon prunes span_links older than this; older tool calls aren't imported.
     public static readonly TimeSpan ToolLinkRetention = TimeSpan.FromDays(7);
 
@@ -144,6 +146,7 @@ public sealed class LedgerImporter
             ? await store.GetImportSessionAsync(log.Source, log.LogId, cancellationToken)
             : await snapshot!.GetImportSessionAsync(log.Source, log.LogId, cancellationToken);
         if (checkpoint is { Complete: true } &&
+            checkpoint.ImportRevision >= CurrentImportRevision &&
             checkpoint.LogSizeBytes == log.SizeBytes &&
             checkpoint.LogLastWriteTime.ToUnixTimeMilliseconds() == log.LastWriteTime.ToUnixTimeMilliseconds() &&
             await SessionLogHash.ComputeAsync(log, cancellationToken) == checkpoint.LogSha256)
@@ -315,6 +318,7 @@ public sealed class LedgerImporter
                     Duplicates = duplicates,
                     OverlapSkipped = overlap,
                     AmbiguousOverlap = ambiguous,
+                    ImportRevision = CurrentImportRevision,
                 },
                 cancellationToken);
         }

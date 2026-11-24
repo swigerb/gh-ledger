@@ -1,5 +1,6 @@
 using System.Text;
 using CopilotLedger.Core.Import;
+using CopilotLedger.Core.Pricing;
 using CopilotLedger.Core.Telemetry;
 using Microsoft.Data.Sqlite;
 
@@ -19,6 +20,8 @@ public sealed class LedgerSnapshot : IAsyncDisposable
     private readonly HashSet<(string Source, string Key)> _aliases = [];
     private readonly HashSet<string> _recordedCanonicalIds = new(StringComparer.Ordinal);
     private readonly HashSet<(string TraceId, string SpanId)> _links = [];
+    private readonly HashSet<long> _repricedRows = [];
+    private readonly HashSet<long> _liveRepricedRows = [];
 
     private LedgerSnapshot(SqliteConnection? connection, SqliteTransaction? transaction, int schemaVersion)
     {
@@ -100,6 +103,8 @@ public sealed class LedgerSnapshot : IAsyncDisposable
 
         List<ImportResolution> resolutions = new(entries.Count);
         int links = 0;
+        int repriced = 0;
+        int liveRepriced = 0;
         foreach (ImportedLedgerEntry entry in entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -148,9 +153,15 @@ public sealed class LedgerSnapshot : IAsyncDisposable
             }
             else if (resolution == ImportResolution.Duplicate &&
                      aliasInLedger &&
-                     entry.ToolLinks.Count > 0 &&
-                     await UsageAuthority.RecordedRowAsync(_transaction!, source, entry, cancellationToken) is not null)
+                     await UsageAuthority.RecordedRowAsync(_transaction!, source, entry, cancellationToken) is long ownRowId)
             {
+                UsageAuthority.StoredPricing stored = await UsageAuthority.ReadPricingAsync(
+                    _connection!, _transaction, ownRowId, SchemaVersion, cancellationToken);
+                if (stored != UsageAuthority.PricingOf(entry.Calculation) && _repricedRows.Add(ownRowId))
+                {
+                    repriced++;
+                }
+
                 foreach (GenAiSpanLink link in entry.ToolLinks)
                 {
                     if (_links.Add((link.TraceId, link.SpanId)) && !await LinkExistsAsync(link, cancellationToken))
@@ -160,10 +171,31 @@ public sealed class LedgerSnapshot : IAsyncDisposable
                 }
             }
 
+            if (canonical is not null &&
+                facts.Owner == UsageAuthority.CanonicalOwner.Live &&
+                entry.Calculation.ChargeSource == ChargeSource.Reported &&
+                _liveRepricedRows.Add(facts.OwnerRowId!.Value))
+            {
+                UsageAuthority.StoredPricing stored = await UsageAuthority.ReadPricingAsync(
+                    _connection!, _transaction, facts.OwnerRowId.Value, SchemaVersion, cancellationToken);
+                if (stored.BillingChannel == "github_ai_credits" &&
+                    stored.PricingStatus == "priced" &&
+                    stored.ChargeSource != "reported")
+                {
+                    liveRepriced++;
+                }
+            }
+
             resolutions.Add(resolution);
         }
 
-        return new ImportRecordResult { Resolutions = resolutions, ToolLinksRecorded = links };
+        return new ImportRecordResult
+        {
+            Resolutions = resolutions,
+            ToolLinksRecorded = links,
+            Repriced = repriced,
+            LiveRepriced = liveRepriced,
+        };
     }
 
     // The checkpoint of a log, or null when none was written or the ledger has no import checkpoints yet.
