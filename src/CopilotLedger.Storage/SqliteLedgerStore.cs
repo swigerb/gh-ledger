@@ -168,6 +168,42 @@ public sealed partial class SqliteLedgerStore
             userVersion = version;
         }
 
+        foreach ((string name, string sql) in LedgerMigrations.Indexes)
+        {
+            await using (SqliteCommand indexQuery = connection.CreateCommand())
+            {
+                indexQuery.CommandText =
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = @name;";
+                indexQuery.Parameters.AddWithValue("@name", name);
+                if (Convert.ToInt32(
+                        await indexQuery.ExecuteScalarAsync(cancellationToken),
+                        System.Globalization.CultureInfo.InvariantCulture) == 1)
+                {
+                    continue;
+                }
+            }
+
+            await using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+            await using (SqliteCommand indexQuery = connection.CreateCommand())
+            {
+                indexQuery.Transaction = transaction;
+                indexQuery.CommandText =
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = @name;";
+                indexQuery.Parameters.AddWithValue("@name", name);
+                if (Convert.ToInt32(
+                        await indexQuery.ExecuteScalarAsync(cancellationToken),
+                        System.Globalization.CultureInfo.InvariantCulture) == 0)
+                {
+                    await using SqliteCommand indexCommand = connection.CreateCommand();
+                    indexCommand.Transaction = transaction;
+                    indexCommand.CommandText = sql;
+                    await indexCommand.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
         _initialized = true;
     }
 
