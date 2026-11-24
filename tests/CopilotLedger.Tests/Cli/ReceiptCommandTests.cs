@@ -465,8 +465,10 @@ public sealed class ReceiptCommandTests
             new LedgerEntry(span, JsonRateCardCalculator.LoadEmbedded().Calculate(span), GitFixture.Feature(temp.Path)),
         ]);
         string repo = Path.Combine(temp.Path, "repo");
-        const string Error =
-            "The receipt for feature/ledger is 68090 bytes; a receipt can be at most 65536 bytes.\n";
+        // The receipt shows the version twice, so its size depends on the version's length: 68,090 bytes for a version of
+        // five characters.
+        string error =
+            $"The receipt for feature/ledger is {68_080 + (2 * GhLedgerCli.Version.Length)} bytes; a receipt can be at most 65536 bytes.\n";
 
         CliRun file = await harness.RunInAsync(repo, "export-pr");
         CliRun stdout = await harness.RunInAsync(repo, "export-pr", "--stdout");
@@ -474,10 +476,10 @@ public sealed class ReceiptCommandTests
 
         Assert.Equal(1, file.ExitCode);
         Assert.Equal(string.Empty, file.Out);
-        Assert.Equal(Error, file.Error);
+        Assert.Equal(error, file.Error);
         Assert.Equal(1, stdout.ExitCode);
         Assert.Equal(string.Empty, stdout.Out);
-        Assert.Equal(Error, stdout.Error);
+        Assert.Equal(error, stdout.Error);
         Assert.Equal(0, json.ExitCode);
         Assert.Equal(string.Empty, json.Error);
         Assert.False(Directory.Exists(Path.Combine(repo, ".github")));

@@ -810,6 +810,21 @@ gh-ledger daemon stopped.
 ```
 <!-- /sample -->
 
+A new release can upgrade the ledger's format the first time it opens the ledger, and that can't be undone: an earlier release can't open the ledger afterward. So before you upgrade, copy your data directory to a new folder outside it: all of it, not only `ledger.db`, so that a `ledger.db-wal` file, which can hold the latest changes, comes with it. The data directory is `C:\Users\you\.copilot-ledger` here, or `~/.copilot-ledger` on macOS and Linux, unless `COPILOT_LEDGER_HOME` names another one. In PowerShell:
+
+```powershell
+$data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
+Copy-Item -LiteralPath $data -Destination "$HOME\copilot-ledger-backup-$(Get-Date -Format yyyyMMdd-HHmmss)" -Recurse
+```
+
+On macOS and Linux:
+
+```shell
+cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
+```
+
+Keep the copy until you're sure you'll stay on the new release; [Upgrading or removing the extension](cli.md#install-and-uninstall) says how to go back with it. Upgrade the extension:
+
 ```shell
 gh extension upgrade ledger
 ```
