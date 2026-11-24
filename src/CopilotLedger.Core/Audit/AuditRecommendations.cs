@@ -24,7 +24,7 @@ public static class AuditRecommendations
         (AuditRuleIds.PremiumModelTrivialTurn,
             "Consider a cheaper model or a local model for these short requests without tool calls; they're only candidates, because a short answer can still need a strong model."),
         (AuditRuleIds.VelocityNearBreaker,
-            "Check whether this burst of spend was expected; if it wasn't, lower the circuit breaker's credit velocity with gh ledger breaker config so it trips next time."),
+            "Check whether this burst of spend was expected; if it wasn't, make sure the circuit breaker's credit velocity, set with gh ledger breaker config, is low enough to trip on such a burst."),
     ];
 
     // Every key: the rule IDs in AuditRuleIds.All order, with context_bloat_zero_output after context_bloat.

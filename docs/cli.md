@@ -446,7 +446,7 @@ gh ledger audit [--repo <key>] [--branch <name>] [--pr <n>] [--since <period>] [
 | `context_growth` | One agent invocation's requests to one model whose input grew at least 4 times over 10 or more requests | Info only | | None |
 | `cache_miss_streak` | Requests in a row, of one agent invocation and model, each with at least 20,000 input tokens and less than 10% of them read from the prompt cache | 5 requests | 10 requests | What the uncached input cost above the cached input price |
 | `premium_model_trivial_turn` | GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day | 10 requests | 20 requests | What they cost above the economy model's price for the same tokens |
-| `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity, unless the breaker recorded a trip for it. Only the daemon trips the breaker, and only on live spans, so an imported chain, or one recorded before the breaker or under other settings, can be reported above 100% | Info only | | None |
+| `velocity_near_breaker` | A prompt chain whose spend in the circuit breaker's window reached 80% of its credit velocity, unless the breaker recorded a credit velocity trip for it. Only the daemon trips the breaker, and only on live spans, so an imported chain, or one recorded before the breaker or under other settings, can be reported above 100% | Info only | | None |
 <!-- /audit-rules -->
 
 - **One lens.** Estimated impacts are billed USD: GitHub AI credits at $0.01 each, and Foundry BYOK. Repriced impacts use the rates in use, your overlay included. A local request's impact is $0. An impact that would include a request without a billed price is unknown (`-` in the table, `null` in JSON), never $0. Findings can overlap, so their impacts aren't added together, and there's no total.
@@ -478,7 +478,7 @@ The table lists the findings, most severe first, then by estimated impact; what 
 | `context_growth` | Start a new session or compact the conversation when the context keeps growing, and keep tool results short. |
 | `cache_miss_streak` | Keep the start of each prompt stable, such as instructions, tool definitions, and earlier messages, so the prompt cache can serve it, and avoid switching models in the middle of a task. |
 | `premium_model_trivial_turn` | Consider a cheaper model or a local model for these short requests without tool calls; they're only candidates, because a short answer can still need a strong model. |
-| `velocity_near_breaker` | Check whether this burst of spend was expected; if it wasn't, lower the circuit breaker's credit velocity with gh ledger breaker config so it trips next time. |
+| `velocity_near_breaker` | Check whether this burst of spend was expected; if it wasn't, make sure the circuit breaker's credit velocity, set with gh ledger breaker config, is low enough to trip on such a burst. |
 <!-- /audit-recommendations -->
 
 ### Local model suggestions

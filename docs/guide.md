@@ -365,7 +365,7 @@ Recommendations:
   cache_miss_streak: Keep the start of each prompt stable, such as instructions, tool definitions, and earlier messages, so the prompt cache can serve it, and avoid switching models in the middle of a task.
   context_bloat: Send less context with each request: attach smaller files and tool results, trim long instructions, or start a new session for a new task.
   context_growth: Start a new session or compact the conversation when the context keeps growing, and keep tool results short.
-  velocity_near_breaker: Check whether this burst of spend was expected; if it wasn't, lower the circuit breaker's credit velocity with gh ledger breaker config so it trips next time.
+  velocity_near_breaker: Check whether this burst of spend was expected; if it wasn't, make sure the circuit breaker's credit velocity, set with gh ledger breaker config, is low enough to trip on such a burst.
 ```
 <!-- /sample -->
 
