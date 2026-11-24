@@ -123,6 +123,41 @@ public sealed class BreakerRulesTests
         Assert.True(budget.ShowNotification);
     }
 
+    [Theory]
+    [InlineData("trip")]
+    [InlineData("budget")]
+    public void BA1_Alerts_NameTheGivenCommand(string kind)
+    {
+        string expected = kind switch
+        {
+            "trip" => "swigerb/copilot-ledger @ feature/ledger: 5 failed tool calls in a row on one prompt. Run: gh ledger breaker status",
+            "budget" => "contoso/api @ main: 31.50 of 40.50 AI credits spent. Run: gh ledger budget list",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+
+        BreakerAlert alert = kind == "trip"
+            ? BreakerMessages.ForTrip(
+                7,
+                "swigerb/copilot-ledger",
+                "feature/ledger",
+                "5 failed tool calls in a row",
+                false,
+                command: "gh ledger")
+            : BreakerMessages.ForBudget(
+                new BranchBudgetRow
+                {
+                    Repository = "contoso/api",
+                    Branch = "main",
+                    BudgetAiCredits = 40.5m,
+                    SpentAiCredits = 31.5m,
+                    SetAt = T0,
+                },
+                true,
+                command: "gh ledger");
+
+        Assert.Equal(expected, alert.Body);
+    }
+
     private static CostEvent Cost(string id, int seconds, decimal usd) =>
         new(id, T0.AddSeconds(seconds), usd);
 

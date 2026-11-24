@@ -1,3 +1,4 @@
+using System.Globalization;
 using CopilotLedger.Cli.Reporting;
 using CopilotLedger.Core.Audit;
 
@@ -39,6 +40,13 @@ public static class AuditTable
                 $"{all.Count(finding => finding.Severity == AuditSeverity.Warning)} warning, " +
                 $"{all.Count(finding => finding.Severity == AuditSeverity.Info)} info." +
                 (shown.Count < all.Count ? $" Showing {shown.Count}." : ""));
+            output.WriteLine(
+                "By rule: " +
+                string.Join(", ", AuditRuleIds.All
+                    .Select(id => (Id: id, Count: all.Count(finding => finding.RuleId == id)))
+                    .Where(rule => rule.Count > 0)
+                    .Select(rule => $"{rule.Id} {rule.Count.ToString(CultureInfo.InvariantCulture)}")) +
+                ".");
         }
 
         if (shown.Count > 0)

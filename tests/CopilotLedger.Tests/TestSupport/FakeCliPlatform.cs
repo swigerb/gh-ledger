@@ -46,6 +46,8 @@ public sealed class FakeCliPlatform : ICliPlatform
     public Func<string, IReadOnlyList<string>, CancellationToken, Task<ProcessRunResult>>? RunHandler { get; set; }
     public List<DetachedStart> DetachedStarts { get; } = [];
     public Func<string, IReadOnlyList<string>, string, int>? StartDetachedHandler { get; set; }
+    public JobState JobState { get; set; }
+    public Exception? JobStateException { get; set; }
     public HashSet<int> RunningProcesses { get; } = [];
     public List<int> KilledProcesses { get; } = [];
 
@@ -138,6 +140,9 @@ public sealed class FakeCliPlatform : ICliPlatform
         return StartDetachedHandler?.Invoke(fileName, arguments, workingDirectory)
             ?? Environment.ProcessId;
     }
+
+    public JobState GetJobState() =>
+        JobStateException is { } exception ? throw exception : JobState;
 
     public bool IsProcessRunning(int processId) =>
         processId == Environment.ProcessId || RunningProcesses.Contains(processId);

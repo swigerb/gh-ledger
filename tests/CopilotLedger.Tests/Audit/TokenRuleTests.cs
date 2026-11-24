@@ -11,13 +11,13 @@ public sealed class TokenRuleTests
     {
         { "below ratio", "none" },
         { "below input", "none" },
-        { "at", "info [inputTokens=50000 tokens, outputTokens=250 tokens, inputOutputRatio=200 ratio] null context_bloat" },
-        { "exact", "info [inputTokens=260000 tokens, outputTokens=1000 tokens, inputOutputRatio=260 ratio] null context_bloat" },
+        { "at", "info [requests=1 requests, inputTokens=50000 tokens, outputTokens=250 tokens, inputOutputRatio=200 ratio] null context_bloat" },
+        { "exact", "info [requests=1 requests, inputTokens=260000 tokens, outputTokens=1000 tokens, inputOutputRatio=260 ratio] null context_bloat" },
         {
             "repeating ratio",
-            "info [inputTokens=100000 tokens, outputTokens=300 tokens, inputOutputRatio=333.33333333333333333333333333 ratio] null context_bloat"
+            "info [requests=1 requests, inputTokens=100000 tokens, outputTokens=300 tokens, inputOutputRatio=333.33333333333333333333333333 ratio] null context_bloat"
         },
-        { "zero output", "info [inputTokens=80000 tokens, outputTokens=0 tokens, zeroOutput=1 flag] null context_bloat_zero_output" },
+        { "zero output", "info [requests=1 requests, inputTokens=80000 tokens, outputTokens=0 tokens, zeroOutput=1 flag] null context_bloat_zero_output" },
     };
 
     [Theory]
@@ -243,6 +243,113 @@ public sealed class TokenRuleTests
         Assert.Equal((growth[0].StartTime, growth[^1].EndTime), (grown.WindowStart, grown.WindowEnd));
         Assert.Equal((misses[0].StartTime, misses[^1].EndTime), (streak.WindowStart, streak.WindowEnd));
         Assert.Equal(AuditFixtures.TraceId, streak.Scope.TraceId);
+    }
+
+    public static TheoryData<string, string> AggregatedBloatCases => new()
+    {
+        {
+            "agent session",
+            "info [requests=20 requests, inputTokens=2400000 tokens, outputTokens=3000 tokens, inputOutputRatio=800 ratio] null context_bloat | " +
+            "info [requests=1 requests, inputTokens=90000 tokens, outputTokens=0 tokens, zeroOutput=1 flag] null context_bloat_zero_output"
+        },
+        {
+            "two invocations",
+            "info [requests=10 requests, inputTokens=1200000 tokens, outputTokens=1500 tokens, inputOutputRatio=800 ratio] null context_bloat | " +
+            "info [requests=10 requests, inputTokens=1200000 tokens, outputTokens=1500 tokens, inputOutputRatio=800 ratio] null context_bloat"
+        },
+        {
+            "two models",
+            "info [requests=5 requests, inputTokens=600000 tokens, outputTokens=750 tokens, inputOutputRatio=800 ratio] null context_bloat | " +
+            "info [requests=5 requests, inputTokens=600000 tokens, outputTokens=750 tokens, inputOutputRatio=800 ratio] null context_bloat"
+        },
+        {
+            "one below",
+            "info [requests=19 requests, inputTokens=2280000 tokens, outputTokens=2850 tokens, inputOutputRatio=800 ratio] null context_bloat"
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(AggregatedBloatCases))]
+    public void AR13_ContextBloat_ReportsOncePerInvocationModelAndKind(string name, string expected)
+    {
+        AuditSpan Agentic(int k) => AuditFixtures.Span(k, TimeSpan.FromMinutes(k)) with
+        {
+            InputTokens = 120_000,
+            CacheReadInputTokens = 114_000,
+            CacheReadState = CacheCounterState.Reported,
+            OutputTokens = 150,
+        };
+        AuditSpan[] spans = name switch
+        {
+            "agent session" =>
+            [
+                .. Enumerable.Range(1, 20).Select(Agentic),
+                AuditFixtures.Span(21, TimeSpan.FromMinutes(21)) with
+                {
+                    InputTokens = 90_000,
+                    CacheReadInputTokens = 0,
+                    OutputTokens = 0,
+                },
+            ],
+            "two invocations" =>
+            [
+                .. Enumerable.Range(1, 20).Select(k =>
+                    k % 2 == 0 ? Agentic(k) with { AgentInvocationId = "b0000000000000b0" } : Agentic(k)),
+            ],
+            "two models" =>
+            [
+                .. Enumerable.Range(1, 10).Select(k =>
+                    k % 2 == 0 ? Agentic(k) with { Model = "claude-sonnet-5.5" } : Agentic(k)),
+            ],
+            "one below" =>
+            [
+                .. Enumerable.Range(1, 20).Select(k => k == 7 ? Agentic(k) with { OutputTokens = 1_000 } : Agentic(k)),
+            ],
+            _ => throw new ArgumentOutOfRangeException(nameof(name)),
+        };
+
+        Assert.Equal(expected, AuditFixtures.Describe(AuditFixtures.Run(
+            AuditRuleIds.ContextBloat,
+            AuditFixtures.Input(spans))));
+    }
+
+    [Fact]
+    public void AR14_ContextBloat_GroupScopeAndWindow()
+    {
+        AuditSpan first = AuditFixtures.Span(1, TimeSpan.Zero) with
+        {
+            InputTokens = 120_000,
+            OutputTokens = 150,
+        };
+        AuditSpan second = AuditFixtures.Span(2, TimeSpan.FromMinutes(1)) with
+        {
+            InputTokens = 120_000,
+            OutputTokens = 150,
+        };
+        AuditSpan third = AuditFixtures.Span(3, TimeSpan.FromMinutes(2)) with
+        {
+            InputTokens = 120_000,
+            OutputTokens = 150,
+            EndTime = AuditFixtures.Span(3, TimeSpan.FromMinutes(2)).StartTime + TimeSpan.FromSeconds(90),
+        };
+
+        AuditFinding finding = Assert.Single(AuditFixtures.Run(
+            AuditRuleIds.ContextBloat,
+            AuditFixtures.Input([first, second, third])));
+
+        AuditScope expectedScope = new()
+        {
+            Repository = first.Repository,
+            Branch = first.Branch,
+            PullRequestNumber = first.PullRequestNumber,
+            Agent = first.AgentName ?? "(none)",
+            Model = first.Model,
+            TraceId = first.TraceId,
+            ConversationId = first.ConversationId,
+        };
+        Assert.Equal(expectedScope, finding.Scope);
+        Assert.Equal(first.StartTime, finding.WindowStart);
+        Assert.Equal(third.StartTime + TimeSpan.FromSeconds(90), finding.WindowEnd);
     }
 
     // Requests of the default invocation, 30 seconds apart, with these inputs and no cache reads.

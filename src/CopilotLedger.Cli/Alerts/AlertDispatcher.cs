@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using CopilotLedger.Cli.Install;
 using CopilotLedger.Otlp.Breaker;
 using CopilotLedger.Storage;
 using Microsoft.Data.Sqlite;
@@ -10,6 +11,7 @@ internal sealed class AlertDispatcher : IBreakerAlertSink
     private readonly CliContext _context;
     private readonly SqliteLedgerStore _store;
     private readonly Action<string> _log;
+    private readonly string _command;
     private readonly Channel<BreakerAlert> _alerts = Channel.CreateUnbounded<BreakerAlert>(
         new UnboundedChannelOptions { SingleReader = true });
 
@@ -22,7 +24,10 @@ internal sealed class AlertDispatcher : IBreakerAlertSink
         _context = context;
         _store = store;
         _log = log;
+        _command = GhExtension.CommandName(context.Platform);
     }
+
+    public string Command => _command;
 
     public void Publish(BreakerAlert alert) =>           // Channel.CreateUnbounded<BreakerAlert>(new UnboundedChannelOptions { SingleReader = true }); TryWrite
         _alerts.Writer.TryWrite(alert);
@@ -56,7 +61,8 @@ internal sealed class AlertDispatcher : IBreakerAlertSink
                 trip.Repository,
                 trip.Branch,
                 trip.Detail,
-                notifications));
+                notifications,
+                _command));
         }
 
         foreach (BranchBudgetRow budget in
@@ -64,7 +70,7 @@ internal sealed class AlertDispatcher : IBreakerAlertSink
                 now - TimeSpan.FromHours(1),
                 cancellationToken))
         {
-            Publish(BreakerMessages.ForBudget(budget, notifications));
+            Publish(BreakerMessages.ForBudget(budget, notifications, _command));
         }
     }
 
