@@ -65,6 +65,59 @@ public sealed class SprintFifteenDocsTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DF5_TheDryRunAndTheShortFormAreDescribedPrecisely()
+    {
+        string[] lines = Text("docs", "cli.md").Split('\n');
+
+        string dryRun = Assert.Single(
+            lines,
+            line => line.StartsWith(
+                "Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` prints",
+                StringComparison.Ordinal));
+        Assert.Contains(
+            "`Wouldn't start the gh-ledger daemon:` with the reason and hint that `daemon start` gives, and exits with 1, as `install` would",
+            dryRun,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "It starts nothing, so it can't tell whether the daemon would fail to start",
+            dryRun,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "exits with the code that `install` would",
+            dryRun,
+            StringComparison.Ordinal);
+
+        string shortForm = McpToolNames.ShortForm(McpToolNames.Hash("computer-use", "exec_js"));
+        string troubleshooting = Assert.Single(
+            lines,
+            line => line.StartsWith("- **A tool shows as `" + shortForm + "`.**", StringComparison.Ordinal));
+        Assert.Contains(
+            "by two SHA-256 hashes, of its server's name and of its own name",
+            troubleshooting,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "the first 8 digits of each",
+            troubleshooting,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "until an import learns the tool's name from a session log that ran it",
+            troubleshooting,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "run `gh ledger import --all`",
+            troubleshooting,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Logs that import doesn't read",
+            troubleshooting,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[MCP tool names](#mcp-tool-names)",
+            troubleshooting,
+            StringComparison.Ordinal);
+    }
+
     private static string Text(params string[] parts) =>
         File.ReadAllText(RepositoryFile(parts)).ReplaceLineEndings("\n");
 

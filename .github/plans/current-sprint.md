@@ -76,7 +76,7 @@ Global rules for every task:
 - [x] Task 9: 0.6.0 → 0.7.0 Upgrade Docs and the 0.6.0 Report's Update (docs & tests). The format stays 7, the first import reads every log again once, and going back is a pinned install without the copy. `UpgradeDocsTests.UD6`. An `**Update:**` line in the 0.6.0 test report's "Gaps found".
 - [x] Task 10: IP6 Reads the Ledger as IP1 Does (tests only). PA3: IP6 clears the connection pools after its last query and reads `ledger.db`, `-wal`, and `-shm` through a `FileShare.ReadWrite | FileShare.Delete` stream, as IP1 does, so it passes alone and in a serial run. Its name, setup, and assertions are unchanged.
 - [x] Task 11: Final Verification (no product change). Build and test gates, serial tests, a `publish` whose `--version` is `0.7.0`, smoke tests with temporary homes, and money, privacy, boundary, and docs sweeps.
-- [ ] Task 12: The Dry Run and the Short Form, Precisely (docs & tests). Review fixes R1 and R2: `docs/cli.md` says that `install --dry-run` exits with 1 where `install` would refuse to start the daemon, and can't tell whether a daemon it would start fails to start; the troubleshooting entry says what the short form's digits are and which logs name a tool. `SprintFifteenDocsTests.DF5`.
+- [x] Task 12: The Dry Run and the Short Form, Precisely (docs & tests). Review fixes R1 and R2: `docs/cli.md` says that `install --dry-run` exits with 1 where `install` would refuse to start the daemon, and can't tell whether a daemon it would start fails to start; the troubleshooting entry says what the short form's digits are and which logs name a tool. `SprintFifteenDocsTests.DF5`.
 
 ## Starting point
 
