@@ -258,6 +258,7 @@ public sealed partial class ImportPrivacyTests
         Assert.Equal(
             ["srv-tool"],
             await LedgerSql.RowsAsync(harness.Context.DatabasePath, "SELECT tool_name FROM span_links;"));
+        SqliteConnection.ClearAllPools();
 
         string output = run.Out + run.Error;
         string[] canaries =
@@ -279,7 +280,10 @@ public sealed partial class ImportPrivacyTests
                 string path = harness.Context.DatabasePath + suffix;
                 if (File.Exists(path))
                 {
-                    byte[] ledger = await FileRetry.ReadAllBytesAsync(path);
+                    await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using MemoryStream copy = new();
+                    await stream.CopyToAsync(copy);
+                    byte[] ledger = copy.ToArray();
                     Assert.True(ledger.AsSpan().IndexOf(bytes) < 0, $"{canary} is in ledger.db{suffix}.");
                 }
             }
