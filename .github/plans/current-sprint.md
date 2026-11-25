@@ -9,7 +9,7 @@
 | Branch | `swigerb-sprint-15-mcp-names-dry-run-help` |
 | Requirements | Issue [#90](https://github.com/swigerb/gh-ledger/issues/90) (live MCP tool calls are named by 129-character hashes), issue [#91](https://github.com/swigerb/gh-ledger/issues/91) (`install --dry-run` always says it would start the daemon), issue [#92](https://github.com/swigerb/gh-ledger/issues/92) and its comment (help usage lines and command hints say `gh-ledger` under the extension), docs that no longer describe these as limitations, version 0.7.0, and its 0.6.0 → 0.7.0 upgrade docs |
 | Status | Current sprint. Sprint 14's plan is archived verbatim at `.github/plans/archive/sprint-14.md` (SHA-256 `4F2DA37E44AC0BC0E3719151AC626912BA03CF87B3423EFD9D3472FF485413D5`). |
-| Amended | 2026-11-24, after Task 2 (`75d4131`): Task 3's ML5 becomes a two-row theory, so every count from Task 3 on is one higher (PA1). 2026-11-25, after Task 3 (`1744ecd`): Task 4's MD1 reads only H's tool calls in its last query, and Task 5's `DecideStart` sets `job` in its `catch`; no count changes (PA2). 2026-11-25, after PA2 (`6896ad2`), with Task 4 in progress: a new Task 10 makes Task 3's IP6 read the ledger's files as IP1 does, so it passes alone and serially, and the final verification becomes Task 11; Task 5's IN20 says what its `withState: false` row asserts about `daemon.json`; no count changes (PA3). See "Plan amendments". |
+| Amended | 2026-11-24, after Task 2 (`75d4131`): Task 3's ML5 becomes a two-row theory, so every count from Task 3 on is one higher (PA1). 2026-11-25, after Task 3 (`1744ecd`): Task 4's MD1 reads only H's tool calls in its last query, and Task 5's `DecideStart` sets `job` in its `catch`; no count changes (PA2). 2026-11-25, after PA2 (`6896ad2`), with Task 4 in progress: a new Task 10 makes Task 3's IP6 read the ledger's files as IP1 does, so it passes alone and serially, and the final verification becomes Task 11; Task 5's IN20 says what its `withState: false` row asserts about `daemon.json`; no count changes (PA3). See "Plan amendments". 2026-11-25, after Task 11 (`f500e7b`): review fixes R1 and R2 added as Task 12, which adds 1 test (2,057); in "Deferred", S15-6 also names R1's case, and S15-7 is new. See "Review after Task 11". |
 
 ## How to use this plan
 
@@ -76,6 +76,7 @@ Global rules for every task:
 - [x] Task 9: 0.6.0 → 0.7.0 Upgrade Docs and the 0.6.0 Report's Update (docs & tests). The format stays 7, the first import reads every log again once, and going back is a pinned install without the copy. `UpgradeDocsTests.UD6`. An `**Update:**` line in the 0.6.0 test report's "Gaps found".
 - [x] Task 10: IP6 Reads the Ledger as IP1 Does (tests only). PA3: IP6 clears the connection pools after its last query and reads `ledger.db`, `-wal`, and `-shm` through a `FileShare.ReadWrite | FileShare.Delete` stream, as IP1 does, so it passes alone and in a serial run. Its name, setup, and assertions are unchanged.
 - [x] Task 11: Final Verification (no product change). Build and test gates, serial tests, a `publish` whose `--version` is `0.7.0`, smoke tests with temporary homes, and money, privacy, boundary, and docs sweeps.
+- [ ] Task 12: The Dry Run and the Short Form, Precisely (docs & tests). Review fixes R1 and R2: `docs/cli.md` says that `install --dry-run` exits with 1 where `install` would refuse to start the daemon, and can't tell whether a daemon it would start fails to start; the troubleshooting entry says what the short form's digits are and which logs name a tool. `SprintFifteenDocsTests.DF5`.
 
 ## Starting point
 
@@ -1053,6 +1054,109 @@ In a clean tree, at the commit after Task 10:
    - No release notes file was added.
 9. Check off this task, and commit with the results in the body.
 
+## Review after Task 11 (2026-11-25, `ledger-architect`)
+
+Reviewed `c6dc935..f500e7b` (15 commits, 57 files) against this plan, issues #90, #91, and #92 with its comment, the coordinator's brief, and `.github/copilot-instructions.md`.
+
+- `dotnet build CopilotLedger.slnx`: 0 warnings, 0 errors. `dotnet test CopilotLedger.slnx`: 2,056 passed, 0 failed, 0 skipped, and the same with `-- xUnit.ParallelizeTestCollections=false`. That's 1,960 plus the 96 this sprint adds. Each task's `Tests:` line matches its acceptance: 1,984; 1,995; 2,012; 2,019; 2,030; 2,041; 2,055; 2,055; 2,056; 2,056; 2,056.
+- `.github/plans/archive/sprint-14.md` is the same blob as `c6dc935:.github/plans/current-sprint.md` (`f7e7540…`), and its SHA-256 is the one the Status row records.
+- Probes of a `win-x64` Release publish of `f500e7b` ran outside the repository, with temporary `COPILOT_LEDGER_HOME`, `COPILOT_HOME`, and `CODEX_HOME`, the binary copied to `<temp>\gh\extensions\gh-ledger\` beside an empty `manifest.yml`, and port 4399, never 4318. All were deleted afterward. `--version` printed `0.7.0`.
+  - **#90, end to end.** `daemon run --port 4399` received an OTLP/JSON trace: one `invoke_agent`, three `chat` spans of `claude-haiku-4.5`, and three `execute_tool` spans with exit code 1 whose `gen_ai.tool.name` is `sha256("computer-use")/sha256("exec_js")`. `audit --json` gave one `failed_tool_retry` finding with `scope.tool` `MCP tool 10be6bee/8453dc19`. The table and the export timeline's `<title>`s showed the short form, and the report didn't contain the 129-character name. `import --all --dry-run` changed nothing. Then a session log for the same conversation got a `tool.execution_start` (`toolName` `computer-use-exec_js`, `mcpServerName` `computer-use`, `mcpToolName` `exec_js`, and a canary in `arguments`) and a failed `tool.execution_complete` (canaries in `result` and `error`). After `import --all` (exit 0), `audit --json`, the table, the timeline, `telemetry/tool-calls.json`, and `telemetry/audit-findings.json` named the tool `computer-use-exec_js`, with the same rule, severity, metrics, and impact. `span_links.tool_name` kept the hash, `mcp_tool_names` had one row, `user_version` stayed 7, and the log's `import_revision` was 2. No canary was in `ledger.db`, `-wal`, `-shm`, or any output.
+  - **#92.** Under the extension, the usage line says `gh ledger` for `import --bogus --help`, the typo `imprt`, `budget set` without its argument, the validator errors of `import` without `--repo` or `--all` and of `export --repo a --all-repos`, `rates --help`, and `audit -?`. With an open trip, `breaker status` ends with `Reset a trip with: gh ledger breaker reset --id <id>`. Over standard input and output, `mcp` reports `serverInfo.version` `0.7.0`, and `get_branch_ledger`'s first line and `circuitBreaker.openTrips[0].resetCommand` say `gh ledger breaker reset --id 1`. The daemon log's job warning says `Run gh ledger daemon start from a regular terminal.` `GuideSamplesTests.GS7` runs `mcp` through `GhLedgerCli` with the extension's platform, so `McpCommand`'s `Command` is tested too.
+- Re-checked F3 (retrieved 2026-11-25): Copilot's OpenTelemetry reference still describes `gen_ai.tool.name` on `execute_tool` spans as "Tool name (for example, `readFile`)" and doesn't mention hashing.
+- Display paths. The only outputs that name a tool are `AuditText.Scope`, `AuditJson`'s `scope.tool`, `AuditLlmPayload`'s `tool`, `ExportSvg`'s `<title>`, and `ExportJson`'s `toolName`. All three report sites (`AuditCommands`, `LedgerMcpTools.AuditFindingsAsync`, and `ExportModelBuilder`) resolve names after `AuditAnalyzer.Report`, and export's tool calls resolve in `ExportRecords.ToolCall`. Breaker details, alerts, flag files, receipts, the other reports and MCP tools, and the daemon log name no tool.
+- Hints. Every `gh-ledger` followed by a word that's left in `src` names the product, the executable (`Run gh-ledger directly.`), or the `--local-llm` payload's `source` (`gh-ledger audit`). Every hint that names a command uses `GhExtension.CommandName`, a `command` that the daemon sets from it, or `LedgerMcpContext.Command`, except the shared texts that D9 keeps (S15-2).
+- Sweeps. No money `double`, `float`, `REAL`, or `Math.Round` was added, and no package. `global.json`, `rates.json`, and `docs/configuration.md` are unchanged. `LedgerMigrations.cs` adds only `Tables`, and `Migrations` ends at 7. `DaemonState.CurrentImportRules` is 1. `ToolStartPaths` gains only `data.mcpServerName` and `data.mcpToolName`, and `git grep -E 'arguments|toolTitle|"result"'` finds nothing in `CopilotSessionLogSource.cs`. `0.7.0` is on Task 8's 15 lines. Task 11's docs pattern finds nothing. The contract changes are the global rules' list.
+- Hermetic. The new tests use temporary directories, `FakeCliPlatform` (whose `HomeDirectory` throws unless a test sets it), `CliHarness`, `TestServer` (XH6), `McpTestHarness`'s in-memory pipes, and a lock held on a temporary `daemon.lock` (IN20, as `ImportCommandTests` does). None starts a process, opens a socket, or runs `git`.
+- The brief's preferences hold: format 7; the table ensured on every writable open; names learned from every `Read` Copilot log, including sessions with live spans, logs out of `--repo` scope, and tool calls older than 7 days (ML6, ML7); one reread (revision 2); a dry run that writes nothing (ML8, MT8); Copilot's own `toolName`; the short form; and the allowlist rows, with IP5's phrases kept.
+- Not defects:
+  - `DaemonCommands.cs` rewraps two conditions that it moved into `DecideStart`; the logic is `StartAsync`'s.
+  - Some comments are shorter than the plan's (`AuditReport.WithToolNames`, `RecordMcpToolNamesAsync`), and `ReadMcpToolNamesAsync` has none. Comments aren't contracts.
+  - Findings keep the stored names' order (D2), so findings that tie on every earlier key show in hash order, not in the order of the names shown.
+  - The table keeps the smallest name by SQLite's BINARY collation (UTF-8 bytes), and the allowlist says "ordinal order". They differ only between characters above U+FFFF and those from U+E000 to U+FFFF.
+  - Task 4's commit body recorded a serial failure of IP6, which Task 10 fixed. Task 11's serial run and this review's pass.
+
+Findings that need a fix:
+
+- **R1 (minor, docs mismatch, #91).** `docs/cli.md:76` says that `--dry-run` "exits with the code that `install` would". The dry run reports only the decision: already running (0), blocked (1), or `Would start the gh-ledger daemon.` (0) (`InstallCommands.cs:308–323`). After a Start decision, the real `install` exits with 1, saying `gh-ledger daemon did not start; see …`, when the daemon exits before it writes `daemon.json` (`DaemonCommands.cs:192–215`), as `daemon run` does with an invalid rates overlay (`DaemonHost.cs:84–88`). Line 74 of the same page says that `install` exits with 1 when the start fails. Task 5's docs text caused this. Fixed by Task 12.
+- **R2 (minor, docs, #90).** The brief asked that the troubleshooting entry "say how names are resolved and what the short form means". `docs/cli.md:576` says only that live spans name an MCP tool "by hashes", not that the digits shown are the first 8 of the SHA-256 of the server's name and of the tool's. Its fix, `gh ledger import --all` after the session ends, doesn't name a tool whose logs import doesn't read, such as sessions of a Copilot version outside 1.0.103–1.0.115, which teach nothing (ML5). Task 4's docs text caused this. Fixed by Task 12.
+
+Optional, not scheduled; the 0.7.0 release notes cover both:
+
+- The first `import --all` after upgrading also applies the documented repairs to each log that 0.6.0 imported, so it can reprice imported requests at the rates in use and give live requests the charges their logs report (A5). The 0.6.0 paragraph names only the MCP tool names, but the steps call that import a repair, and "Repairs" says what it does.
+- A `CIRCUIT_OPEN` file that 0.6.0 wrote keeps `gh-ledger breaker reset` until the next trip, `breaker reset`, or `breaker config` rewrites it.
+
+## Task 12: The Dry Run and the Short Form, Precisely
+
+Review fixes R1 and R2. Docs and one docs test; no product change. Checked on a scratch copy of `f500e7b` with this task's change, outside the repository and deleted afterward: 0 warnings, 0 errors, and 2,057 passed, 0 failed, 0 skipped; `SprintFifteenDocsTests` (5) passed with `xUnit.ParallelizeTestCollections=false`; and DF5 failed against `f500e7b`'s `docs/cli.md`.
+
+**Files:** `docs/cli.md` and `tests/CopilotLedger.Tests/Docs/SprintFifteenDocsTests.cs` only, plus checking off this task.
+
+**Docs (`docs/cli.md`; line numbers at `f500e7b`):**
+
+1. Replace line 76, the paragraph that starts ``Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` prints``, with exactly:
+
+   ```markdown
+   Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` prints the changes without making them. For the daemon, it says that it's already running, with its pid; or, in a terminal whose Windows job would stop it, `Wouldn't start the gh-ledger daemon:` with the reason and hint that `daemon start` gives, and exits with 1, as `install` would; or `Would start the gh-ledger daemon.` It starts nothing, so it can't tell whether the daemon would fail to start, for example because of an invalid rates overlay; if it does, `install` exits with 1.
+   ```
+
+2. Replace line 576, the troubleshooting bullet that starts ``- **A tool shows as `MCP tool 10be6bee/8453dc19`.**``, with exactly:
+
+   ```markdown
+   - **A tool shows as `MCP tool 10be6bee/8453dc19`.** Copilot CLI's live spans name an MCP tool by two SHA-256 hashes, of its server's name and of its own name, and reports show the first 8 digits of each until an import learns the tool's name from a session log that ran it. After the session ends, run `gh ledger import --all`. Logs that import doesn't read, such as those of Copilot versions it doesn't support, name nothing; see [MCP tool names](#mcp-tool-names).
+   ```
+
+No other line of `docs/cli.md` changes. Neither line names a version, so `VersionPlacesTests` is unaffected, and both write the product as "gh-ledger".
+
+**Test (`SprintFifteenDocsTests`), new: `DF5_TheDryRunAndTheShortFormAreDescribedPrecisely`.** Use the existing `Text` helper, `Assert.Single` with a predicate, and `StringComparison.Ordinal`, as DF1–DF4 and UD6 do:
+
+```csharp
+string[] lines = Text("docs", "cli.md").Split('\n');
+
+string dryRun = Assert.Single(
+    lines,
+    line => line.StartsWith(
+        "Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` prints",
+        StringComparison.Ordinal));
+// dryRun contains, ordinal:
+//   "`Wouldn't start the gh-ledger daemon:` with the reason and hint that `daemon start` gives, and exits with 1, as `install` would"
+//   "It starts nothing, so it can't tell whether the daemon would fail to start"
+// and doesn't contain "exits with the code that `install` would".
+
+string shortForm = McpToolNames.ShortForm(McpToolNames.Hash("computer-use", "exec_js"));
+string troubleshooting = Assert.Single(
+    lines,
+    line => line.StartsWith("- **A tool shows as `" + shortForm + "`.**", StringComparison.Ordinal));
+// troubleshooting contains, ordinal, each of:
+//   "by two SHA-256 hashes, of its server's name and of its own name"
+//   "the first 8 digits of each"
+//   "until an import learns the tool's name from a session log that ran it"
+//   "run `gh ledger import --all`"
+//   "Logs that import doesn't read"
+//   "[MCP tool names](#mcp-tool-names)"
+```
+
+Write each check as its own `Assert.Contains` or `Assert.DoesNotContain`. Don't change DF1–DF4, `Text`, or `RepositoryFile`.
+
+**Acceptance:**
+
+- DF5 passes: **1 test**, so 2,057 passed, in parallel and with `xUnit.ParallelizeTestCollections=false`.
+- Every other test passes unchanged, including DF1–DF4, `UpgradeDocsTests`, `VersionPlacesTests`, `ProductNameTests`, `GuideSamplesTests`, `SprintThirteenDocsTests`, `AuditDocsTests`, `ExportAllowlistTests`, and `ImportPrivacyTests`.
+- `Select-String -Path docs/cli.md -SimpleMatch 'exits with the code that'` finds nothing.
+- `Select-String -Path docs/cli.md -SimpleMatch 'so it can''t tell whether the daemon would fail to start'` finds exactly one line, 76.
+- `Select-String -Path docs/cli.md -SimpleMatch 'the first 8 digits of each until an import learns'` finds exactly one line, 576.
+- `git diff HEAD~1 --stat` lists only `docs/cli.md`, `tests/CopilotLedger.Tests/Docs/SprintFifteenDocsTests.cs`, and this plan file. `git diff HEAD~1 -- docs/cli.md` replaces exactly lines 76 and 576. The plan file changes only to check off this task.
+
+**Verification:**
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx
+dotnet test CopilotLedger.slnx -- xUnit.ParallelizeTestCollections=false
+```
+
+The build reports 0 warnings and 0 errors. Record `Tests: <n> passed` and the serial run's counts in the commit body. After this task, hand back to `ledger-architect` for review mode.
+
 ## Tests added this sprint
 
 | Task | File | Tests (theory rows counted) |
@@ -1072,8 +1176,9 @@ In a clean tree, at the commit after Task 10:
 | 7 | `Otlp/CircuitBreakerMonitorTests.cs` | BM13: 1 |
 | 7 | `Docs/SprintFifteenDocsTests.cs` | DF4: 1 |
 | 9 | `Docs/UpgradeDocsTests.cs` | UD6: 1 |
+| 12 | `Docs/SprintFifteenDocsTests.cs` | DF5: 1 |
 
-Total: 96, from 1,960 to 2,056.
+Total: 97, from 1,960 to 2,057 (2,056 through Task 11).
 
 Changed tests, each as strong as before:
 
@@ -1085,9 +1190,9 @@ Changed tests, each as strong as before:
 
 The guide's `breaker-status` and `mcp` samples change, and `GuideSamplesTests` checks them unchanged (Task 7).
 
-## After Task 11 (orchestrator)
+## After Task 12 (orchestrator)
 
-Hand back to `ledger-architect` for review mode. Release notes for 0.7.0 aren't committed to the repository: the architect's planning report drafts them, and the coordinator publishes them with the release. Don't push, tag, open a PR, or create a release from a builder run.
+Hand back to `ledger-architect` for review mode. Release notes for 0.7.0 aren't committed to the repository: the architect's review report drafts them, and the coordinator publishes them with the release. Don't push, tag, open a PR, or create a release from a builder run.
 
 ## Deferred to later sprints
 
@@ -1096,6 +1201,7 @@ Hand back to `ledger-architect` for review mode. Release notes for 0.7.0 aren't 
 - **S15-3.** Replacing `ExtensionHelpAction` with System.CommandLine's own usage name for the root command (`RootCommand.HelpName` on the project's `main`; not in 2.0.15) once a release that has it is adopted.
 - **S15-4.** Confirming that the GitHub Copilot app and VS Code's Agent Host hash MCP tool names as Copilot CLI does (A1).
 - **S15-5.** Per-source import revisions, so a change that concerns only Copilot logs doesn't read Codex rollouts again (D6).
-- **S15-6.** `install --dry-run` can't foresee a sign-in item registration that would fail (D7).
+- **S15-6.** `install --dry-run` can't foresee a sign-in item registration that would fail (D7), or a daemon that fails to start once it's launched, such as one with an invalid rates overlay (R1).
+- **S15-7.** Copilot's OpenTelemetry reference (retrieved 2026-11-25), under "Transport security", says that if the `otlp-http` exporter resolves to an `http://` endpoint, "including the default `http://localhost:4318`", export is disabled rather than sent in cleartext, with only a warning in Copilot's process log. The section's variables (`OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_KEY`, and their per-signal variants) "apply only to the otlp-http exporter with an https:// endpoint". **Assumption, not verified:** the warning applies only when one of them is set, because the 0.6.0 live test received spans from Copilot CLI 1.0.115 at `http://localhost:4318` without them. If a live check confirms it, `install` and `status` should warn about these variables, as they warn about `OTEL_EXPORTER_OTLP_ENDPOINT` and a `grpc` protocol (`CopilotOtelEnvironment`). If export to `http://` is disabled even without them, gh-ledger's receiver can't get live spans from that Copilot version, and that needs its own plan.
 - **Carried from Sprint 14** (see `.github/plans/archive/sprint-14.md`): S14-1 to S14-5, unchanged; and from Sprint 12, S12-1 to S12-8 and S12-10 to S12-12, unchanged (S12-9 was done by Sprint 14).
 - Everything Sprint 11 deferred, unchanged (see `.github/plans/archive/sprint-11.md`, "Deferred to later sprints"), except Sprint 5's "`gh ledger` in every message", which Tasks 6 and 7 finish for help and command hints. Product and executable names stay `gh-ledger`, and S15-2 tracks the shared artifacts.
