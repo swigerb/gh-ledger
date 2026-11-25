@@ -14,7 +14,7 @@ internal static class StartupItem
                 @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run\CopilotLedger",
                 command,
                 command.Length > 260
-                    ? "Warning: the gh-ledger path is too long for a sign-in command, so gh-ledger won't start when you sign in. Run gh-ledger daemon start after you sign in."
+                    ? $"Warning: the gh-ledger path is too long for a sign-in command, so gh-ledger won't start when you sign in. Run {GhExtension.CommandName(context.Platform)} daemon start after you sign in."
                     : null);
         }
 
@@ -80,7 +80,7 @@ internal static class StartupItem
             desktop,
             desktopContent,
             invalid
-                ? "Warning: the gh-ledger path has characters that a desktop autostart entry can't run, so gh-ledger won't start when you sign in. Run gh-ledger daemon start after you sign in."
+                ? $"Warning: the gh-ledger path has characters that a desktop autostart entry can't run, so gh-ledger won't start when you sign in. Run {GhExtension.CommandName(context.Platform)} daemon start after you sign in."
                 : null);
     }
 }

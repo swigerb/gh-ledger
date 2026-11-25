@@ -3,6 +3,7 @@ using System.CommandLine.Parsing;
 using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using CopilotLedger.Cli.Install;
 using CopilotLedger.Cli.Reporting;
 using CopilotLedger.Core.Breaker;
 using CopilotLedger.Core.Git;
@@ -279,7 +280,8 @@ internal static class BreakerCommands
                     $"  rule {BreakerRuleNames.ToName(trip.Rule)}, trace {trip.TraceId}, session {trip.ConversationId ?? "(none)"}");
             }
 
-            context.Out.WriteLine("Reset a trip with: gh-ledger breaker reset --id <id>");
+            context.Out.WriteLine(
+                $"Reset a trip with: {GhExtension.CommandName(context.Platform)} breaker reset --id <id>");
         }
 
         return 0;
@@ -565,7 +567,11 @@ internal static class BreakerCommands
         {
             try
             {
-                await CircuitFlagFile.SyncAsync(store, root, cancellationToken);
+                await CircuitFlagFile.SyncAsync(
+                    store,
+                    root,
+                    GhExtension.CommandName(context.Platform),
+                    cancellationToken);
             }
             catch (Exception ex) when (
                 ex is IOException or UnauthorizedAccessException)

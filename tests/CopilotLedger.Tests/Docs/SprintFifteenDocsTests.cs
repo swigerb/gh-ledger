@@ -46,6 +46,25 @@ public sealed class SprintFifteenDocsTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DF4_TheGuideShowsTheExtensionsCommandInHints()
+    {
+        string guide = Text("docs", "guide.md");
+
+        Assert.Contains(
+            "Reset a trip with: gh ledger breaker reset --id <id>",
+            guide,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Where a message or `--help` says",
+            guide,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "gh-ledger breaker reset",
+            guide,
+            StringComparison.Ordinal);
+    }
+
     private static string Text(params string[] parts) =>
         File.ReadAllText(RepositoryFile(parts)).ReplaceLineEndings("\n");
 

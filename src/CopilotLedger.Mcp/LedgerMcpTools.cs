@@ -952,10 +952,10 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 ["currentSession"] = currentSession,
                 ["trippedAt"] = FormatTime(trip.TrippedAt),
                 ["detail"] = trip.Detail,
-                ["resetCommand"] = $"gh-ledger breaker reset --id {trip.Id}",
+                ["resetCommand"] = $"{_context.Command} breaker reset --id {trip.Id}",
             });
             warningText.Add(
-                $"WARNING: gh-ledger circuit breaker is open for {trip.Repository} @ {trip.Branch}: {trip.Detail} on one prompt (trip {trip.Id}). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id {trip.Id}");
+                $"WARNING: gh-ledger circuit breaker is open for {trip.Repository} @ {trip.Branch}: {trip.Detail} on one prompt (trip {trip.Id}). Stop and ask the user before continuing. The user can reset it with: {_context.Command} breaker reset --id {trip.Id}");
         }
 
         JsonObject? budgetObject = null;

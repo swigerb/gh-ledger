@@ -2,7 +2,7 @@
 
 This guide walks through everyday gh-ledger tasks. To install gh-ledger and try each command, see the [quickstart](quickstart.md). For every option, see the [command reference](cli.md).
 
-The samples come from one example: the GitHub CLI extension on Windows, in the `contoso/webapp` repository on the `feature/search` branch, at 16:30 on 2026-11-21 (UTC-5), with a month of spend, a Foundry BYOK rates overlay, a budget, and an open circuit-breaker trip. A test checks that each output is exactly what gh-ledger prints. Where a message or `--help` says `gh-ledger <command>`, run `gh ledger <command>`.
+The samples come from one example: the GitHub CLI extension on Windows, in the `contoso/webapp` repository on the `feature/search` branch, at 16:30 on 2026-11-21 (UTC-5), with a month of spend, a Foundry BYOK rates overlay, a budget, and an open circuit-breaker trip. A test checks that each output is exactly what gh-ledger prints.
 
 - [Set up gh-ledger](#set-up-gh-ledger)
 - [Backfill history after installing](#backfill-history-after-installing)
@@ -449,7 +449,7 @@ Flag file: off. Notifications: on.
 
 Trip 1 at 2026-11-21 11:21: contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt
   rule credit_velocity, trace 0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2, session 7d4e1c2a-5b3f-4e8d-9a6c-0000000000b2
-Reset a trip with: gh-ledger breaker reset --id <id>
+Reset a trip with: gh ledger breaker reset --id <id>
 ```
 <!-- /sample -->
 
@@ -755,7 +755,7 @@ Then ask Copilot, for example, "How much has this branch cost so far?" Copilot c
 
 <!-- sample: mcp -->
 ```text
-WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1
+WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh ledger breaker reset --id 1
 {
   "repository": "contoso/webapp",
   "branch": "feature/search",
@@ -795,12 +795,12 @@ WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 
         "currentSession": false,
         "trippedAt": "2026-11-21T16:21:32.0000000+00:00",
         "detail": "252.00 AI credits in 5 minutes",
-        "resetCommand": "gh-ledger breaker reset --id 1"
+        "resetCommand": "gh ledger breaker reset --id 1"
       }
     ]
   },
   "warnings": [
-    "WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1"
+    "WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh ledger breaker reset --id 1"
   ]
 }
 ```
