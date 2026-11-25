@@ -204,6 +204,10 @@ Importing again records nothing twice and finishes a stopped import. `import` re
 
 When an import reads a log that an earlier gh-ledger imported, it repairs what was recorded from it: it reprices imported requests with the rates in use (`Repriced`), gives live requests that the daemon priced at the rate card the valid charge their log reports (`Live repriced`), and moves tool calls attached to the wrong request (`Tool links relinked`; tool calls older than 7 days aren't kept). Each request keeps its list price beside its charge. A dry run reports the same counts and changes nothing.
 
+### MCP tool names
+
+Copilot CLI's live spans name a tool from an MCP server by two lowercase hexadecimal SHA-256 hashes, of the server's name and of the tool's name, joined by `/`. Its session log names the tool in clear, so each import learns the name from the logs it reads: `data.toolName` of `tool.execution_start`, such as `computer-use-exec_js`, the name that imported tool calls show. Export, audit, and the MCP server show it for live calls too. A tool that no log has named yet shows as `MCP tool` and the first 8 digits of each hash, such as `MCP tool 10be6bee/8453dc19`. The ledger keeps the hashes, and the audit's tool rules group calls by them.
+
 ### The import report
 
 For each source, the report counts the logs and requests that import read, recorded, skipped, deferred, rejected, and repaired. Warnings on standard error name the session or rollout and the line and byte of each problem, never the log's content.
@@ -343,7 +347,7 @@ gh ledger export [--format html] [--out <path>] [--bundle] [--repo <key> | --all
 | `--generated-at` | Now | The UTC generation time to record, such as `2026-11-21T21:30:00Z`, to reproduce an export. |
 | `--force` | | Replace existing files that aren't read-only. |
 
-The report shows summary cards, coverage notes, a zoomable timeline of each session's requests and tool calls, cost by model and agent, cache efficiency, prompt chains, spend tables, breaker trips and budgets, and up to 100 audit findings. It loads nothing and works without JavaScript. Standard output names the files, request count, scope, and period, never a folder. With an invalid rates overlay, export warns and leaves `premium_model_trivial_turn` and repriced estimates out of the findings.
+The report shows summary cards, coverage notes, a zoomable timeline of each session's requests and tool calls, cost by model and agent, cache efficiency, prompt chains, spend tables, breaker trips and budgets, and up to 100 audit findings. It loads nothing and works without JavaScript. Tool calls and findings name MCP tools as [MCP tool names](#mcp-tool-names) describes. Standard output names the files, request count, scope, and period, never a folder. With an invalid rates overlay, export warns and leaves `premium_model_trivial_turn` and repriced estimates out of the findings.
 
 ### The bundle
 
@@ -460,6 +464,7 @@ The output counts the findings by severity and rule, lists them, most severe fir
 - Impacts are billed USD at the rates in use. A local request's impact is $0, and one that includes a request without a billed price is unknown (`-`, or `null` in JSON). Findings can overlap, so don't add impacts together.
 - `turn_velocity`, `tool_loop`, `failed_tool_retry`, `context_growth`, and `cache_miss_streak` follow one agent invocation at a time, so they skip Codex requests and imported requests of named sub-agents, which have none that the ledger can tell apart.
 - Tool calls are kept for 7 days, so the tool rules can't see older ones, and `premium_model_trivial_turn` skips requests whose tool count is unknown.
+- The tool rules group calls by the tool name that the ledger keeps, and findings name MCP tools as [MCP tool names](#mcp-tool-names) describes.
 - `premium_model_trivial_turn` skips requests charged at least 5% below list price, because Auto or Copilot Fusion picked their model.
 - A request without cache counters is never a cache miss; it ends a streak.
 
@@ -566,5 +571,5 @@ gh-ledger never stores prompt or response content, working directories, or remot
 - **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example on a full disk, and Copilot is told to retry. Fix the cause it names.
 - **`Database user_version <n> is newer than the supported version <m>.`** A newer gh-ledger upgraded the ledger. Upgrade gh-ledger, or restore your copy; see [Install and uninstall](#install-and-uninstall).
 - **`import` exits with code 2.** The warnings say what wasn't imported. Leave out sessions from before Copilot CLI 1.0.103 with `--since`. Open sessions are skipped, without affecting coverage, unless you pass `--include-active`.
-- **Tool names are 129-character hashes.** Copilot CLI's live spans name an MCP tool `sha256(server)/sha256(tool)` in lowercase hexadecimal, so the export timeline and audit findings show that name. Imported tool calls keep the readable name from the session log.
+- **A tool shows as `MCP tool 10be6bee/8453dc19`.** Copilot CLI's live spans name an MCP tool by hashes, and no session log that import has read has named that tool yet. After its session ends, run `gh ledger import --all`; see [MCP tool names](#mcp-tool-names).
 - **A console window flashes at sign-in.** Windows 11 24H2 and later start gh-ledger without one.

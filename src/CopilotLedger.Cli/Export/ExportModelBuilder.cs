@@ -14,6 +14,8 @@ internal static class ExportModelBuilder
         CancellationToken cancellationToken)
     {
         LedgerFilter filter = inputs.Filter;
+        IReadOnlyDictionary<string, string> toolNames =
+            await snapshot.GetMcpToolNamesAsync(cancellationToken);
         HashSet<string> roots = new(
             await snapshot.GetRepositoryRootsAsync(filter, cancellationToken),
             StringComparer.Ordinal);
@@ -49,6 +51,7 @@ internal static class ExportModelBuilder
         };
         ExportCoverageRow coverage = await snapshot.GetCoverageAsync(filter, toolHistoryFrom, cancellationToken);
         AuditReport audit = await AuditAsync(snapshot, inputs, shown, cancellationToken);
+        audit = audit.WithToolNames(toolNames);
         audit = audit with
         {
             Findings =
@@ -72,7 +75,7 @@ internal static class ExportModelBuilder
         [
             .. (await snapshot.GetLatestToolCallsAsync(filter, inputs.MaxTimelineSpans, cancellationToken))
                 .Reverse()
-                .Select(ExportRecords.ToolCall),
+                .Select(row => ExportRecords.ToolCall(row, toolNames)),
         ];
         IReadOnlyList<PromptChainRow> promptChains =
             await snapshot.GetTopPromptChainsAsync(filter, ExportLimits.PromptChains, cancellationToken);
@@ -158,6 +161,7 @@ internal static class ExportModelBuilder
                 [.. byModel.Select(row => row.Model ?? "(none)")],
                 inputs.TimeZone),
             ChainTurns = await ChainTurnsAsync(snapshot, filter, promptChains, cancellationToken),
+            ToolNames = toolNames,
         };
 
         string Shown(string key) => ExportRecords.Repository(key, roots, inputs.IncludeLocalPaths);

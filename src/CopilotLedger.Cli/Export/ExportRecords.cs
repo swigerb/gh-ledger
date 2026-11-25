@@ -3,6 +3,7 @@ using CopilotLedger.Cli.Audit;
 using CopilotLedger.Cli.Reporting;
 using CopilotLedger.Core.Audit;
 using CopilotLedger.Core.Pricing;
+using CopilotLedger.Core.Telemetry;
 using CopilotLedger.Storage;
 
 namespace CopilotLedger.Cli.Export;
@@ -140,7 +141,9 @@ internal static class ExportRecords
         IngestSource = row.IngestSource,
     };
 
-    public static ExportToolCallRecord ToolCall(ExportToolCallRow row)
+    public static ExportToolCallRecord ToolCall(
+        ExportToolCallRow row,
+        IReadOnlyDictionary<string, string> toolNames)
     {
         string status = row.StatusCode switch
         {
@@ -154,7 +157,7 @@ internal static class ExportRecords
             SpanId = row.SpanId,
             ConversationId = row.ConversationId,
             Agent = row.AgentName,
-            ToolName = row.ToolName,
+            ToolName = McpToolNames.Display(row.ToolName, toolNames),
             StartTime = row.StartTime,
             ExitCode = row.ToolExitCode,
             Status = status,

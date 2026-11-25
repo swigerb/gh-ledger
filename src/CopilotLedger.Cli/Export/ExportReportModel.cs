@@ -23,6 +23,7 @@ internal sealed record ExportReportModel
     public required IReadOnlyList<BranchBudgetRow> Budgets { get; init; }               // shown keys
     public required ExportTimeline Timeline { get; init; }
     public required IReadOnlyList<ExportChainTurns> ChainTurns { get; init; }           // the first GrowthChains chains with 2+ requests
+    public required IReadOnlyDictionary<string, string> ToolNames { get; init; }         // learned MCP tool names by hashed name
 }
 
 internal sealed record ExportHeader

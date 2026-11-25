@@ -819,6 +819,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
         DateTimeOffset generatedAt =
             DateTimeOffset.FromUnixTimeMilliseconds(_context.TimeProvider.GetUtcNow().ToUnixTimeMilliseconds());
         AuditInput input;
+        IReadOnlyDictionary<string, string> toolNames;
         await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
         {
             input = await snapshot.GetAuditInputAsync(
@@ -832,6 +833,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 },
                 generatedAt,
                 cancellationToken);
+            toolNames = await snapshot.GetMcpToolNamesAsync(cancellationToken);
         }
 
         AuditReport report = AuditAnalyzer.Report(
@@ -854,7 +856,7 @@ internal sealed class LedgerMcpTools(LedgerMcpContext context)
                 ToUtc = generatedAt,
             },
             values.MinSeverity,
-            values.Limit);
+            values.Limit).WithToolNames(toolNames);
         WarningResult warnings = await WarningsAsync(
             store,
             current is null ? null : current.RepositorySlug ?? current.RepositoryRoot,

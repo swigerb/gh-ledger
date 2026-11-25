@@ -1,4 +1,5 @@
 using CopilotLedger.Core.Breaker;
+using CopilotLedger.Core.Telemetry;
 
 namespace CopilotLedger.Core.Audit;
 
@@ -50,4 +51,25 @@ public sealed record AuditReport
     // The findings shown: those at MinSeverity or above, the first Limit of them.
     public IReadOnlyList<AuditFinding> Shown =>
         [.. Findings.Where(finding => finding.Severity >= MinSeverity).Take(Limit ?? int.MaxValue)];
+
+    // Resolve learned MCP tool names for display only, preserving the findings' stored-name order and selection.
+    public AuditReport WithToolNames(IReadOnlyDictionary<string, string> learned)
+    {
+        ArgumentNullException.ThrowIfNull(learned);
+        return this with
+        {
+            Findings =
+            [
+                .. Findings.Select(finding => finding.Scope.Tool is null
+                    ? finding
+                    : finding with
+                    {
+                        Scope = finding.Scope with
+                        {
+                            Tool = McpToolNames.Display(finding.Scope.Tool, learned),
+                        },
+                    }),
+            ],
+        };
+    }
 }
