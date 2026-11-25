@@ -113,6 +113,8 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         ("agentId", 2048),
         ("data.toolCallId", 2048),
         ("data.toolName", 256),
+        ("data.mcpServerName", 256),
+        ("data.mcpToolName", 256),
         ("data.parentToolCallId", 2048));
 
     private static readonly PathTree ToolCompletePaths = new(
@@ -231,6 +233,7 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
         private readonly ImportDiagnosticBag _diagnostics = new(ImportSourceKind.Copilot, location.LogId);
         private readonly List<ImportedUsageRecord> _records = [];
         private readonly List<ImportedToolCall> _toolCalls = [];
+        private readonly HashSet<LearnedToolName> _learned = [];
         private readonly List<PendingTool> _completedTools = [];
         private (SessionLogStatus Status, ImportEventKind Kind, string? Version, long Line, long Offset)? _stop;
         private bool _started;
@@ -382,6 +385,9 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
                 ProducerVersion = _version,
                 Records = _records,
                 ToolCalls = _toolCalls,
+                LearnedToolNames = [.. _learned
+                    .OrderBy(name => name.HashedName, StringComparer.Ordinal)
+                    .ThenBy(name => name.ToolName, StringComparer.Ordinal)],
                 Diagnostics = _diagnostics.ToList(),
                 RecordsParsed = _parsed,
                 UnsupportedUsageShapes = _unsupported,
@@ -698,6 +704,14 @@ public sealed class CopilotSessionLogSource : ISessionLogSource
             Chain(fields, ImportEventKind.ToolExecutionStart);
             string? toolCallId = fields.String("data.toolCallId");
             string? toolName = fields.String("data.toolName");
+            if (fields.Duplicate is null &&
+                toolName is not null &&
+                fields.String("data.mcpServerName") is string server &&
+                fields.String("data.mcpToolName") is string tool)
+            {
+                _learned.Add(new LearnedToolName(McpToolNames.Hash(server, tool), toolName));
+            }
+
             if (fields.Duplicate is not null || toolCallId is null || toolName is null || Time(fields) is not DateTimeOffset start)
             {
                 return;

@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text;
+using CopilotLedger.Cli.Install;
 using CopilotLedger.Cli.Reporting;
 using CopilotLedger.Core.Pricing;
 using CopilotLedger.Storage;
@@ -103,7 +104,7 @@ internal static class RatesCommands
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             cancellationToken);
         context.Out.WriteLine(
-            $"Created {path}. Add your prices, then run: gh-ledger rates validate");
+            $"Created {path}. Add your prices, then run: {GhExtension.CommandName(context.Platform)} rates validate");
         return 0;
     }
 

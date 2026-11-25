@@ -168,40 +168,14 @@ public sealed partial class SqliteLedgerStore
             userVersion = version;
         }
 
+        foreach ((string name, string sql) in LedgerMigrations.Tables)
+        {
+            await EnsureSchemaObjectAsync(connection, "table", name, sql, cancellationToken);
+        }
+
         foreach ((string name, string sql) in LedgerMigrations.Indexes)
         {
-            await using (SqliteCommand indexQuery = connection.CreateCommand())
-            {
-                indexQuery.CommandText =
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = @name;";
-                indexQuery.Parameters.AddWithValue("@name", name);
-                if (Convert.ToInt32(
-                        await indexQuery.ExecuteScalarAsync(cancellationToken),
-                        System.Globalization.CultureInfo.InvariantCulture) == 1)
-                {
-                    continue;
-                }
-            }
-
-            await using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
-            await using (SqliteCommand indexQuery = connection.CreateCommand())
-            {
-                indexQuery.Transaction = transaction;
-                indexQuery.CommandText =
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = @name;";
-                indexQuery.Parameters.AddWithValue("@name", name);
-                if (Convert.ToInt32(
-                        await indexQuery.ExecuteScalarAsync(cancellationToken),
-                        System.Globalization.CultureInfo.InvariantCulture) == 0)
-                {
-                    await using SqliteCommand indexCommand = connection.CreateCommand();
-                    indexCommand.Transaction = transaction;
-                    indexCommand.CommandText = sql;
-                    await indexCommand.ExecuteNonQueryAsync(cancellationToken);
-                }
-            }
-
-            await transaction.CommitAsync(cancellationToken);
+            await EnsureSchemaObjectAsync(connection, "index", name, sql, cancellationToken);
         }
 
         _initialized = true;
@@ -1741,6 +1715,50 @@ public sealed partial class SqliteLedgerStore
             await connection.DisposeAsync();
             throw;
         }
+    }
+
+    // Adds a table or index of the latest format that the ledger lacks, without changing user_version.
+    private static async Task EnsureSchemaObjectAsync(
+        SqliteConnection connection,
+        string type,
+        string name,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using (SqliteCommand objectQuery = connection.CreateCommand())
+        {
+            objectQuery.CommandText =
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = @type AND name = @name;";
+            objectQuery.Parameters.AddWithValue("@type", type);
+            objectQuery.Parameters.AddWithValue("@name", name);
+            if (Convert.ToInt32(
+                    await objectQuery.ExecuteScalarAsync(cancellationToken),
+                    System.Globalization.CultureInfo.InvariantCulture) == 1)
+            {
+                return;
+            }
+        }
+
+        await using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+        await using (SqliteCommand objectQuery = connection.CreateCommand())
+        {
+            objectQuery.Transaction = transaction;
+            objectQuery.CommandText =
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = @type AND name = @name;";
+            objectQuery.Parameters.AddWithValue("@type", type);
+            objectQuery.Parameters.AddWithValue("@name", name);
+            if (Convert.ToInt32(
+                    await objectQuery.ExecuteScalarAsync(cancellationToken),
+                    System.Globalization.CultureInfo.InvariantCulture) == 0)
+            {
+                await using SqliteCommand objectCommand = connection.CreateCommand();
+                objectCommand.Transaction = transaction;
+                objectCommand.CommandText = sql;
+                await objectCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static async Task<int> GetUserVersionAsync(

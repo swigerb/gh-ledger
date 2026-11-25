@@ -196,6 +196,7 @@ internal static class InstallCommands
         }
 
         string? startupItem = previous?.StartupItem;
+        bool signInItemPlanned = false;
         if (!string.IsNullOrWhiteSpace(
                 context.Platform.GetEnvironmentVariable("COPILOT_LEDGER_HOME")))
         {
@@ -238,6 +239,7 @@ internal static class InstallCommands
                 else if (dryRun)
                 {
                     context.Out.WriteLine("Would start gh-ledger when you sign in.");
+                    signInItemPlanned = context.Platform.IsWindows;
                 }
                 else
                 {
@@ -305,8 +307,20 @@ internal static class InstallCommands
         int exitCode;
         if (dryRun)
         {
-            context.Out.WriteLine("Would start the gh-ledger daemon.");
-            exitCode = 0;
+            DaemonStartDecision decision =
+                DaemonCommands.DecideStart(context, signInItemPlanned);
+            if (decision.Outcome == DaemonStartOutcome.Start)
+            {
+                context.Out.WriteLine("Would start the gh-ledger daemon.");
+                exitCode = 0;
+            }
+            else
+            {
+                exitCode = DaemonCommands.WriteStartDecision(
+                    context,
+                    decision,
+                    dryRun: true);
+            }
         }
         else
         {

@@ -241,6 +241,7 @@ internal static class AuditCommands
         SqliteLedgerStore store = new(context.DatabasePath, context.TimeProvider);
         await store.InitializeAsync(cancellationToken);
         AuditInput input;
+        IReadOnlyDictionary<string, string> toolNames;
         await using (LedgerExportSnapshot snapshot = await store.OpenExportSnapshotAsync(cancellationToken))
         {
             input = await snapshot.GetAuditInputAsync(
@@ -254,6 +255,7 @@ internal static class AuditCommands
                 },
                 generatedAt,
                 cancellationToken);
+            toolNames = await snapshot.GetMcpToolNamesAsync(cancellationToken);
         }
 
         AuditReport report = AuditAnalyzer.Report(
@@ -276,7 +278,7 @@ internal static class AuditCommands
                 ToUtc = generatedAt,
             },
             request.MinSeverity,
-            request.Limit);
+            request.Limit).WithToolNames(toolNames);
         byte[]? body = request.LocalLlm is null ? null : AuditLlmPayload.Body(report, request.LocalLlmModel!);
         if (request.ShowLlmPayload)
         {

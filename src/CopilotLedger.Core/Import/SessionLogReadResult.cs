@@ -7,6 +7,7 @@ public sealed record SessionLogReadResult
     public string? ProducerVersion { get; init; }                           // valid (ProducerVersion.TryParse), or null
     public required IReadOnlyList<ImportedUsageRecord> Records { get; init; }
     public required IReadOnlyList<ImportedToolCall> ToolCalls { get; init; }
+    public IReadOnlyList<LearnedToolName> LearnedToolNames { get; init; } = [];   // a Read Copilot log's MCP tools: distinct, ordinal by HashedName, then ToolName
     public required IReadOnlyList<ImportDiagnostic> Diagnostics { get; init; }
     public required long RecordsParsed { get; init; }             // usage lines of a Read log, valid or not
     public required long UnsupportedUsageShapes { get; init; }

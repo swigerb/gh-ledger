@@ -366,7 +366,9 @@ public sealed class CopilotSessionLogs
         string toolName,
         string? agentId = null,
         string? parentToolCallId = null,
-        string? parentId = null)
+        string? parentId = null,
+        string? mcpServerName = null,
+        string? mcpToolName = null)
     {
         JsonObject data = new()
         {
@@ -378,6 +380,16 @@ public sealed class CopilotSessionLogs
         if (parentToolCallId is not null)
         {
             data["parentToolCallId"] = parentToolCallId;
+        }
+
+        if (mcpServerName is not null)
+        {
+            data["mcpServerName"] = mcpServerName;
+        }
+
+        if (mcpToolName is not null)
+        {
+            data["mcpToolName"] = mcpToolName;
         }
 
         return Event("tool.execution_start", data, agentId, parentId: parentId);

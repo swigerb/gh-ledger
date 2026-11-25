@@ -21,8 +21,8 @@ Releases are GitHub Releases of this repository: `gh extension install swigerb/g
 4. Tag the merged commit and push the tag:
 
    ```shell
-   git tag v0.6.0
-   git push origin v0.6.0
+   git tag v0.7.0
+   git push origin v0.7.0
    ```
 
 For a pushed `v*` tag, the Release workflow checks that the tag is `v` plus the project version, builds and smoke-tests the binaries, checks `ratesVersion` against the latest release's rates, attests the six binaries, `rates.json`, and `rates.v2.json` with `actions/attest-build-provenance`, and creates the release with these assets:

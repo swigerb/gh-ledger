@@ -20,6 +20,11 @@ public sealed class LedgerExportSnapshot : IAsyncDisposable
         _transaction = transaction;
     }
 
+    // The MCP tool names that import learned, by hashed name, for McpToolNames.Display.
+    public Task<IReadOnlyDictionary<string, string>> GetMcpToolNamesAsync(
+        CancellationToken cancellationToken = default) =>
+        SqliteLedgerStore.ReadMcpToolNamesAsync(_transaction, cancellationToken);
+
     // As SqliteLedgerStore.GetRollupAsync with the recorded API-equivalent results.
     public Task<IReadOnlyList<LedgerRollupRow>> GetRollupAsync(
         LedgerGrouping grouping,

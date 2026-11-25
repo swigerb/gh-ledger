@@ -6,6 +6,24 @@ using CopilotLedger.Cli.Install;
 
 namespace CopilotLedger.Cli.Daemon;
 
+// What daemon start decides before it starts anything.
+internal enum DaemonStartOutcome
+{
+    AlreadyRunning,   // the daemon holds its lock
+    NotExecutable,    // this process isn't the gh-ledger executable
+    Blocked,          // the terminal's Windows job would stop the daemon, or can't be read
+    Start,
+}
+
+internal sealed record DaemonStartDecision
+{
+    public required DaemonStartOutcome Outcome { get; init; }
+    public int? ProcessId { get; init; }      // AlreadyRunning: daemon.json's processId; null when it can't be read
+    public string? Executable { get; init; }  // NotExecutable: the process's path; null when unknown
+    public string? JobError { get; init; }    // Blocked: why the job can't be read; null when the job blocks
+    public bool SignInItem { get; init; }     // Blocked: a sign-in item exists, or signInItemPlanned
+}
+
 internal static class DaemonCommands
 {
     public static Command Create(CliContext context)
@@ -57,50 +75,111 @@ internal static class DaemonCommands
         return command;
     }
 
-    internal static async Task<int> StartAsync(
+    // Decides daemon start without side effects: DaemonFiles.IsHeld opens and closes the lock file only when it exists, and
+    // daemon.json, the process path, the job, and the sign-in item are only read. signInItemPlanned: install's dry run would
+    // have registered the Windows sign-in item before starting the daemon.
+    internal static DaemonStartDecision DecideStart(
         CliContext context,
-        int port,
-        CancellationToken cancellationToken)
+        bool signInItemPlanned = false)
     {
         if (DaemonFiles.IsHeld(context))
         {
-            DaemonState? state = DaemonFiles.TryReadState(context);
-            context.Out.WriteLine(state is null
-                ? "gh-ledger daemon is already running."
-                : $"gh-ledger daemon is already running (pid {state.ProcessId}).");
-            return 0;
+            return new DaemonStartDecision
+            {
+                Outcome = DaemonStartOutcome.AlreadyRunning,
+                ProcessId = DaemonFiles.TryReadState(context)?.ProcessId,
+            };
         }
 
         string? executable = context.Platform.ProcessPath;
-        string executableName = GetExecutableName(executable);
-        if (!executableName.Equals("gh-ledger", StringComparison.OrdinalIgnoreCase))
+        if (!GetExecutableName(executable).Equals(
+                "gh-ledger",
+                StringComparison.OrdinalIgnoreCase))
         {
-            context.Error.WriteLine(
-                $"Run this command from the gh-ledger executable (current process: {executable ?? "unknown"}).");
-            return 1;
+            return new DaemonStartDecision
+            {
+                Outcome = DaemonStartOutcome.NotExecutable,
+                Executable = executable,
+            };
         }
 
         JobState job;
         string? jobError = null;
         try { job = context.Platform.GetJobState(); }
         catch (Win32Exception ex) { job = default; jobError = ex.Message; }
-        if (jobError is not null || DetachedLaunchPolicy.Decide(job) == DetachedLaunch.Blocked)
+        if (jobError is not null ||
+            DetachedLaunchPolicy.Decide(job) == DetachedLaunch.Blocked)
         {
-            context.Error.WriteLine(jobError is null
-                ? "gh-ledger daemon not started: this terminal runs in a Windows job that stops the processes it started when it closes, so the daemon would stop with it."
-                : $"gh-ledger daemon not started: can't read this terminal's Windows job, so the daemon might stop when the terminal closes ({jobError}).");
-            string command = GhExtension.CommandName(context.Platform);
+            return new DaemonStartDecision
+            {
+                Outcome = DaemonStartOutcome.Blocked,
+                JobError = jobError,
+                SignInItem = signInItemPlanned ||
+                    context.Platform.GetStartupCommand("CopilotLedger") is not null,
+            };
+        }
+
+        return new DaemonStartDecision { Outcome = DaemonStartOutcome.Start };
+    }
+
+    // Writes what daemon start says for a decision other than Start, and returns its exit code: AlreadyRunning to standard
+    // output, 0; NotExecutable and Blocked to standard error, 1. With dryRun, Blocked's first line starts "Wouldn't start the
+    // gh-ledger daemon: " instead of "gh-ledger daemon not started: ". Throws ArgumentException for Start.
+    internal static int WriteStartDecision(
+        CliContext context,
+        DaemonStartDecision decision,
+        bool dryRun)
+    {
+        if (decision.Outcome == DaemonStartOutcome.AlreadyRunning)
+        {
+            context.Out.WriteLine(decision.ProcessId is int processId
+                ? $"gh-ledger daemon is already running (pid {processId})."
+                : "gh-ledger daemon is already running.");
+            return 0;
+        }
+
+        if (decision.Outcome == DaemonStartOutcome.NotExecutable)
+        {
             context.Error.WriteLine(
-                context.Platform.GetStartupCommand("CopilotLedger") is not null
-                    ? $"Run {command} daemon start from a regular terminal, or sign out and back in to start it from the sign-in item."
-                    : $"Run {command} daemon start from a regular terminal.");
+                $"Run this command from the gh-ledger executable (current process: {decision.Executable ?? "unknown"}).");
             return 1;
         }
 
+        if (decision.Outcome == DaemonStartOutcome.Blocked)
+        {
+            string reason = decision.JobError is null
+                ? "this terminal runs in a Windows job that stops the processes it started when it closes, so the daemon would stop with it."
+                : $"can't read this terminal's Windows job, so the daemon might stop when the terminal closes ({decision.JobError}).";
+            context.Error.WriteLine(
+                (dryRun
+                    ? "Wouldn't start the gh-ledger daemon: "
+                    : "gh-ledger daemon not started: ") + reason);
+            string command = GhExtension.CommandName(context.Platform);
+            context.Error.WriteLine(decision.SignInItem
+                ? $"Run {command} daemon start from a regular terminal, or sign out and back in to start it from the sign-in item."
+                : $"Run {command} daemon start from a regular terminal.");
+            return 1;
+        }
+
+        throw new ArgumentException("Start has nothing to report.", nameof(decision));
+    }
+
+    internal static async Task<int> StartAsync(
+        CliContext context,
+        int port,
+        CancellationToken cancellationToken)
+    {
+        DaemonStartDecision decision = DecideStart(context);
+        if (decision.Outcome != DaemonStartOutcome.Start)
+        {
+            return WriteStartDecision(context, decision, dryRun: false);
+        }
+
+        string executable = context.Platform.ProcessPath!;
         Directory.CreateDirectory(context.DataDirectory);
         DaemonFiles.DeleteIfExists(DaemonFiles.StatePath(context));
         int processId = context.Platform.StartDetached(
-            executable!,
+            executable,
             [
                 "daemon",
                 "run",

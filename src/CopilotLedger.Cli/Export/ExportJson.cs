@@ -340,6 +340,7 @@ internal static class ExportJson
         Stream stream,
         LedgerExportSnapshot snapshot,
         ExportInputs inputs,
+        IReadOnlyDictionary<string, string> toolNames,
         CancellationToken cancellationToken)
     {
         await using (Utf8JsonWriter writer = new(stream, FileOptions))
@@ -354,7 +355,7 @@ internal static class ExportJson
                 page = await snapshot.GetToolCallsAsync(inputs.Filter, after, ExportLimits.PageSize, cancellationToken);
                 foreach (ExportToolCallRow row in page)
                 {
-                    WriteToolCall(writer, ExportRecords.ToolCall(row));
+                    WriteToolCall(writer, ExportRecords.ToolCall(row, toolNames));
                 }
 
                 await writer.FlushAsync(cancellationToken);

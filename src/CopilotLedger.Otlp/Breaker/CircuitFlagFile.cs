@@ -17,7 +17,10 @@ public static class CircuitFlagFile
     public static string GetPath(string repositoryRoot) =>                     // Path.Combine(repositoryRoot, DirectoryName, FileName)
         Path.Combine(repositoryRoot, DirectoryName, FileName);
 
-    public static string Render(string repositoryRoot, IReadOnlyList<BreakerTrip> openTrips)   // the file's text; openTrips is non-empty
+    public static string Render(
+        string repositoryRoot,
+        IReadOnlyList<BreakerTrip> openTrips,
+        string command = BreakerMessages.DefaultCommand)   // the file's text; openTrips is non-empty
     {
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(
@@ -56,7 +59,7 @@ public static class CircuitFlagFile
                 writer.WriteString("detail", trip.Detail);
                 writer.WriteString(
                     "resetCommand",
-                    $"gh-ledger breaker reset --id {trip.Id.ToString(CultureInfo.InvariantCulture)}");
+                    $"{command} breaker reset --id {trip.Id.ToString(CultureInfo.InvariantCulture)}");
                 writer.WriteEndObject();
             }
 
@@ -73,6 +76,7 @@ public static class CircuitFlagFile
     public static async Task SyncAsync(
         SqliteLedgerStore store,
         string repositoryRoot,
+        string command = BreakerMessages.DefaultCommand,
         CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(repositoryRoot))
@@ -90,7 +94,7 @@ public static class CircuitFlagFile
                     new BreakerTripFilter { RepositoryRoot = repositoryRoot },
                     cancellationToken)
                 : [];
-            string? desired = trips.Count == 0 ? null : Render(repositoryRoot, trips);
+            string? desired = trips.Count == 0 ? null : Render(repositoryRoot, trips, command);
             if (attempt > 0 && string.Equals(applied, desired, StringComparison.Ordinal))
             {
                 return;

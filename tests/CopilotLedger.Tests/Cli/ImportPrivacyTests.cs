@@ -28,6 +28,7 @@ public sealed partial class ImportPrivacyTests
         ["span_links"] = ["git_branch", "git_commit_sha", "git_repository_slug", "parent_span_id"],
         ["import_sessions"] = [],
         ["import_record_aliases"] = [],
+        ["mcp_tool_names"] = [],
     };
 
     private static readonly string[] Canaries =
@@ -130,6 +131,7 @@ public sealed partial class ImportPrivacyTests
                      ("span_links", "owner_span_row_id IS NOT NULL"),
                      ("import_sessions", "1"),
                      ("import_record_aliases", "1"),
+                     ("mcp_tool_names", "1"),
                  })
         {
             SortedSet<string> filled = new(StringComparer.Ordinal);
@@ -216,6 +218,79 @@ public sealed partial class ImportPrivacyTests
     }
 
     [Fact]
+    public async Task IP6_AnMcpToolCall_KeepsOnlyItsHashedNameAndToolName()
+    {
+        using TempDirectory temp = new();
+        await using CliHarness harness = Harness(temp);
+        new CopilotSessionLogs("s-mcp")
+            .Usage("u1", S1, numToolCalls: 1)
+            .Event(
+                "tool.execution_start",
+                new JsonObject
+                {
+                    ["toolCallId"] = "toolu-m1",
+                    ["toolName"] = "srv-tool",
+                    ["mcpServerName"] = Canary("SERVER"),
+                    ["mcpToolName"] = Canary("TOOL"),
+                    ["arguments"] = new JsonObject { ["query"] = Canary("ARGS") },
+                    ["toolTitle"] = Canary("PROMPT"),
+                })
+            .Event(
+                "tool.execution_complete",
+                new JsonObject
+                {
+                    ["toolCallId"] = "toolu-m1",
+                    ["success"] = false,
+                    ["result"] = new JsonObject { ["content"] = Canary("RESULT") },
+                    ["error"] = new JsonObject { ["code"] = "failure", ["message"] = Canary("ERRMSG") },
+                })
+            .Write(harness.Context.CopilotHome);
+
+        CliRun run = await harness.RunAsync("import", "--all", "--source", "copilot", "--json");
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Equal(
+            ["f3f23e35c9fc32bd46be8fb3989b4952f3dccaf5dbc4721da91359972275a9d5/74ef83b0e3a641bf9d96ddd6e6dcf473f87891e975cbc4782d0be0a03f8c8cb4|srv-tool"],
+            await LedgerSql.RowsAsync(
+                harness.Context.DatabasePath,
+                "SELECT hashed_name || '|' || tool_name FROM mcp_tool_names;"));
+        Assert.Equal(
+            ["srv-tool"],
+            await LedgerSql.RowsAsync(harness.Context.DatabasePath, "SELECT tool_name FROM span_links;"));
+        SqliteConnection.ClearAllPools();
+
+        string output = run.Out + run.Error;
+        string[] canaries =
+        [
+            Canary("SERVER"),
+            Canary("TOOL"),
+            Canary("ARGS"),
+            Canary("PROMPT"),
+            Canary("RESULT"),
+            Canary("ERRMSG"),
+            CopilotSessionLogs.Canary,
+        ];
+        foreach (string canary in canaries)
+        {
+            Assert.DoesNotContain(canary, output, StringComparison.Ordinal);
+            byte[] bytes = Encoding.UTF8.GetBytes(canary);
+            foreach (string suffix in new[] { "", "-wal", "-shm" })
+            {
+                string path = harness.Context.DatabasePath + suffix;
+                if (File.Exists(path))
+                {
+                    await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using MemoryStream copy = new();
+                    await stream.CopyToAsync(copy);
+                    byte[] ledger = copy.ToArray();
+                    Assert.True(ledger.AsSpan().IndexOf(bytes) < 0, $"{canary} is in ledger.db{suffix}.");
+                }
+            }
+        }
+    }
+
+    [Fact]
     public async Task IP_AM1_AssistantMessageCanariesReachNoLedgerOrOutput()
     {
         using TempDirectory temp = new();
@@ -290,7 +365,12 @@ public sealed partial class ImportPrivacyTests
                 })
             .SubagentStarted("agent-1", "explore", "toolu-9")
             .Usage("u2", S2, agentId: "agent-1", parentToolCallId: "toolu-9")
-            .ToolStart("toolu-3", "grep", agentId: "agent-1")
+            .ToolStart(
+                "toolu-3",
+                "computer-use-exec_js",
+                agentId: "agent-1",
+                mcpServerName: "computer-use",
+                mcpToolName: "exec_js")
             .ToolComplete("toolu-3", false, agentId: "agent-1")
             .Usage("u3", null, model: "qwen3.8-27b", providerType: "ollama")
             .Compaction(

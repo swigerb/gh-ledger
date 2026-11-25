@@ -146,7 +146,7 @@ internal static class DaemonHost
                 WriteLog(
                     writer,
                     context,
-                    $"Port {port} is in use. Stop the other program, or run gh-ledger daemon run --port {port}.");
+                    $"Port {port} is in use. Stop the other program, or run {GhExtension.CommandName(context.Platform)} daemon run --port {port}.");
                 return 1;
             }
 
