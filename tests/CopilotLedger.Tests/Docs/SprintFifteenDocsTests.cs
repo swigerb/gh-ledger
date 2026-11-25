@@ -33,6 +33,19 @@ public sealed class SprintFifteenDocsTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DF3_HelpIsNoLongerDescribedAsNamingGhLedger()
+    {
+        Assert.DoesNotContain(
+            "`--help` usage lines say",
+            Text("docs", "cli.md"),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "The help shows the program's own name",
+            Text("docs", "quickstart.md"),
+            StringComparison.Ordinal);
+    }
+
     private static string Text(params string[] parts) =>
         File.ReadAllText(RepositoryFile(parts)).ReplaceLineEndings("\n");
 

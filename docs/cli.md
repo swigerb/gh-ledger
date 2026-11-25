@@ -2,7 +2,7 @@
 
 gh-ledger runs a local OpenTelemetry receiver at `http://localhost:4318`, records GitHub Copilot's per-request usage in a SQLite ledger on your machine, and reports AI spend by repository, branch, pull request, model, agent, and prompt. To get started, see the [quickstart](quickstart.md). For walkthroughs, see the [user guide](guide.md).
 
-This page writes commands as `gh ledger <command>`, the GitHub CLI extension. For a binary you built, run `<folder>/gh-ledger <command>`. `--help` usage lines say `gh-ledger`; with the extension, type `gh ledger`. gh-ledger keeps its files in `~/.copilot-ledger` (`%USERPROFILE%\.copilot-ledger` on Windows), or in the directory that `COPILOT_LEDGER_HOME` names; see [configuration.md](configuration.md).
+This page writes commands as `gh ledger <command>`, the GitHub CLI extension. For a binary you built, run `<folder>/gh-ledger <command>`. gh-ledger keeps its files in `~/.copilot-ledger` (`%USERPROFILE%\.copilot-ledger` on Windows), or in the directory that `COPILOT_LEDGER_HOME` names; see [configuration.md](configuration.md).
 
 ## Commands at a glance
 
