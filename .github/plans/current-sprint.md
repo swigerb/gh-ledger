@@ -1,19 +1,18 @@
-# Sprint 14: Import Speed, Routed Audits, Provenance & 0.6.0
+# Sprint 15: MCP Tool Names, the Install Dry Run, `gh ledger` in Help & 0.7.0
 
 | | |
 |---|---|
 | Architect | `ledger-architect` |
 | Builder | `ledger-builder` (MAI Code 2) |
 | Target | .NET (`global.json`'s SDK, unchanged), zero Docker, no new packages |
-| Plan written | 2026-11-24, against `main` at `0f96a83` (Sprint 12, PR #88) |
-| Branch | `swigerb-sprint-14-import-speed-routed-audits` |
-| Requirements | Issue [#82](https://github.com/swigerb/gh-ledger/issues/82) remainder (quadratic import lookup; oversized events import never reads), issue [#80](https://github.com/swigerb/gh-ledger/issues/80) remainder (`premium_model_trivial_turn` and routed requests), issue [#77](https://github.com/swigerb/gh-ledger/issues/77) (release provenance attestations), the 0.6.0 version bump and its 0.5.0 → 0.6.0 upgrade docs |
-| Status | Current sprint. Sprint 12's plan is archived verbatim at `.github/plans/archive/sprint-12.md`. Sprint 13's is at `.github/plans/archive/sprint-13.md`. |
-| Amended | 2026-11-24, after Task 1 (`30dd55e`): Task 3's oversized rule follows import's normal-size rule instead of a two-type allowlist. 2026-11-24, after Task 2 (`36f8c27`): Task 3's test vectors repaired (PA2). See "Plan amendments". 2026-11-24, after Task 9 (`81d6bf9`): review fixes R1 and R2 added as Tasks 10 and 11. See "Review after Task 9". |
+| Plan written | 2026-11-24, against `main` at `c6dc935` ("Docs: a quickstart, report screenshots, and a sweep for accuracy and brevity (#94)") |
+| Branch | `swigerb-sprint-15-mcp-names-dry-run-help` |
+| Requirements | Issue [#90](https://github.com/swigerb/gh-ledger/issues/90) (live MCP tool calls are named by 129-character hashes), issue [#91](https://github.com/swigerb/gh-ledger/issues/91) (`install --dry-run` always says it would start the daemon), issue [#92](https://github.com/swigerb/gh-ledger/issues/92) and its comment (help usage lines and command hints say `gh-ledger` under the extension), docs that no longer describe these as limitations, version 0.7.0, and its 0.6.0 → 0.7.0 upgrade docs |
+| Status | Current sprint. Sprint 14's plan is archived verbatim at `.github/plans/archive/sprint-14.md` (SHA-256 `4F2DA37E44AC0BC0E3719151AC626912BA03CF87B3423EFD9D3472FF485413D5`). |
 
 ## How to use this plan
 
-`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification, runs the verification commands, changes the line to `- [x]`, and stops. Tasks are sequential, and each builds on the ones before it. Each task is one commit, titled `Sprint 14 Task N: <Title>`, with the repository's `Co-authored-by` trailer.
+`ledger-builder` implements one task per run: the first unchecked `Task N:` line below. It follows that task's specification, runs the verification commands, changes the line to `- [x]`, and stops. Tasks are sequential, and each builds on the ones before it. Each task is one commit, titled `Sprint 15 Task N: <Title>`, with the repository's `Co-authored-by` trailer.
 
 This plan is a **specification**, not copy-exact code. Each task gives:
 
@@ -22,10 +21,11 @@ This plan is a **specification**, not copy-exact code. Each task gives:
 - schemas and DDL;
 - numbered algorithms;
 - exact test vectors;
+- docs text;
 - acceptance criteria;
 - verification commands.
 
-Implement exactly those contracts. Where a task says "exactly", the value, string, name, or order is fixed. Where it leaves a detail open (a private helper's name, a loop's shape), choose the simplest option that matches the surrounding code's style. Don't add features, options, logging, caching, or fast paths the task doesn't ask for. Don't refactor code outside the task's files.
+Implement exactly those contracts. Where a task says "exactly", the value, string, name, or order is fixed. Where it leaves a detail open (a private helper's name, a loop's shape), choose the simplest option that matches the surrounding code's style. Don't add features, options, logging, caching, or fast paths the task doesn't ask for. Don't refactor code outside the task's files. Inside a table cell, `\|` stands for `|`.
 
 After **every** task:
 
@@ -34,768 +34,991 @@ dotnet build CopilotLedger.slnx
 dotnet test CopilotLedger.slnx
 ```
 
-The build must report 0 warnings and 0 errors (`TreatWarningsAsErrors` is on in `Directory.Build.props`). The test run must report 0 failed and 0 skipped. Record the passed count in the commit message body as `Tests: <n> passed`. The baseline at `0f96a83` is **1,921 passed, 0 failed, 0 skipped** (measured 2026-11-24 while planning).
+The build must report 0 warnings and 0 errors (`TreatWarningsAsErrors` is on in `Directory.Build.props`). The test run must report 0 failed and 0 skipped. Record the passed count in the commit message body as `Tests: <n> passed`. The baseline at `c6dc935` is **1,960 passed, 0 failed, 0 skipped** (measured 2026-11-24 while planning, SDK 10.0.115). Each task says exactly how many tests it adds, counting each theory row; if the count differs, stop and report it.
 
 Global rules for every task:
 
-- **Money is `decimal` only.** No `double`, `float`, or `Math.Round` on money, and no SQLite `REAL`. The benchmark script's timings are seconds, not money, and may use `[double]`.
-- **Hermetic tests.** Use temporary directories, `ManualTimeProvider`, `FakeCliPlatform`, `CliHarness`, `LedgerSql`, and synthetic `CopilotSessionLogs` and `CodexRollouts` fixtures. No test may:
+- **Money is `decimal` only.** No `double`, `float`, or `Math.Round` on money, and no SQLite `REAL`. Tests compare money as `decimal`, for example `GetDecimal()` against `0.0086m`.
+- **Hermetic tests.** Use temporary directories, `ManualTimeProvider`, `FakeCliPlatform`, `CliHarness`, `LedgerSql`, `McpTestHarness`, and synthetic `CopilotSessionLogs` fixtures. No test may:
   - open a socket, start a process, or run `git`;
   - use Docker or the network;
   - read `~/.copilot`, `~/.codex`, or `~/.copilot-ledger`.
 
-  The benchmark script (Task 1) is **not** a test. `dotnet test` never runs it.
-- **Privacy.** Nothing new is stored. No prompt, response, reasoning, tool argument, tool result, or summary text is read or kept. Task 3 reads, at most, the first 65,536 bytes of an oversized line, and only to find its top-level `type`. It keeps nothing from them. The benchmark reads only the session log it generates.
+  A test that drops or alters schema, or reads `ledger.db`, `-wal`, or `-shm` bytes, calls `SqliteConnection.ClearAllPools()` first. Every test must also pass with `dotnet test CopilotLedger.slnx -- xUnit.ParallelizeTestCollections=false`. A test that compares System.CommandLine's own words ("Usage:", "Description:", "Show help and usage information") sets `CultureInfo.CurrentCulture` and `CultureInfo.CurrentUICulture` to `CultureInfo.InvariantCulture` and restores both in `finally`, as `CacheReportTests` does.
+- **Privacy.** The only new stored data is the `mcp_tool_names` table (Task 2): an MCP tool's hashed name, which live spans already store as `span_links.tool_name`, and Copilot's `data.toolName` for it, which imported tool calls already store. Import newly reads `data.mcpServerName` and `data.mcpToolName` of `tool.execution_start` and keeps them only inside that hash. It never reads `arguments`, results, titles, or errors.
 - **No new packages, and `global.json` is unchanged.** `src/CopilotLedger.Core/Pricing/rates.json` is unchanged in every task, including `ratesVersion`.
+- **The ledger format stays 7.** No migration is added or changed. `DaemonState.CurrentImportRules` stays 1: the daemon's live-span rules don't change, so a running 0.6.0 daemon doesn't block this version's `import`.
 - **Public contracts change only as listed.** These are the only public or internal contract changes this sprint:
-  - `LedgerMigrations.Indexes` (Task 2);
-  - `JsonlLineReader.OversizedHandler` and `JsonlLineReader.PrefixBytes` (Task 3);
-  - `JsonFields.ReadTypePrefix` (Task 3);
-  - the two `OnOversized` signatures (Task 3);
-  - `AuditSpan.ListCostUsd` (Task 4);
-  - `<Version>` 0.6.0 (Task 5).
+  - `McpToolNames` (Task 1);
+  - `LearnedToolName`, `LedgerMigrations.Tables`, `SqliteLedgerStore.RecordMcpToolNamesAsync`, `SqliteLedgerStore.ReadMcpToolNamesAsync`, and `LedgerExportSnapshot.GetMcpToolNamesAsync` (Task 2);
+  - `SessionLogReadResult.LearnedToolNames` and `LedgerImporter.CurrentImportRevision` = 2 (Task 3);
+  - `AuditReport.WithToolNames`, `ExportRecords.ToolCall`'s second parameter, `ExportJson.WriteToolCallsAsync`'s new parameter, and `ExportReportModel.ToolNames` (Task 4);
+  - `DaemonStartOutcome`, `DaemonStartDecision`, `DaemonCommands.DecideStart`, and `DaemonCommands.WriteStartDecision` (Task 5);
+  - `ExtensionHelpAction` (Task 6);
+  - `CircuitFlagFile.Render`'s and `CircuitFlagFile.SyncAsync`'s `command` parameters, and `LedgerMcpContext.Command` (Task 7);
+  - `<Version>` 0.7.0 (Task 8).
 
-  CLI options, JSON fields, MCP tools, OTLP handling, the ledger format number (7), and every report's output stay as they are.
-- **Version strings in top-level docs.** After Task 5, no line in `README.md`, `docs/*.md`, `.github/workflows/*.yml`, `src/`, or `tests/` may name `0.6.0`, except the places that `VersionPlacesTests` lists (VR3). New text says "this version" instead. Naming `0.5.0` or `v0.5.0` is allowed.
-- If a contract here doesn't compile against the code, a referenced line has moved, or a test vector disagrees with the code's arithmetic, **stop and report it**. Don't redesign.
+  CLI options, JSON field names, MCP tool names and schemas, and OTLP handling stay as they are. Output values change only where a task says so.
+- **Version strings in top-level docs.** Until Task 8, no new line in `README.md`, `docs/*.md`, `.github/workflows/*.yml`, `src/`, or `tests/` may name `0.6.0`, the current version then: `VersionPlacesTests.VR3` fails on it. Test fixtures that need a version use `9.9.9`. From Task 8 on, the same holds for `0.7.0`, except the places `VersionPlacesTests` lists. Naming `0.5.0` is always allowed, and naming `0.6.0` is allowed from Task 8 on, so docs text that names it waits for Task 9 (D10).
+- If a contract here doesn't compile against the code, a referenced line has moved, or a test vector disagrees with the code, **stop and report it**. Don't redesign.
 
 ## Tasks
 
-- [x] Task 1: Import Benchmark Script and Baseline (tests/benchmarks). A PowerShell 7 script that generates a large synthetic Copilot session, imports it three times with a given binary against temporary homes, and prints a timing table. The baseline is measured with a Release publish of the unchanged tree and recorded in the commit body.
-- [x] Task 2: The Conversation-Live Index, Ensured on Every Open (CopilotLedger.Storage, docs & tests). `ix_spans_conversation_live` makes the importer's per-record live-span lookups indexed. Opening any format-7 ledger adds it when it's missing, whether the ledger is new, upgraded from format 6, or a format 7 that Sprint 12 created. The format number stays 7.
-- [x] Task 3: Oversized Lines of Unread Types Are Skipped (CopilotLedger.Core, docs & tests). An oversized Copilot line counts as skipped when the first 64 KiB of the line show a complete top-level `type` that isn't one of the event types import reads (`CopilotSessionLogSource.Types`), the same rule as for lines of normal size, so the log can complete. An oversized line of a type import reads, or whose type can't be read from the prefix, stays malformed. Codex is unchanged.
-- [x] Task 4: `premium_model_trivial_turn` Skips Routed Requests (CopilotLedger.Core, CopilotLedger.Storage, docs & tests). `AuditSpan.ListCostUsd`. A GitHub AI credits request charged at least 5% below its list price was routed by Auto or Fusion, so the rule leaves it out. No schema change.
-- [x] Task 5: Version 0.6.0 (all version places, docs & tests). Step 1 of `docs/releasing.md`, exactly. Rates unchanged.
-- [x] Task 6: Release Provenance Attestations (.github/workflows, docs & tests). A SHA-pinned `actions/attest-build-provenance` step in the tag-only `release` job, with `id-token: write` and `attestations: write` on that job only. Verification commands in `docs/cli.md` and `docs/releasing.md`. `ReleaseWorkflowTests`.
-- [x] Task 7: 0.5.0 → 0.6.0 Upgrade Docs (docs & tests). Format 6 → 7 is one-way. Copy the data directory first, stop the daemon and close the MCP sessions, upgrade, run `gh ledger import --all` once, and roll back with `--pin v0.5.0` and the copy. `UpgradeDocsTests.UD5`.
-- [x] Task 8: Import Benchmark Report (docs/test-reports). Run the Task 1 script against a Release publish of this branch and record before and after in `docs/test-reports/<date>-import-benchmark.md`.
-- [x] Task 9: Final Verification (no product change). Build and test gates, a `publish` whose `--version` is `0.6.0`, money, privacy, and boundary sweeps, and confirmation that the rates are unchanged.
-- [x] Task 10: LX6 Reaches the Live-Span Lookups (tests only). Review fix R1: LX6 uses service request IDs that import accepts, so its two dry runs reach `UsageAuthority.GatherAsync`, and it asserts what they decided.
-- [x] Task 11: The Oversized Rule Is Copilot's (docs only). Review fix R2: `docs/cli.md` says that only a Copilot line longer than 8 MiB can count as a skipped event. A longer Codex line is always malformed.
+- [ ] Task 1: MCP Tool Names: Hash, Shape, Short Form, and Display (CopilotLedger.Core & tests). `McpToolNames` computes Copilot CLI's hashed name of an MCP tool, recognizes the 129-character shape, writes the short form `MCP tool 10be6bee/8453dc19`, and turns a stored tool name into the name reports show.
+- [ ] Task 2: The `mcp_tool_names` Table, Ensured on Every Open (CopilotLedger.Core, CopilotLedger.Storage & tests). A two-column table that opening any format-7 ledger adds when it's missing, as Sprint 14 did for its index, with an upsert that keeps the ordinally smallest name and a read for the export snapshot. The format number stays 7.
+- [ ] Task 3: Import Learns MCP Tool Names (CopilotLedger.Core, CopilotLedger.Storage, docs & tests). The Copilot source reads `data.mcpServerName` and `data.mcpToolName` beside `data.toolName`, and the importer records the learned names of every log it reads, before its checkpoint. `CurrentImportRevision` 2 reads each log once more. The import allowlist documents the table.
+- [ ] Task 4: Reports Show Readable MCP Tool Names (CopilotLedger.Core, CopilotLedger.Cli, CopilotLedger.Mcp, docs & tests). Export's timeline, `tool-calls.json`, and findings; `audit`'s table, `--json`, and local-model payload; and MCP `get_audit_findings` show the learned name or the short form. Findings are computed from the stored names first. The troubleshooting entry about 129-character names becomes "MCP tool names".
+- [ ] Task 5: `install --dry-run` Decides the Daemon Step as `install` Does (CopilotLedger.Cli, docs & tests). One side-effect-free decision, shared by `daemon start`, `install`, and its dry run: already running, with its pid; wouldn't start, with the reason, hint, and exit code 1; or would start.
+- [ ] Task 6: Help Names `gh ledger` Under the Extension (CopilotLedger.Cli, docs & tests). The root help option's action is wrapped, so the usage line of every help, including the help after a parse error, starts with `gh ledger` under the extension. A built binary's help is unchanged.
+- [ ] Task 7: Command Hints Name `gh ledger` Under the Extension (CopilotLedger.Cli, CopilotLedger.Otlp, CopilotLedger.Mcp, docs & tests). The eight hard-coded hints of #92's comment use `GhExtension.CommandName`, `BreakerMessages.DefaultCommand`, or `LedgerMcpContext.Command`. The guide's `breaker-status` and `mcp` samples follow.
+- [ ] Task 8: Version 0.7.0 (all version places, docs & tests). Step 1 of `docs/releasing.md`, exactly. Rates unchanged.
+- [ ] Task 9: 0.6.0 → 0.7.0 Upgrade Docs and the 0.6.0 Report's Update (docs & tests). The format stays 7, the first import reads every log again once, and going back is a pinned install without the copy. `UpgradeDocsTests.UD6`. An `**Update:**` line in the 0.6.0 test report's "Gaps found".
+- [ ] Task 10: Final Verification (no product change). Build and test gates, serial tests, a `publish` whose `--version` is `0.7.0`, smoke tests with temporary homes, and money, privacy, boundary, and docs sweeps.
 
 ## Starting point
 
-- `main` at `0f96a83`, "Sprint 12: Billing and import fidelity (#88)", after Sprint 13 (`5d3bfbf`, PR #87).
-- Product version: `0.5.0`.
-- Ledger format: 7 (`LedgerMigrations.cs:212–220`).
-- Copilot import window: 1.0.103–1.0.115.
-- Tests: 1,921 passed.
-- What this plan depends on, read from the code at `0f96a83`:
-  - **Import lookups.** `UsageAuthority.GatherAsync` (`UsageAuthority.cs:230–268`) runs once per imported record. It runs `EXISTS (SELECT 1 FROM spans WHERE conversation_id = @conversation AND ingest_source = 'otlp')` and the same with `AND canonical_usage_id IS NULL`. `ReconcileConversationAsync` (`:290–315`) has the same subqueries. No index starts with `conversation_id`, so each lookup scans `spans`, and importing n records into a ledger of n rows is O(n²).
-  - **Store open.** `SqliteLedgerStore.InitializeAsync` (`SqliteLedgerStore.cs:102–175`):
-    1. sets WAL;
-    2. refuses a newer `user_version`;
-    3. runs each pending migration under `BEGIN IMMEDIATE`, re-reading `user_version` inside the transaction;
-    4. sets `_initialized = true`.
+- `main` at `c6dc935`, after Sprint 14 (`ee4d3a1`, PR #89), its 0.6.0 live test report (#93), and the docs sweep (#94).
+- Product version: `0.6.0`. Ledger format: 7. Copilot import window: 1.0.103–1.0.115.
+- Tests: 1,960 passed.
+- What this plan depends on, read from the code at `c6dc935`:
+  - **Live tool names.** `GenAiSpanNormalizer.cs:180` stores `gen_ai.tool.name` as it arrives, in `span_links.tool_name`. Tool names reach users only through:
+    - export: `ExportRecords.ToolCall` (`ExportRecords.cs:143`), which feeds the SVG timeline's `<title>` (`ExportSvg.cs:64`) through `ExportModelBuilder.cs:75`, and the bundle's `toolName` (`ExportJson.cs:357`, `:487`);
+    - audit findings' `Scope.Tool` (`ToolSequences.cs:83`), which `AuditText.Scope` (the CLI table and export's findings), `AuditJson` (`audit --json`, `telemetry/audit-findings.json`, MCP `get_audit_findings`), and `AuditLlmPayload` (`--local-llm`, `--show-llm-payload`) write.
 
-    `LedgerSnapshot`, which `import --dry-run` uses, opens the ledger read-only and never migrates.
-  - **Line reader.** `JsonlLineReader.Read` (`JsonlLineReader.cs`) stops keeping a line's bytes once it passes `maxLineBytes` and calls `onOversized(lineNumber, byteOffset)` at its end, or at EOF. Its only callers are `CopilotSessionLogSource.cs:210` and `CodexSessionLogSource.cs:174`. Both pass `OnOversized`, which counts a malformed line with `ImportDiagnosticCode.OversizedLine` (`CopilotSessionLogSource.cs:317–318`, `CodexSessionLogSource.cs:245–246`). `LedgerImporter` marks a log complete only when `MalformedLines == 0`, so a log with an oversized line is read again by every import.
-  - **Audit.** `SqliteLedgerStore.ReadAuditSpansAsync` (`SqliteLedgerStore.Audit.cs:100–180`) selects 25 columns and builds `AuditSpan`. `PremiumModelTrivialTurnRule` filters candidates at lines 22–36. `list_cost_usd_pico` is NULL when the row was charged at the rate card ("the same as `cost_usd_pico`", migration 7's comment). Otherwise it holds the rate card's price beside a reported charge.
-  - **Release workflow.** `.github/workflows/release.yml`:
-    - top-level `permissions: contents: read`;
-    - jobs `build` (matrix of six), `rates`, and `release`;
-    - `release` has `if: github.event_name == 'push' && github.ref_type == 'tag'` and `permissions: contents: write`;
-    - `release` steps: checkout, download-artifact, "Add the rates and checksums", "Create the release".
-
-    `workflow_dispatch` is a trigger, but the `if` skips `release`.
+    `BreakerEvents.ToolCallEvent.ToolName` is read only for retry churn's failure test; no alert, flag file, trip detail, MCP text, report, or receipt displays a tool name. `AuditAnalyzer.Order` sorts findings by `Scope.Tool` as its last key but one.
+  - **Import of tool events.** `CopilotSessionLogSource.ToolStartPaths` (`:109`) allowlists `id`, `parentId`, `timestamp`, `agentId`, `data.toolCallId`, `data.toolName` (256), and `data.parentToolCallId`. `ToolStart` (`:696`) keeps a pending call. `Finish` (`:332`) builds the `SessionLogReadResult` (`:379`). `LedgerImporter.ImportLogAsync` reads every discovered log that isn't active, out of `--since`, or unchanged (`:144–155`: `Complete`, `ImportRevision >= CurrentImportRevision` (1), size, write time, and SHA-256), keeps tool calls of the last 7 days only, and writes the checkpoint last (`:297–324`).
+  - **Store open.** `SqliteLedgerStore.InitializeAsync` (`SqliteLedgerStore.cs:102`) runs the migrations, then, for each of `LedgerMigrations.Indexes` (`:171–205`), checks `sqlite_master`, takes `BEGIN IMMEDIATE`, checks again, and creates the index. `LedgerSnapshot`, which `import --dry-run` uses, opens read-only and never migrates. `audit`, `export`, and MCP `get_audit_findings` initialize the store and then read one `LedgerExportSnapshot`.
+  - **Daemon start and install.** `DaemonCommands.StartAsync` (`DaemonCommands.cs:60`) decides, in order: the daemon holds its lock (`DaemonFiles.IsHeld`: already running, pid from `daemon.json`, exit 0); the process isn't named `gh-ledger` (exit 1); the Windows job blocks or can't be read (exit 1, two lines, the second with a sign-in part when `GetStartupCommand("CopilotLedger")` is set); otherwise it starts. `InstallAsync` refuses a process not named `gh-ledger` before any output or change, dry run included (`InstallCommands.cs:51–57`, `IN8`), registers the sign-in item, and then, with `--dry-run`, always prints `Would start the gh-ledger daemon.` and exits 0 (`:305–316`).
+  - **Help.** `GhLedgerCli.InvokeAsync` (`GhLedgerCli.cs:34–64`) builds a `RootCommand`, whose name is `RootCommand.ExecutableName`. No command adds its own help option.
+  - **Command hints.** #81 added `GhExtension.CommandName` (`"gh ledger"` for the extension layout, else `"gh-ledger"`), `BreakerMessages.DefaultCommand`, `AlertDispatcher.Command`, and `CircuitBreakerMonitor`'s `command` parameter. These still hard-code `gh-ledger`: `BreakerCommands.cs:282`; `LedgerMcpTools.cs:953` and `:956`; `CircuitFlagFile.cs:58–59`; `DaemonHost.cs:149`; `RatesCommands.cs:106`; `StartupItem.cs:17` and `:83`.
 
 ## Verified facts
 
 | # | Fact | Source (retrieved 2026-11-24) |
 |---|---|---|
-| F1 | `actions/attest-build-provenance` latest release is `v4.2.2`, published 2026-08-06T19:59:04Z. Tag `v4.2.2` points to commit `4d101475d8b20a2381f78447822ac1eab6504dd8`. | `gh api repos/actions/attest-build-provenance/releases/latest`; `gh api repos/actions/attest-build-provenance/commits/v4.2.2 --jq .sha` (re-checked at plan commit time) |
-| F2 | v4 of `attest-build-provenance` is a composite wrapper around `actions/attest` (v4.2.1, `508db95…`). Its README says new implementations should consider `actions/attest` directly. It takes `subject-path` (newline-separated paths or globs), signs with Sigstore (public-good instance for public repositories), and stores the attestation through the attestations API. | https://github.com/actions/attest-build-provenance (README and `action.yml` at `4d10147`) |
-| F3 | The required job permissions are `id-token: write` (to get the OIDC token for Sigstore) and `attestations: write` (to persist the attestation). `artifact-metadata: write` and `packages: write` are needed only with `push-to-registry` or a storage record, which this sprint doesn't use. `contents: read` is needed only for a private repository's checkout; the `release` job already has `contents: write` for `gh release create`. | Same README, "Usage" and "Permissions" |
-| F4 | swigerb/gh-ledger is public, so attestations go to the public Sigstore instance and anyone can verify them. | `gh repo view swigerb/gh-ledger --json visibility` → `PUBLIC` |
-| F5 | `gh attestation verify <file> --repo <owner>/<repo>` verifies by the file's SHA-256 digest. `--signer-workflow <owner>/<repo>/<path>` requires the workflow that signed it, and `--source-ref <ref>` requires the ref it ran on. | `gh attestation verify --help`, gh 2.103.3 |
-| F6 | Auto model selection: "If you are on a paid Copilot plan, you qualify for a 10% discount on model costs while using auto model selection in Copilot Chat, or Copilot cloud agent." | https://docs.github.com/en/copilot/concepts/models/auto-model-selection, "Discount for using auto model selection" |
-| F7 | Copilot Fusion: "Through November 30, 2026, users on paid Copilot plans receive a 30% discount on model costs when using Copilot Fusion. When you use Copilot Fusion, you're billed for each model it uses, at that model's standard rate. There's no separate charge for Copilot Fusion." | https://docs.github.com/en/copilot/concepts/models/copilot-fusion, "Billing for Copilot Fusion" |
-| F8 | One GitHub AI credit is $0.01 (`AiCreditMath`, unchanged since Sprint 10). | Repository code and `docs/configuration.md` |
-| F9 | SQLite stores `CREATE INDEX IF NOT EXISTS ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp';` in `sqlite_master.sql` as `CREATE INDEX ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp'`. `pragma_index_list('spans')` reports it as `ix_spans_conversation_live\|0\|c\|1` (name, unique, origin, partial). Both `GatherAsync` subqueries plan as `SEARCH spans USING COVERING INDEX ix_spans_conversation_live (conversation_id=?)`, and `… (conversation_id=? AND canonical_usage_id=?)` for the `IS NULL` one. | Planning probe, SQLite 3.50.4 (Python `sqlite3`), 2026-11-24 |
-| F10 | SQLite refuses `ALTER TABLE spans DROP COLUMN canonical_usage_id` or `… ingest_source` while a partial index refers to the column ("error in index ix_spans_conversation_live after drop column"). Test fixtures that build an older format by dropping those columns must `DROP INDEX ix_spans_conversation_live;` first. | Same probe |
-| F11 | Baseline import of a generated 20,000-record session with two 9 MiB ignored lines, using `0f96a83`'s Release build on the planning machine: run 1 took 141.86 s (exit 2, recorded 20,000, malformed 2). An unchanged re-run took 282.62 s (exit 2, duplicate 20,000, malformed 2), because the log never completes. After manually adding the Task 2 index, the same re-run took 1.9 s. | Planning probe, 2026-11-24 (Task 1 re-measures it reproducibly) |
+| F1 | For a tool from an MCP server, Copilot CLI's live `execute_tool` span sets `gen_ai.tool.name` to the lowercase hexadecimal SHA-256 of the server's name in UTF-8, `/`, and the SHA-256 of the tool's name in UTF-8: 129 characters. It matched exactly on CLI 1.0.103 (`ledger`/`get_branch_ledger`) and 1.0.115 (`computer-use`/`exec_js`). Built-in tools such as `powershell`, `view`, `task`, and `tool_search_tool` arrive in clear. | The coordinator's check against real spans and session logs, recorded in issue #90. Cited as given: no real span or session log was opened while planning, by design. |
+| F2 | The same call's `tool.execution_start` in the session log has `data.toolName` `computer-use-exec_js`, `data.mcpServerName` `computer-use`, and `data.mcpToolName` `exec_js`. | Same |
+| F3 | Copilot's OpenTelemetry reference describes `gen_ai.tool.name` on `execute_tool` spans only as "Tool name (for example, `readFile`)" and doesn't mention hashing. Tool arguments and results are attributes only with content capture. | https://docs.github.com/en/copilot/reference/enterprise-administrators/opentelemetry-reference, "`execute_tool` span attributes" |
+| F4 | SHA-256 of the UTF-8 bytes, lowercase hexadecimal: `ledger` → `fe14010b4fe83303852f0467c919ef9a7ca089b91e96e3aad7d426dd87079297`; `get_branch_ledger` → `eb20c46435d60871da0eb97ce23417c04835e272725c59a3a649c7ce8e521d97`; `computer-use` → `10be6beef496b89dae799c37bd04e5eba2a6264a0a4d605f5661b50d7dc4d1ea`; `exec_js` → `8453dc19fda259c463d7aaffb07becf26b7ce2cfc690a2b0a957e201653dc85a`; `café` (`63 61 66 c3 a9`) → `850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e`; the empty string → `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`; `CANARY-SERVER-7c1d` → `f3f23e35c9fc32bd46be8fb3989b4952f3dccaf5dbc4721da91359972275a9d5`; `CANARY-TOOL-7c1d` → `74ef83b0e3a641bf9d96ddd6e6dcf473f87891e975cbc4782d0be0a03f8c8cb4`. The UTF-16LE hash of `café` differs (`8c9f3eed…`). The issue's `10be6beef496…/8453dc19fda2…` is `computer-use`/`exec_js`. | Computed while planning with .NET 10.0.15 (`SHA256`) and Python `hashlib`; both agree |
+| F5 | In System.CommandLine 2.0.15 as restored here, `HelpBuilder` and `HelpContext` are **internal**, and so are `HelpAction.Builder` and `LocalizationResources`. Public: `HelpAction` (sealed; `MaxWidth`, `Invoke(ParseResult)`, `ClearsParseErrors` true), `HelpOption.Action` (settable), `ParseErrorAction` (sealed), `SynchronousCommandLineAction` (protected constructor), virtual `CommandLineAction.Terminating` and `ClearsParseErrors`, `ParseResult.Action` and `ParseResult.InvocationConfiguration`, a settable `InvocationConfiguration.Output`, and static `RootCommand.ExecutableName`. `RootCommand` adds a recursive `HelpOption` and a `VersionOption`. | Reflection over `%USERPROFILE%\.nuget\packages\system.commandline\2.0.15\lib\net8.0\System.CommandLine.dll` |
+| F6 | Replacing the root `HelpOption`'s action with a `SynchronousCommandLineAction` that runs the original `HelpAction` into a buffer and rewrites the usage line works, unchanged in exit code and in every other byte (CRLF kept), for: root `--help`; `import --help`; `budget set --help`; help after a parse error (`budget set` without its argument, `daemon` without a subcommand, the typo `imprt`); and `--help` beside an unknown option. `ParseErrorAction` writes its errors to `Error`, its typo suggestions to `Output` before the help, and then invokes the nearest `HelpOption`'s action. | Scratch probe outside the repository, deleted afterward |
+| F7 | gh-ledger's help at `c6dc935` (Debug build, with temporary `COPILOT_LEDGER_HOME` and `COPILOT_HOME`; nothing was created): 29 help outputs, the root and 28 subcommands. Usage lines read `gh-ledger [command] [options]`, `gh-ledger budget set <credits> [options]`, and so on. A Commands row is `  <name>` followed by a space, such as `  set <credits>  Set the current branch's budget.` `daemon stop --help` is `Description:`, `  Stop the running daemon.`, a blank line, `Usage:`, `  gh-ledger daemon stop [options]`, a blank line, `Options:`, `  -?, -h, --help  Show help and usage information`, and a blank line. | Planning run |
+| F8 | An `IOException` that a hosted service throws from `StartAsync` comes out of `WebApplication.StartAsync` unwrapped, with `UseTestServer()` (ASP.NET Core 10, `Microsoft.AspNetCore.TestHost` 10.0.15). `OtlpReceiverApp` uses `WebApplication.CreateEmptyBuilder`, which registers no logger. | Scratch probe, deleted |
+| F9 | Microsoft.Data.Sqlite 10.0.15 bundles SQLite 3.53.3. Task 2's DDL creates the table; `pragma_table_list('mcp_tool_names')` gives `table\|2\|1\|1` (type, ncol, wr, strict); `pragma_table_info` gives `hashed_name\|TEXT\|1\|1` and `tool_name\|TEXT\|0\|1` (name, type, pk, notnull); the upsert keeps the smaller name by BINARY collation; the CHECKs reject a 128-character key and empty or 257-character names. | Scratch probes (Microsoft.Data.Sqlite 10.0.15, and Python `sqlite3` 3.50.4), deleted |
+| F10 | 0.6.0 (`c6dc935`) skips a complete, unchanged log whose checkpoint has `ImportRevision >= 1`. | `LedgerImporter.cs:13`, `:149` |
+| F11 | `claude-haiku-4.5` costs 1.00, 0.10 cached, and 5.00 USD per million input, cached input, and output tokens (rates `2026-11-23`), so a request of 10,000 input tokens, 8,000 of them read from the cache, and 300 output tokens costs $0.0043. | `src/CopilotLedger.Core/Pricing/rates.json`; `AuditSeeds` says the same |
 
 ## Assumptions (not verified against a primary source)
 
-- **A1.** The oversized lines seen in practice are `model.model_call_success` and `model.messages_snapshot` events. They come from issue #82 and the coordinator, and no real session log was opened to confirm them, by design. Task 3's rule doesn't depend on these names: any type that isn't in `CopilotSessionLogSource.Types` is skipped, as a short line of that type already is. The names are used only in tests and the benchmark.
-- **A2.** In an oversized event line, the top-level `type` appears within the first 65,536 bytes. If it doesn't, the line stays malformed. That loses no data, but it doesn't help the log complete.
-- **A3.** A reported charge for an Auto or Fusion request already reflects the discount (F6, F7), so `cost_usd_pico < list_cost_usd_pico` for routed requests. This is issue #80's premise. Fusion requests after November 30, 2026 are charged at the list price and can't be told apart from a chosen model.
-- **A4.** A request charged 5% or more below its list price was routed. Nothing else in the rates (rounding of nano-AIU to pico-USD, or tier boundaries) produces a gap that large.
+- **A1.** The GitHub Copilot app and VS Code's Agent Host, which share Copilot's runtime, name MCP tools the same way. Nothing here depends on it: any stored name of the hashed shape is resolved, whatever sent it.
+- **A2.** `data.toolName` for one server and tool is the same in every log. When logs disagree, the ordinally smallest name is shown (D4).
+- **A3.** Copilot keeps a session log for every session, so an import after a session ends learns its MCP tools' names. A tool whose only log is gone, or whose session is still open, shows the short form until an import reads a log that ran it (`--include-active` reads open sessions).
+- **A4.** In the test host, standard output is redirected, so System.CommandLine doesn't wrap help (`HelpAction.MaxWidth` is `int.MaxValue`). The tests don't depend on it: the lines they compare are under 60 characters, and the Commands-row pattern skips continuation lines.
+- **A5.** Rereading every log once (Task 3) takes about as long as a first import: the 0.6.0 live test's repair import of 308 sessions took 13.6 s. A reread also applies the documented repairs, so imported requests are repriced with the rates in use if the overlay or downloaded rates changed since they were imported.
 
 ## Decisions
 
-- **D1. Index, not cache (#82).** A partial covering index `ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp'` turns each per-record lookup into an O(log n) seek, with the `UsageAuthority` SQL unchanged. Its literal `'otlp'` matches the partial index's `WHERE`, which SQLite requires before it can use the index. A per-import cache was rejected: it must be invalidated by every live write in the same transaction, it duplicates `UsageAuthority`'s decision logic, and it still costs a scan per conversation.
-- **D2. Ensured on open, not a migration.** The index is created by `InitializeAsync` after the migration loop, whenever it's missing. That covers:
-  - a new ledger;
-  - format 6 → 7 (migration 7 runs, then the index is added);
-  - a format-7 ledger that Sprint 12 created without the index;
-  - a ledger where something dropped it.
+- **D1. A table ensured on open; the format stays 7 (#90).** Learned names go in a new `mcp_tool_names` table that `InitializeAsync` creates whenever it's missing, after the migrations and before the indexes, under the same check, `BEGIN IMMEDIATE`, and check-again pattern as Sprint 14's index. `user_version` stays 7, so 0.6.0 still opens an upgraded ledger: it ignores the table. Going back is a pinned install, without the copy. A migration 8 was rejected: it would make the upgrade one-way for nothing that 0.6.0 can't ignore. Storing the readable name in `span_links.tool_name` was rejected: the stored value must not change (#90).
+- **D2. Resolve for display only.** Rules, grouping, ordering, limits, and the stored values all use `span_links.tool_name` as stored. Each display maps a name through `McpToolNames.Display` at the end: an audit report through `AuditReport.WithToolNames` after `AuditAnalyzer.Report`, and export's tool calls in `ExportRecords.ToolCall`. Findings keep the order and selection that the stored names gave them, so the same runs, counts, and findings are shown before and after a name is learned.
+- **D3. What's shown.** A learned name is Copilot's own `data.toolName`, such as `computer-use-exec_js`, the same name an imported call of that tool shows. An unknown hashed name shows as `MCP tool ` plus its first 8 digits, `/`, and the first 8 digits after the `/`: `MCP tool 10be6bee/8453dc19`. Only exactly 64 lowercase hexadecimal digits, `/`, and 64 more count as hashed. Every other name, and null, is shown as stored.
+- **D4. The ordinally smallest name wins.** When logs give one hashed name different tool names (A2), the table keeps the smallest by SQLite's BINARY collation, whatever the order of the logs and imports. "First learned wins" was rejected: the result would depend on import history. "Latest wins" was rejected: it needs a timestamp column, and a reread could flip a name back and forth.
+- **D5. Learn from every log import reads.** Every Copilot log whose status is `Read` teaches its names: whatever its records' `--repo` or `--since` scope, whether its session has live spans (whose tool calls aren't imported), and whatever its tool calls' age (the 7-day window applies to links, not names). A tool start teaches a name when `data.toolName`, `data.mcpServerName`, and `data.mcpToolName` are all valid strings and no allowlisted property repeats, with or without a tool call ID or completion. The importer records them before the log's checkpoint. A dry run records nothing. The import report doesn't change. Codex rollouts teach nothing.
+- **D6. One more read of each log: `CurrentImportRevision` 2.** Logs imported earlier must be read again to learn their names, so a checkpoint below revision 2 is read again once, as revision 0 was for Sprint 12. 0.6.0 accepts revision 2 as current (F10), so after going back it doesn't read them again. Codex rollouts are read again once too, which only resolves duplicates. A per-source revision was rejected as more machinery than one reread costs.
+- **D7. One daemon decision for `daemon start`, `install`, and the dry run (#91).** `DaemonCommands.DecideStart` decides without side effects. `DaemonFiles.IsHeld` opens and closes the lock file only when it exists; `daemon.json`, the process path, the job, and the sign-in item are only read. `StartAsync` and the dry run report a decision through one writer, with the same streams and exit codes. For an already running daemon, the dry run prints `daemon start`'s line. For a blocked start, it prints `Wouldn't start the gh-ledger daemon: ` and `daemon start`'s reason, then `daemon start`'s hint line, to standard error, and exits 1. The hint's sign-in part counts a Windows sign-in item that the dry run would register, as the real `install` registers it before starting the daemon. A registration that would fail can't be foreseen. The "not the gh-ledger executable" outcome is part of the decision for `daemon start`, but `install` never reaches it: it refuses that process first, dry run included (`IN8`).
+- **D8. Help: wrap the help option's action (#92).** System.CommandLine 2.0.15 keeps its help builder internal (F5), names the root command after the executable, and doesn't allow spaces in command names. So under the extension, `GhLedgerCli` replaces the root `HelpOption`'s action with `ExtensionHelpAction`. It runs the original `HelpAction` into a buffer and replaces the root's name with `gh ledger` in the usage line only: the first line after the first blank line that starts with two spaces and the root's name. Because `ParseErrorAction` invokes the same option's action (F6), help after a parse error is covered too. For a binary the user built, nothing is installed, so help is byte-for-byte as before. Rejected: reflection into the internal builder (breaks silently on a package update), rewriting all output (could touch more than help), and a root command named `gh ledger` (not allowed).
+- **D9. Command hints (#92).** The eight hints in #92's comment name the command through `GhExtension.CommandName` where the CLI's platform is known, through a `command` parameter that defaults to `BreakerMessages.DefaultCommand` in Otlp (the flag file, as #81 did for alerts), and through `LedgerMcpContext.Command` in Mcp, which `gh ledger mcp` sets. Every other `gh-ledger` in `src` names the product, the executable, or a built binary, such as `Run gh-ledger directly.` when `gh` isn't on `PATH`, and stays. Texts that say `gh ledger` for everyone (the audit recommendation `set with gh ledger breaker config`, receipts, and export's report text) stay: they're the documented form, and `AuditDocsTests` pins the first.
+- **D10. Bump before the docs that name the previous version.** Task 8 bumps to 0.7.0 before Task 9 writes docs that name 0.6.0. Until then, 0.6.0 is the current version, and `VR3` fails on any new mention of it (Sprint 14's D9).
+- **D11. Upgrade docs for 0.6.0 → 0.7.0.** Users of 0.6.0 need three facts: the format is unchanged, so going back is a pinned install without the copy; the first `import --all` reads every log again (A5); and the existing steps still apply. A short `**Upgrading from 0.6.0.**` paragraph in `docs/cli.md`, a sentence under `### Repairs` that names the logs read once more (those that gh-ledger 0.6.0 or earlier imported), one sentence in the guide, and `UD6` pin them. `UD5` keeps pinning 0.5.0's.
+- **D12. The 0.6.0 report gets one `**Update:**` line.** It goes under "Gaps found", after its table, as the brief asks. The 0.5.0 report has its update line near its top instead. Nothing else in a dated report changes.
 
-  `user_version` stays 7, migration 7's text is unchanged, and an earlier format-7 build (Sprint 12, if any were installed) can still open the ledger. SQLite maintains the index for its writes. Adding migration 8 was rejected: it would make the upgrade one-way a second time for no format change.
-- **D3. Dry runs don't create it.** `import --dry-run` never writes the ledger (`docs/cli.md`), so on a ledger that no write command has opened since the upgrade, a dry run is as slow as before. Its results are identical either way. Documented in Task 2.
-- **D4. Oversized prefix (amended).** Import already skips a line of normal size as soon as its `type` shows it's none of the events it reads (`docs/cli.md`). Oversized lines follow the same rule. The reader passes each oversized line's first `min(65,536, length)` bytes to the handler. `JsonFields.ReadTypePrefix` reads them as an incomplete JSON block, against `CopilotSessionLogSource.Types`. The line is skipped only if the top-level `type` string is complete, is **not** one of the event types import reads (result -1), and appears after `session.start` with the log not stopped. An oversized line of a type import reads (result ≥ 0), or whose type can't be read from the prefix (result null), stays malformed, as today. This is as safe as an allowlist: a line of a type import never reads can't hold a record import would keep, at any size, so skipping it loses nothing. No list of special oversized types exists. Line hashing, line numbers, and offsets are unchanged. An oversized **unterminated** last line passes an empty prefix and stays malformed, because it's incomplete. A prefix can't see a second `type` property later in the line: the first one decides.
-- **D5. Routed means at least 5% below list (#80).** The rule leaves out a span when `ListCostUsd is decimal list && list > 0m && CostUsd <= list * 0.95m`. The literal request was "reported charge less than list cost". The 5% tolerance keeps a request whose charge differs from the rate card by rounding or a small rate drift in the rule, while Auto (10%) and Fusion (30%) clear it. No `ChargeSource` property is added. `ListCostUsd` is `null` when the ledger row's `list_cost_usd_pico` is NULL, which means "the same as the charge".
-- **D6. Attest with `actions/attest-build-provenance@4d10147` (v4.2.2).** This is the action that issue #77 names, and it's still maintained. Moving to `actions/attest` is deferred (S14-3). Subjects are the six binaries, `rates.json`, and `rates.v2.json`, listed explicitly (no glob). `gh-ledger-checksums.txt` isn't attested: it's derived from the attested files, and each file is verified by digest.
-- **D7. Manual runs never attest.** `workflow_dispatch` keeps skipping the `release` job, so a manual run builds, smoke-tests, checks rates, and uploads workflow artifacts, but never attests and never releases. Only the `release` job, which runs for a pushed `v*` tag, gets `id-token: write` and `attestations: write`. Top-level permissions stay `contents: read`, and `build` and `rates` get nothing new. Attesting manual-run artifacts was rejected: they aren't released, and an attestation for a binary nobody ships only adds noise to the repository's attestation list.
-- **D8. Authenticode is out of scope.** Windows binaries stay unsigned. The docs say so, and point to `gh attestation verify` instead.
-- **D9. Bump before the docs that would name it.** Task 5 bumps the version before Task 6 and Task 7 write docs that name `0.5.0`. VR3 fails on any unlisted mention of the *current* version. Writing "0.5.0 and earlier" while the version is still 0.5.0 would fail it, and after the bump it's fine.
+## Task 1: MCP Tool Names: Hash, Shape, Short Form, and Display
 
-## Plan amendments
-
-- **PA1 (2026-11-24, after Task 1 at `30dd55e`; coordinator-approved).** Task 3 no longer special-cases `model.model_call_success` and `model.messages_snapshot`. An oversized line whose complete top-level `type`, read from the 64 KiB prefix, isn't one of the event types import reads counts as a skipped event, and the log can complete. An oversized line of a type import reads, or whose type can't be read from the prefix, stays malformed. Changed: the Requirements row, the Task 3 summary line, A1, D4, Task 3's title, contracts, Copilot `OnOversized` algorithm, tests (CS20 becomes a theory, CS21 gains two heads, CS22, CS24, and OV1 renamed, CS25–CS27 added), docs text, and acceptance; Task 8's wording; Task 9's privacy list; "Tests added this sprint"; S14-5. Task 1 and its completed text, including F11, are unchanged. Unchanged: the 64 KiB prefix, "the first `type` decides", the after-`session.start` condition, unterminated last lines, hashing, line numbers and offsets, Codex, D1–D3, D5–D9, and the task order.
-- **PA2 (2026-11-24, after Task 2 at `36f8c27`; plan-text repair, no behavior change).** Task 3's tests now agree with PA1's rule and the code. CS5 (an oversized `user.message`, a type import doesn't read) expects MalformedLines 0, SkippedEvents 2, and no diagnostics, instead of PA1's leftover "unchanged" malformed expectation. CS19, CS25, CS26, and OV1 use valid service request IDs (`R1`, `R2`) instead of `"r-1"`/`"r-2"`, which `UsageIdentity.NormalizeServiceRequestId` rejects. `O`, `R1`, `R2`, CX18's fixture, OV1's harness and assertions, the nested reader class names in the contracts, CS18's precondition note, the acceptance text, and "Tests added this sprint" are made explicit. Task 2's LX6 text is left as committed.
-
-## Task 1: Import Benchmark Script and Baseline
-
-**Files:** `tests/benchmarks/Measure-ImportSpeed.ps1` (new). No product or test-project change. The script is outside every project, so `dotnet test` never runs it.
+**Files:** new `src/CopilotLedger.Core/Telemetry/McpToolNames.cs`; new `tests/CopilotLedger.Tests/Telemetry/McpToolNamesTests.cs`.
 
 **Contract:**
 
-```powershell
-#Requires -Version 7.2
-[CmdletBinding()]
-param(
-    [Parameter(Mandatory)] [string] $Binary,        # a published gh-ledger (gh-ledger.exe on Windows)
-    [ValidateRange(2, 1000000)] [int] $Records = 20000,
-    [string] $WorkRoot,                              # default: <temp>/gh-ledger-import-benchmark-<yyyyMMdd-HHmmss>
-    [switch] $KeepFiles
-)
+```csharp
+namespace CopilotLedger.Core.Telemetry;
+
+// Copilot CLI's live execute_tool span names a tool from an MCP server by gen_ai.tool.name = the lowercase hexadecimal
+// SHA-256 of the server's name in UTF-8, "/", and the SHA-256 of the tool's name in UTF-8: 129 characters. The session log
+// names the same call in clear, so import learns the readable name of each hashed one, and reports show it.
+public static class McpToolNames
+{
+    public const int HashedLength = 129;
+
+    // serverName's tool toolName as Copilot CLI's live spans name it. Throws ArgumentNullException for null.
+    public static string Hash(string serverName, string toolName);
+
+    // 64 lowercase hexadecimal digits, "/", and 64 more.
+    public static bool IsHashed([NotNullWhen(true)] string? name);
+
+    // "MCP tool " + the first 8 digits + "/" + the first 8 digits after the "/". Throws ArgumentException unless IsHashed.
+    public static string ShortForm(string hashedName);
+
+    // What reports show for a stored tool name: for a hashed name, the name a session log gave it (learned, by hashed name),
+    // else its ShortForm; any other name, and null, as it is. Throws ArgumentNullException for a null learned.
+    public static string? Display(string? name, IReadOnlyDictionary<string, string> learned);
+}
 ```
 
 **Algorithm:**
 
-1. `$ErrorActionPreference = 'Stop'`. Resolve `$Binary` to a full path, and throw `"Binary <path> doesn't exist."` if it isn't a file.
-2. Set `$WorkRoot`, defaulting to `Join-Path ([IO.Path]::GetTempPath()) ("gh-ledger-import-benchmark-" + (Get-Date -Format yyyyMMdd-HHmmss))`. If it exists and has any entry, throw `"WorkRoot <path> isn't empty."`. Create `<WorkRoot>/copilot-home` and `<WorkRoot>/ledger-home`.
-3. Generate `<WorkRoot>/copilot-home/session-state/6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f/events.jsonl` with a `System.IO.StreamWriter`: UTF-8 without BOM, `NewLine = "\n"`. Event `n` (1-based) has:
-   - ID `'00000000-0000-4000-8000-{0:x12}' -f n`;
-   - timestamp 2026-11-20T12:00:00Z plus n seconds, `yyyy-MM-ddTHH:mm:ss.fffZ`, invariant culture;
-   - `parentId` null for event 1, else the previous ID.
+1. `Hash`: `Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(serverName))) + "/" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(toolName)))`.
+2. `IsHashed`: `name` has length 129, `name[64] == '/'`, and every other character is `0`–`9` or `a`–`f`.
+3. `ShortForm`: throw `new ArgumentException("The name isn't a hashed MCP tool name.", nameof(hashedName))` unless `IsHashed`; return `"MCP tool " + hashedName[..8] + "/" + hashedName[65..73]`.
+4. `Display`: `ArgumentNullException.ThrowIfNull(learned)`. If `!IsHashed(name)`, return `name`. Return `learned.TryGetValue(name, out string? readable) ? readable : ShortForm(name)`.
 
-   Each line is `{"type":"<type>","data":<data>,"id":"<id>","timestamp":"<time>","parentId":<parent>}`.
-   1. `session.start` with data `{"sessionId":"6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f","version":1,"producer":"copilot-agent","copilotVersion":"1.0.114","startTime":"2026-11-20T12:00:00.000Z","context":{"cwd":"<WorkRoot with / separators>"},"alreadyInUse":false}`.
-   2. For i = 1..Records, `session.usage_record` with data `{"usage":{"model":"claude-haiku-4.5","provider":{"id":"copilot","kind":"copilot","label":"GitHub Copilot"},"modelDisplayName":"claude-haiku-4.5","inputTokens":1000,"outputTokens":100,"cacheReadTokens":0,"cacheWriteTokens":0,"reasoningTokens":0,"duration":1000,"initiator":"user","isByok":false,"apiCallId":"u-<i:d8>","serviceRequestId":"<'10000000-0000-4000-8000-{0:x12}' -f i>","accounting":{"sourceSessionId":"6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f","sequence":<i>,"usageId":"u-<i:d8>"},"cacheDetailsReported":true,"numToolCalls":0}}`.
-   3. Right after record `[int]($Records / 2)`, write two ignored oversized lines:
-      - `model.messages_snapshot` with data `{"messages":"<x × 9,437,184>"}`;
-      - `model.model_call_success` with data `{"response":"<x × 9,437,184>"}`.
+**Tests (`McpToolNamesTests`).** Private constants:
 
-      Each is longer than 8 MiB.
+- `LedgerHash` = `"fe14010b4fe83303852f0467c919ef9a7ca089b91e96e3aad7d426dd87079297/eb20c46435d60871da0eb97ce23417c04835e272725c59a3a649c7ce8e521d97"`;
+- `ExecJs` = `"10be6beef496b89dae799c37bd04e5eba2a6264a0a4d605f5661b50d7dc4d1ea/8453dc19fda259c463d7aaffb07becf26b7ce2cfc690a2b0a957e201653dc85a"`.
 
-   The filler is the letter `x` only: the file never holds real content.
-4. Save the current `COPILOT_HOME` and `COPILOT_LEDGER_HOME`, then set them to `<WorkRoot>/copilot-home` and `<WorkRoot>/ledger-home`. In `try`, do runs 1–3; in `finally`, restore both variables (removing any that were unset), and delete `$WorkRoot` unless `-KeepFiles`.
-5. Each run uses a `System.Diagnostics.Stopwatch` around `& $Binary import --all --json`, capturing stdout. Record `$LASTEXITCODE`, then parse the JSON. From the `sources` element whose `source` is `copilot`, take `sessionsScanned`, `sessionsSkippedUnchanged`, `recorded`, `duplicate`, `malformedLines`, and `skippedEvents`. If `sessionsScanned` isn't 1, throw `"Run <n> scanned <m> sessions, not 1."`.
-   - Run 1: the first import into an empty ledger.
-   - Run 2: the same command again, unchanged.
-   - Run 3: append `"\n"` to `events.jsonl` (`[IO.File]::AppendAllText`), which changes its bytes but not its events, then the same command.
-6. Write to the output (`Write-Output`):
-   - `Binary: <path>`;
-   - `Version: <& $Binary --version>`;
-   - `OS: <[System.Runtime.InteropServices.RuntimeInformation]::OSDescription>`;
-   - `Processors: <[Environment]::ProcessorCount>`;
-   - `Records: <Records>`;
-   - `Log bytes: <length of events.jsonl before run 1>`.
+| ID | Name | Vectors | Expected |
+|---|---|---|---|
+| MN1 | `MN1_Hash_IsTheSha256OfEachNameInUtf8` (theory, 4 rows) | (`ledger`, `get_branch_ledger`); (`computer-use`, `exec_js`); (`"caf\u00e9"`, `exec_js`); (`""`, `""`) | `LedgerHash`; `ExecJs`; `850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e/8453dc19fda259c463d7aaffb07becf26b7ce2cfc690a2b0a957e201653dc85a`; `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| MN2 | `MN2_IsHashed_AcceptsOnlyTheHashedShape` (theory, 11 rows of `(string? name, bool expected)`) | `LedgerHash`, `ExecJs`; then `null`, `""`, `"powershell"`, `ExecJs.ToUpperInvariant()`, `ExecJs[..128]`, `ExecJs + "0"`, `ExecJs.Replace('/', '-')`, `"g" + ExecJs[1..]`, `ExecJs[..63] + "/0" + ExecJs[65..]` | `true` for the first two; `false` for the other nine |
+| MN3 | `MN3_ShortForm_IsTheFirst8DigitsOfEachHash` (theory, 2 rows) | `LedgerHash`; `ExecJs` | `"MCP tool fe14010b/eb20c464"`; `"MCP tool 10be6bee/8453dc19"` |
+| MN4 | `MN4_ShortForm_RefusesAnotherName` | `ShortForm("powershell")` | throws `ArgumentException` |
+| MN5 | `MN5_Display_ResolvesOnlyHashedNames` (theory, 5 rows of `(string? name, string? expected)`), with `learned` = `{ [ExecJs] = "computer-use-exec_js", ["powershell"] = "never shown" }` (ordinal) | `null`; `"powershell"`; `ExecJs`; `LedgerHash`; `ExecJs.ToUpperInvariant()` | `null`; `"powershell"`; `"computer-use-exec_js"`; `"MCP tool fe14010b/eb20c464"`; `ExecJs.ToUpperInvariant()` |
+| MN6 | `MN6_Display_RequiresTheLearnedNames` | `Display("powershell", null!)` | throws `ArgumentNullException` |
 
-   Then write this markdown table, with seconds formatted `F2` using the invariant culture:
+**Acceptance:** MN1–MN6 pass: **24 tests**, so 1,984 passed. No other file changes.
 
-   ```text
-   | Run | Seconds | Exit | Scanned | Skipped unchanged | Recorded | Duplicate | Malformed lines | Skipped events |
-   |---|---|---|---|---|---|---|---|---|
-   | 1 first | … |
-   | 2 unchanged | … |
-   | 3 changed bytes | … |
-   ```
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
 
-**Baseline (do this in this task, after writing the script):**
-
-```powershell
-git stash list   # must be empty; the tree must equal 0f96a83 plus this script
-dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r win-x64 -o "$env:TEMP\gh-ledger-bench-before"
-pwsh -NoProfile -File tests/benchmarks/Measure-ImportSpeed.ps1 -Binary "$env:TEMP\gh-ledger-bench-before\gh-ledger.exe"
-```
-
-On Linux or macOS, use that platform's RID and the binary without `.exe`. The before run takes several minutes; on the planning machine, runs 1 and 2 took about 142 s and 283 s (F11).
-
-**Acceptance:**
-
-- The script runs to completion against the unchanged tree and prints the table. Copy its whole output verbatim into the commit body under `Baseline (0f96a83):`, then `Tests: <n> passed`.
-- Expected shape of the before-table. If it differs, report it; don't fix product code in this task.
-  - Run 1: exit 2, recorded = Records, malformed lines 2.
-  - Run 2: skipped unchanged 0, duplicate = Records, malformed lines 2.
-  - Run 3: duplicate = Records, malformed lines 2.
-- `git grep -n "\.copilot-ledger\|\.copilot\b" -- tests/benchmarks` finds nothing: the script never names the real homes.
-- No test count change. The baseline remains 1,921.
-
-**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`; the baseline commands above.
-
-## Task 2: The Conversation-Live Index, Ensured on Every Open
+## Task 2: The `mcp_tool_names` Table, Ensured on Every Open
 
 **Files:**
 
+- new `src/CopilotLedger.Core/Import/LearnedToolName.cs`
 - `src/CopilotLedger.Storage/LedgerMigrations.cs`
 - `src/CopilotLedger.Storage/SqliteLedgerStore.cs`
-- `docs/cli.md`
-- New `tests/CopilotLedger.Tests/Storage/ConversationLiveIndexTests.cs`
-- The test fixtures named under "Fixture fixes"
+- `src/CopilotLedger.Storage/SqliteLedgerStore.Imports.cs`
+- `src/CopilotLedger.Storage/SqliteLedgerStore.Export.cs`
+- `src/CopilotLedger.Storage/LedgerExportSnapshot.cs`
+- new `tests/CopilotLedger.Tests/Storage/McpToolNameStoreTests.cs`
 
-`UsageAuthority.cs` is **unchanged**.
+`LedgerMigrations.Migrations`, every migration's text, and `Indexes` are unchanged.
 
-**Contract (`LedgerMigrations`):**
+**Contracts:**
 
 ```csharp
-// Indexes that every ledger of the latest format has. Opening the ledger adds one that's missing, without changing
-// user_version: SQLite keeps an index current for every writer, including an earlier build of the same format.
-// ix_spans_conversation_live: the importer's per-record live-span lookups (UsageAuthority), which name 'otlp' literally
-// so that SQLite can use this partial index.
-public static IReadOnlyList<(string Name, string Sql)> Indexes { get; } =
+// CopilotLedger.Core.Import
+// An MCP tool's hashed name, as Copilot CLI's live spans give it (McpToolNames.Hash of a tool.execution_start's
+// data.mcpServerName and data.mcpToolName), and that event's data.toolName.
+public sealed record LearnedToolName(string HashedName, string ToolName);
+
+// LedgerMigrations, before Indexes
+// Tables that every ledger of the latest format has. Opening the ledger adds one that's missing, without changing
+// user_version: an earlier build of the same format ignores it.
+// mcp_tool_names: the names that import learned for MCP tools whose live spans Copilot names by hashes (McpToolNames).
+public static IReadOnlyList<(string Name, string Sql)> Tables { get; } =
 [
-    ("ix_spans_conversation_live",
-     "CREATE INDEX IF NOT EXISTS ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp';"),
+    ("mcp_tool_names",
+     """
+     CREATE TABLE IF NOT EXISTS mcp_tool_names (
+         hashed_name TEXT NOT NULL PRIMARY KEY CHECK (length(hashed_name) = 129),
+         tool_name   TEXT NOT NULL CHECK (length(tool_name) BETWEEN 1 AND 256)
+     ) STRICT, WITHOUT ROWID;
+     """),
 ];
+
+// SqliteLedgerStore (SqliteLedgerStore.Imports.cs)
+// Records names that import learned, under one BEGIN IMMEDIATE transaction: adds each new hashed name, and for one it knows
+// keeps the smaller tool name by SQLite's BINARY collation. Validates every name first: an ArgumentException when one's
+// HashedName isn't McpToolNames.IsHashed or its ToolName isn't 1 to 256 characters long, and nothing is written. Returns
+// without opening the ledger when names is empty.
+public async Task RecordMcpToolNamesAsync(IReadOnlyList<LearnedToolName> names, CancellationToken cancellationToken = default);
+
+// SqliteLedgerStore (SqliteLedgerStore.Export.cs)
+// Every learned MCP tool name, by hashed name (ordinal).
+internal static async Task<IReadOnlyDictionary<string, string>> ReadMcpToolNamesAsync(
+    SqliteTransaction snapshot,
+    CancellationToken cancellationToken);
+
+// LedgerExportSnapshot
+// The MCP tool names that import learned, by hashed name, for McpToolNames.Display.
+public Task<IReadOnlyDictionary<string, string>> GetMcpToolNamesAsync(CancellationToken cancellationToken = default) =>
+    SqliteLedgerStore.ReadMcpToolNamesAsync(_transaction, cancellationToken);
 ```
 
-`Migrations` and migration 7's text are unchanged.
+**Algorithm (`InitializeAsync`).** Move the body of today's `Indexes` loop (`SqliteLedgerStore.cs:171–205`) into a private static helper, `EnsureSchemaObjectAsync(SqliteConnection connection, string type, string name, string sql, CancellationToken cancellationToken)`, whose two queries become `SELECT COUNT(*) FROM sqlite_master WHERE type = @type AND name = @name;`:
 
-**Algorithm (`SqliteLedgerStore.InitializeAsync`, after the migration loop, before `_initialized = true`):** for each `(name, sql)` in `LedgerMigrations.Indexes`:
+1. If the count, outside a transaction, is 1, return.
+2. `BEGIN IMMEDIATE` (`connection.BeginTransaction(deferred: false)`).
+3. If the count inside the transaction is 0, execute `sql` in the transaction.
+4. Commit.
 
-1. Run `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = @name;` outside a transaction. If it returns 1, continue.
-2. `await using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);` (BEGIN IMMEDIATE, as the migrations do).
-3. Run the same count inside the transaction. If it returns 0, execute `sql` in the transaction.
-4. `await transaction.CommitAsync(cancellationToken);`
+After the migration loop, call it for each of `LedgerMigrations.Tables` with `"table"`, then for each of `LedgerMigrations.Indexes` with `"index"`, then set `_initialized = true`. The index's behavior is unchanged. Give the helper a one-line comment: it adds a table or index of the latest format that the ledger lacks, without changing `user_version`.
 
-A second process that waits on the write lock then sees the index and only commits an empty transaction.
+**Algorithm (`RecordMcpToolNamesAsync`):**
 
-**Fixture fixes:** each test that turns a ledger back into an older format by dropping `spans.canonical_usage_id` or `spans.ingest_source` must run `DROP INDEX ix_spans_conversation_live;` first (F10). At `0f96a83`, those scripts are in:
+1. `ArgumentNullException.ThrowIfNull(names)`; `EnsureInitialized()`.
+2. For each name: null, `!McpToolNames.IsHashed(name.HashedName)`, or `name.ToolName is not { Length: >= 1 and <= 256 }` throws `new ArgumentException("Learned MCP tool names need a hashed name and a tool name of 1 to 256 characters.", nameof(names))`.
+3. If `names.Count == 0`, return.
+4. One connection, `BEGIN IMMEDIATE`, and for each name:
 
-- `tests/CopilotLedger.Tests/Storage/LedgerSnapshotTests.cs` (~line 82);
-- `Storage/ApiEquivalentStoreTests.cs` (~line 125);
-- `Storage/SchemaVersion6Tests.cs` (~line 72);
-- `Storage/SpanLinkStoreTests.cs` (~lines 36, 397, 595).
+   ```sql
+   INSERT INTO mcp_tool_names (hashed_name, tool_name) VALUES (@hashed_name, @tool_name)
+   ON CONFLICT (hashed_name) DO UPDATE SET tool_name = excluded.tool_name
+   WHERE excluded.tool_name < mcp_tool_names.tool_name;
+   ```
 
-Also add `DROP INDEX IF EXISTS ix_spans_conversation_live;` to the format-6 script in `SchemaVersion7Tests` (`CreateFormat6Async`), so that it builds a true format 6. Run the suite to find any other such script: the error is `error in index ix_spans_conversation_live after drop column`. Fix only by adding the `DROP INDEX` line; don't change what any test asserts.
+5. Commit.
 
-**Tests (`ConversationLiveIndexTests`, all through public APIs and `LedgerSql`):**
+**Algorithm (`ReadMcpToolNamesAsync`):** `SELECT hashed_name, tool_name FROM mcp_tool_names;` in the snapshot transaction, into a `Dictionary<string, string>(StringComparer.Ordinal)`.
+
+**Tests (`McpToolNameStoreTests`).** Constants `ExecJs` and `LedgerHash` as in Task 1. `Rows(path)` is `LedgerSql.RowsAsync(path, "SELECT hashed_name || '|' || tool_name FROM mcp_tool_names ORDER BY hashed_name;")`. `TableCount(path)` is `LedgerSql.ScalarAsync(path, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'mcp_tool_names';")`.
 
 | ID | Name | Vector | Expected |
 |---|---|---|---|
-| LX1 | `LX1_ANewLedger_HasTheIndex` | `new SqliteLedgerStore(path, time).InitializeAsync()` | `RowsAsync(path, "SELECT name \|\| '\|' \|\| \"unique\" \|\| '\|' \|\| origin \|\| '\|' \|\| partial FROM pragma_index_list('spans') WHERE name = 'ix_spans_conversation_live'")` is `["ix_spans_conversation_live\|0\|c\|1"]`. `RowsAsync(path, "SELECT name FROM pragma_index_info('ix_spans_conversation_live') ORDER BY seqno")` is `["conversation_id", "canonical_usage_id"]`. `ScalarAsync(path, "SELECT sql FROM sqlite_master WHERE name = 'ix_spans_conversation_live'")` is `CREATE INDEX ix_spans_conversation_live ON spans (conversation_id, canonical_usage_id) WHERE ingest_source = 'otlp'`. `PRAGMA user_version` is 7. |
-| LX2 | `LX2_AFormat6Ledger_UpgradesTo7AndGainsTheIndex` | Initialize, record one live span with `TestSpans.Chat(conversationId: "c-1")`, then run `SchemaVersion7Tests`' format-6 script (with the `DROP INDEX` first, as above) and `PRAGMA user_version = 6;`. Open a new store on the path and initialize. | `user_version` 7; the LX1 index row is present; `SELECT COUNT(*) FROM spans` is 1; `charge_source` of that row is `rate_card`. |
-| LX3 | `LX3_ASprint12Format7Ledger_GainsTheIndex` | Initialize, record the same span, `DROP INDEX ix_spans_conversation_live;` (user_version stays 7), then open a new store and initialize. | `user_version` 7; the index row is present; the span count is 1. |
-| LX4 | `LX4_OpeningIsIdempotentAndConcurrentOpensAgree` | On one new path, `Task.WhenAll` of two `InitializeAsync` calls on two store instances, then a third, sequential `InitializeAsync`. | No exception; `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_spans_conversation_live'` is 1; `user_version` 7. |
-| LX5 | `LX5_TheImportLookups_UseTheIndex` | On an initialized empty ledger, `RowsAsync` of `EXPLAIN QUERY PLAN SELECT EXISTS (SELECT 1 FROM spans WHERE conversation_id = 'c' AND ingest_source = 'otlp'), EXISTS (SELECT 1 FROM spans WHERE conversation_id = 'c' AND ingest_source = 'otlp' AND canonical_usage_id IS NULL)`, joining the rows' `detail` column. | The joined text contains `USING COVERING INDEX ix_spans_conversation_live (conversation_id=?)` and `USING COVERING INDEX ix_spans_conversation_live (conversation_id=? AND canonical_usage_id=?)`. If the bundled SQLite words the plan differently, stop and report it; don't loosen the assertion. |
-| LX6 | `LX6_ADryRun_NeverCreatesTheIndex_AndDecidesTheSame` | `CliHarness` with a Copilot log (`CopilotSessionLogs("s-a")` with `Usage("u-1", "r-1")` and `Usage("u-2", "r-2")`). Initialize the harness's ledger, insert one live span for conversation `s-a` with `TestSpans.Chat(conversationId: "s-a")` through the store, then `DROP INDEX ix_spans_conversation_live;`. Run `import --all --dry-run --json` (A). Then initialize a store on the path, which adds the index, and run the same command (B). | After A, the index is absent (count 0). A and B have exit codes equal to each other, and identical stdout. After B, the index is present. |
-
-**Docs (`docs/cli.md`):**
-
-- In the `**Ledger format.**` paragraph, after "the first time its daemon or any command opens it.", insert: `Opening a format 7 ledger also adds an index that import uses to match its requests with live ones, when it's missing; on a large ledger that can take a moment once, and it doesn't change the format.` The paragraph must still not contain `format 6` (UD3).
-- In the `--dry-run` bullet under "Import past sessions", append: `Because it never writes the ledger, it doesn't add the index that the paragraph on the ledger format describes, so until the daemon or another command has opened the ledger with this version, a dry run of a large session can take much longer than the import itself; its results are the same.`
+| MT1 | `MT1_ANewLedger_HasTheTable` | `new SqliteLedgerStore(path).InitializeAsync()` | `RowsAsync(path, "SELECT name \|\| '\|' \|\| type \|\| '\|' \|\| pk \|\| '\|' \|\| \"notnull\" FROM pragma_table_info('mcp_tool_names') ORDER BY cid;")` is `["hashed_name\|TEXT\|1\|1", "tool_name\|TEXT\|0\|1"]`. `ScalarAsync(path, "SELECT type \|\| '\|' \|\| ncol \|\| '\|' \|\| wr \|\| '\|' \|\| strict FROM pragma_table_list('mcp_tool_names');")` is `"table\|2\|1\|1"`. `PRAGMA user_version` is 7. |
+| MT2 | `MT2_AFormat7LedgerWithoutTheTable_GainsIt` | Initialize; record `ImportEntries.Live("c-1", null)`; `ClearAllPools()`; `DROP TABLE mcp_tool_names;`; `ClearAllPools()`; a new store on the path, initialized | `TableCount` 1; `user_version` 7; `SELECT COUNT(*) FROM spans` 1 |
+| MT3 | `MT3_AFormat6Ledger_UpgradesAndGainsTheTable` | Initialize; record the same span; `ClearAllPools()`; run `DROP TABLE mcp_tool_names; DROP INDEX ix_spans_conversation_live; DROP INDEX ix_span_links_import_span; ALTER TABLE spans DROP COLUMN list_cost_usd_pico; ALTER TABLE spans DROP COLUMN charge_source; ALTER TABLE import_sessions DROP COLUMN import_revision; PRAGMA user_version = 6;`; `ClearAllPools()`; a new store, initialized | `user_version` 7; `TableCount` 1; the span count 1; its `charge_source` is `rate_card` |
+| MT4 | `MT4_ConcurrentOpens_CreateOneTable` | `Task.WhenAll` of two `InitializeAsync` calls on two stores of one new path, then a third | No exception; `TableCount` 1; `user_version` 7 |
+| MT5 | `MT5_LearnedNames_KeepTheOrdinallySmallestName` | On an initialized store: record `[(ExecJs, "computer-use-exec_js"), (LedgerHash, "ledger-get_branch_ledger")]` (A); record `[(ExecJs, "zzz")]` (B); record `[(ExecJs, "computer-use/exec_js")]` (C); record A again (D); record `[(ExecJs, "computer-use-exec")]` (E) | After A, B, C, and D, `Rows` is `[ExecJs + "\|computer-use-exec_js", LedgerHash + "\|ledger-get_branch_ledger"]`. After E, `[ExecJs + "\|computer-use-exec", LedgerHash + "\|ledger-get_branch_ledger"]`. |
+| MT6 | `MT6_AnInvalidName_WritesNothing` (theory, 4 rows of `(string hashedName, string toolName)`) | `("powershell", "x")`; `(ExecJs.ToUpperInvariant(), "x")`; `(ExecJs, "")`; `(ExecJs, new string('x', 257))`. Each records `[new(LedgerHash, "ledger-get_branch_ledger"), new(hashedName, toolName)]` | `ArgumentException`; `SELECT COUNT(*) FROM mcp_tool_names` is 0 |
+| MT7 | `MT7_TheExportSnapshot_ReadsTheNames` | On a new initialized store, `GetMcpToolNamesAsync()` of an export snapshot (N0); record A of MT5; a new snapshot's names (N1) | N0 is empty. N1 has exactly 2 entries: `N1[ExecJs]` is `computer-use-exec_js` and `N1[LedgerHash]` is `ledger-get_branch_ledger`. |
+| MT8 | `MT8_ADryRunImport_NeverCreatesTheTable` | `CliHarness` (the default constructor); `new CopilotSessionLogs("s-a").Usage("u-1", R1)` written to `harness.Context.CopilotHome`, with `R1` = `"11111111-1111-4111-8111-111111111111"`; initialize the harness's ledger; `ClearAllPools()`; `DROP TABLE mcp_tool_names;`; `ClearAllPools()`; run `import --all --dry-run --json`; then `import --all --json` | After the dry run: exit code 0 and `TableCount` 0. After the import: exit code 0 and `TableCount` 1. |
 
 **Acceptance:**
 
-- LX1–LX6 pass, the fixture fixes change no assertion, and `UpgradeDocsTests` UD1–UD4 still pass (the format stays 7).
-- `git diff 0f96a83 -- src/CopilotLedger.Storage/UsageAuthority.cs` is empty.
-- Quick check, not a gate: `pwsh -File tests/benchmarks/Measure-ImportSpeed.ps1 -Binary <a Release publish of this commit> -Records 2000` finishes with run 2 taking under 5 s. Note the result in the commit body.
+- MT1–MT8 pass: **11 tests**, so 1,995 passed. Sprint 14's `ConversationLiveIndexTests` and every existing test pass unchanged.
+- `git diff c6dc935 -- src/CopilotLedger.Storage/LedgerMigrations.cs` adds only `Tables` and its comment.
+- No `CopilotSessionLogSource`, importer, CLI, or docs change.
 
-## Task 3: Oversized Lines of Unread Types Are Skipped
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
+
+## Task 3: Import Learns MCP Tool Names
 
 **Files:**
 
-- `src/CopilotLedger.Core/Import/JsonlLineReader.cs`
-- `src/CopilotLedger.Core/Import/JsonFields.cs`
 - `src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs`
-- `src/CopilotLedger.Core/Import/CodexSessionLogSource.cs`
+- `src/CopilotLedger.Core/Import/SessionLogReadResult.cs`
+- `src/CopilotLedger.Storage/Import/LedgerImporter.cs`
 - `docs/cli.md`
-- `tests/CopilotLedger.Tests/Import/CopilotSessionGateTests.cs`
-- `tests/CopilotLedger.Tests/Import/CodexRolloutTests.cs`
-- New `tests/CopilotLedger.Tests/Cli/ImportOversizedTests.cs`
-
-`ImportLimits` is unchanged.
+- `tests/CopilotLedger.Tests/TestSupport/CopilotSessionLogs.cs`
+- `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs`
+- `tests/CopilotLedger.Tests/Import/ImportRepairTests.cs`
+- new `tests/CopilotLedger.Tests/Import/McpToolNameImportTests.cs`
 
 **Contracts:**
 
 ```csharp
-// JsonlLineReader
-internal const int PrefixBytes = 64 * 1024;   // the start of an oversized line that its handler sees
+// SessionLogReadResult, after ToolCalls
+public IReadOnlyList<LearnedToolName> LearnedToolNames { get; init; } = [];   // a Read Copilot log's MCP tools: distinct, ordinal by HashedName, then ToolName
 
-// prefix: the line's first min(PrefixBytes, its length) bytes, valid only during the call; empty for an oversized last
-// line without "\n", which is incomplete.
-internal delegate void OversizedHandler(ReadOnlySpan<byte> prefix, long lineNumber, long byteOffset);
-
-internal static void Read(
-    Stream stream, long maxBytes, int maxLineBytes, LineHandler onLine,
-    OversizedHandler onOversized,                // was Action<long, long>
-    Action<long, long> onUnterminated, IncrementalHash? hash, CancellationToken cancellationToken);
-
-// JsonFields
-// The index in types of the top-level "type" string of a JSON object that may be cut off anywhere: -1 when it's another
-// string, and null when the prefix isn't the start of a JSON object, or ends before a top-level "type" string is complete,
-// or that value isn't a string. The first top-level "type" decides; a later duplicate isn't seen.
-internal static int? ReadTypePrefix(ReadOnlySpan<byte> prefix, IReadOnlyList<string> types);
-
-// CopilotSessionLogSource.Session (the nested per-log reader class that has OnOversized today). It uses the existing
-// private static CopilotSessionLogSource.Types list, the event types import reads, unchanged. No other list of types is added.
-internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset);
-
-// CodexSessionLogSource.Rollout (the nested per-rollout reader class that has OnOversized today)
-internal void OnOversized(ReadOnlySpan<byte> prefix, long number, long offset);   // ignores prefix; behavior unchanged
+// LedgerImporter
+public const int CurrentImportRevision = 2;   // 2: every log is read once more, to learn its MCP tools' names
 ```
 
-**Algorithm (reader):**
+**Algorithm (Copilot source):**
 
-1. Keep an `int prefixLength`, initially 0.
-2. When a line first exceeds `maxLineBytes` (the `lineLength + count > maxLineBytes` branch), before setting `oversized = true`:
-   1. If `lineLength < PrefixBytes`, copy `min(PrefixBytes - lineLength, count)` bytes from `chunk[start..]` to `line[lineLength..]`, and set `prefixLength = lineLength + copied`.
-   2. Otherwise, set `prefixLength = PrefixBytes`.
+1. Add `("data.mcpServerName", 256)` and `("data.mcpToolName", 256)` to `ToolStartPaths`, after `("data.toolName", 256)`. Nothing else is added to any path tree.
+2. `Session` gets `private readonly HashSet<LearnedToolName> _learned = [];`.
+3. In `ToolStart`, after `Chain(...)` and the reads of `toolCallId` and `toolName`, and before the existing early `return`: if `fields.Duplicate is null && toolName is not null && fields.String("data.mcpServerName") is string server && fields.String("data.mcpToolName") is string tool`, add `new LearnedToolName(McpToolNames.Hash(server, tool), toolName)`. The rest of `ToolStart` is unchanged.
+4. In `Finish`, set `LearnedToolNames = [.. _learned.OrderBy(name => name.HashedName, StringComparer.Ordinal).ThenBy(name => name.ToolName, StringComparer.Ordinal)]` on the `Read` result only. `SessionLogs.NotRead` and Codex are unchanged, so their results keep the empty default.
 
-   `line` is always at least `ChunkBytes` (64 KiB) long, because it's rented with that size and only grows, so the copy fits. Don't reset `line`'s bytes until the line ends.
-3. At the line's `\n`, call `onOversized(line.AsSpan(0, prefixLength), lineNumber, lineOffset)`. Then reset `prefixLength = 0` along with `lineLength` and `oversized`.
-4. At EOF with `oversized`, call `onOversized(ReadOnlySpan<byte>.Empty, lineNumber, lineOffset)`.
-5. Everything else is unchanged:
-   - hashing every byte read;
-   - blank-line handling;
-   - `\r` trimming;
-   - line numbers and offsets;
-   - the 8 MiB limit.
+**Algorithm (importer).** In `ImportLogAsync`, inside the existing `if (store is not null)` block that writes the checkpoint and before that write, add `if (result.LearnedToolNames.Count > 0) { await store.RecordMcpToolNamesAsync(result.LearnedToolNames, cancellationToken); }`. Update the comment above the block to start "The log's learned MCP tool names, then its checkpoint, follow its last batch." This runs for every log whose status is `Read`, whatever its records' scope, resolutions, or tool calls' age. Nothing else changes, including the report and the skip check, which now compares with revision 2.
 
-**Algorithm (`ReadTypePrefix`):**
+**Fixture (`CopilotSessionLogs.ToolStart`):** add optional parameters `string? mcpServerName = null, string? mcpToolName = null` after `parentId`. When one is given, set `data["mcpServerName"]` or `data["mcpToolName"]` to it before the `Event(...)` call; their position in `data` doesn't matter, because the reader doesn't depend on order. Existing calls are unchanged.
 
-1. Create `Utf8JsonReader reader = new(prefix, isFinalBlock: false, new JsonReaderState(Options))` with the class's existing `Options`. Wrap steps 2–5 in `try { … } catch (JsonException) { return null; }`.
-2. If `!reader.Read()` or `reader.TokenType != JsonTokenType.StartObject`, return null.
-3. Loop:
-   1. If `!reader.Read()`, return null.
-   2. If `TokenType == EndObject`, return null.
-   3. The token is a `PropertyName`. If `TextEquals(ref reader, "type")`, go to step 4.
-   4. Otherwise, if `!reader.Read()` or `!reader.TrySkip()`, return null (the value is cut off).
-4. If `!reader.Read()` or `TokenType != String`, return null.
-5. For `i` in `0..types.Count`, return `i` if `TextEquals(ref reader, types[i])`. Return -1.
+**Changed tests:**
 
-**Algorithm (Copilot `OnOversized`):**
+- `ImportRepairTests.RR1` (`Assert.Equal(1, …ImportRevision)` at line 35–37) and `RR8` (`Assert.Equal(1, checkpoint.ImportRevision)` at line 167): expect `2`. Nothing else in them changes.
+- `ImportPrivacyTests`:
+  - `LeftEmpty` gains `["mcp_tool_names"] = [],`;
+  - IP3's array gains `("mcp_tool_names", "1"),`;
+  - in `WriteFixtures`, `.ToolStart("toolu-3", "grep", agentId: "agent-1")` becomes `.ToolStart("toolu-3", "computer-use-exec_js", agentId: "agent-1", mcpServerName: "computer-use", mcpToolName: "exec_js")`.
 
-1. If `_started`, `_stop is null`, and `JsonFields.ReadTypePrefix(prefix, Types) == -1` (a complete top-level `type` that import doesn't read), increment `_skipped` and return. Add no diagnostic.
-2. Otherwise (before `session.start`, after a stop, a type import reads, or a type the prefix can't show), call `Malformed(ImportDiagnosticCode.OversizedLine, ImportEventKind.Unknown, null, number, offset)`, as today.
+  IP1–IP5's assertions are unchanged, and so are IP1's counts (6 spans and 3 links).
 
-**Tests:**
+**New test in `ImportPrivacyTests`:**
 
-`O(head)` is a private static test helper: `head + new string('x', ImportLimits.MaxLineBytes + 1 - head.Length - 3) + "\"}}"`, an ASCII line exactly `MaxLineBytes + 1` bytes long. Add it to `CopilotSessionGateTests`, and add an identical private copy to `ImportOversizedTests` (OV1). CX18 inlines the same formula. `C` is `CopilotSessionLogs.Canary`. Each `CopilotSessionGateTests` test also calls `AssertNoCanary(result)`.
+`IP6_AnMcpToolCall_KeepsOnlyItsHashedNameAndToolName`:
 
-`R1` is `"11111111-1111-4111-8111-111111111111"` and `R2` is `"22222222-2222-4222-8222-222222222222"`, the same values as `ImportCommandTests.S1` and `S2`. Declare them as private constants in each test class that uses them. A `Usage` record needs a service request ID that `UsageIdentity.NormalizeServiceRequestId` accepts (a non-empty UUID); with anything else, such as `"r-1"`, it's an unsupported usage shape, no record is created, and the log never completes.
+1. `Harness(temp)`. Write `new CopilotSessionLogs("s-mcp")`, then:
+   - `.Usage("u1", S1, numToolCalls: 1)`;
+   - `.Event("tool.execution_start", { toolCallId: "toolu-m1", toolName: "srv-tool", mcpServerName: Canary("SERVER"), mcpToolName: Canary("TOOL"), arguments: { query: Canary("ARGS") }, toolTitle: Canary("PROMPT") })`;
+   - `.Event("tool.execution_complete", { toolCallId: "toolu-m1", success: false, result: { content: Canary("RESULT") }, error: { code: "failure", message: Canary("ERRMSG") } })`;
 
-| ID | Log (after `session.start` unless stated) | Expected |
-|---|---|---|
-| CS5 `CS5_ALineLongerThan8MiBIsDiscardedUnread` (name and log unchanged; assertions change, see below) | oversized `user.message` (head `"{\"type\":\"user.message\",\"data\":{\"content\":\"" + C`, as today), then `UserMessage()` | MalformedLines 0, SkippedEvents 2, Diagnostics empty. Still asserts the oversized line is exactly `MaxLineBytes + 1` bytes, and `AssertNoCanary(result)` |
-| CS18 `CS18_AnOversizedMessagesSnapshot_IsSkipped` | `Raw(O("{\"type\":\"model.messages_snapshot\",\"data\":{\"messages\":\"" + C))`, then `UserMessage()` | Status Read, MalformedLines 0, SkippedEvents 2, Diagnostics empty |
-| CS19 `CS19_AnOversizedModelCallSuccess_IsSkipped_WhereverItsTypeIs` | `Raw(O("{\"id\":\"00000000-0000-4000-8000-000000000002\",\"data\":{\"model\":\"m\",\"nested\":[1,{\"a\":true},null]},\"type\":\"model.model_call_success\",\"response\":\"" + C))`, then `Usage("u-1", R1)` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
-| CS20 `CS20_AnOversizedEventThatImportReads_StaysMalformed` (theory) | Two heads, each `Raw(O(head))`: `"{\"type\":\"session.usage_record\",\"data\":{\"usage\":{\"model\":\"" + C`; `"{\"type\":\"session.usage\\u005frecord\",\"data\":{\"usage\":{\"model\":\"" + C` (escaped, still a type import reads) | Each: MalformedLines 1, SkippedEvents 0, Records.Count 0, one `OversizedLine` diagnostic at line 2 |
-| CS21 `CS21_ATypeBeyondThePrefixOrUnreadable_StaysMalformed` (theory) | Seven heads, each with `O(head)`: `"{\"pad\":\"" + new string('y', 65_508) + "\",\"type\":\"model.messages_snapshot\",\"x\":\""` (the prefix ends inside the `type` value, after `"type":"model.mess`: the value starts at byte 65,526, and the prefix is bytes 0–65,535); `"{\"data\":{\"messages\":\"" + new string('y', 70_000) + "\"},\"type\":\"model.messages_snapshot\",\"x\":\""` (type past 65,536 bytes); `"{\"x\":\""` (no `type` at all); `"{\"type\":7,\"x\":\""`; `"{\"type\":null,\"x\":\""`; `"[{\"type\":\"model.messages_snapshot\",\"x\":\""`; `"{type:\"model.messages_snapshot\",\"x\":\""` | Each: MalformedLines 1, SkippedEvents 0, one `OversizedLine` diagnostic at line 2 |
-| CS22 `CS22_AnEscapedUnreadType_IsSkipped` | `Raw(O("{\"type\":\"model.messages\\u005fsnapshot\",\"x\":\""))` | MalformedLines 0, SkippedEvents 1 |
-| CS23 `CS23_AnOversizedUnterminatedLastLine_StaysMalformed` | `WriteAsync(home, new CopilotSessionLogs(SessionId).Text() + O("{\"type\":\"model.messages_snapshot\",\"x\":\""))`, with no trailing `\n` | MalformedLines 1, one `OversizedLine` diagnostic at line 2 |
-| CS24 `CS24_AnOversizedUnreadLineBeforeSessionStart_StaysMalformed` | `WriteAsync(home, O("{\"type\":\"model.messages_snapshot\",\"x\":\"") + "\n" + new CopilotSessionLogs(SessionId).Text())` | Status Read, MalformedLines 1, one `OversizedLine` diagnostic at line 1 |
-| CS25 `CS25_AnOversizedBinaryAsset_IsSkipped` | `Raw(O("{\"type\":\"session.binary_asset\",\"data\":{\"bytes\":\"" + C))`, then `Usage("u-1", R1)` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
-| CS26 `CS26_AnOversizedLineOfAnUnknownFutureType_IsSkipped` | `Raw(O("{\"type\":\"future.unknown_event\",\"data\":{\"blob\":\"" + C))`, then `Usage("u-1", R1)` | Status Read, MalformedLines 0, SkippedEvents 1, Records.Count 1, Diagnostics empty |
-| CS27 `CS27_AnOversizedAssistantMessage_StaysMalformed` | `Raw(O("{\"type\":\"assistant.message\",\"data\":{\"content\":\"" + C))` | MalformedLines 1, SkippedEvents 0, one `OversizedLine` diagnostic at line 2 |
-| CX18 `CX18_AnOversizedRolloutLine_StaysMalformed_WhateverItsType` (`CodexRolloutTests`) | `new CodexRollouts(Thread).Raw(head + new string('x', ImportLimits.MaxLineBytes + 1 - head.Length - 3) + "\"}}")`, with `head` = `"{\"type\":\"model.messages_snapshot\",\"payload\":{\"x\":\""` | Status Read, MalformedLines 1, one `OversizedLine` diagnostic at line 2 |
-| OV1 `OV1_ALogWhoseOversizedLinesAreUnread_CompletesAndIsSkippedNextTime` (`ImportOversizedTests`, `CliHarness` built as `ImportCommandTests.Harness` builds it, with `ManualTimeProvider(new DateTimeOffset(2026, 11, 23, 12, 0, 0, TimeSpan.Zero))`) | Write `new CopilotSessionLogs("s-ov").Usage("u-1", R1).Raw(O("{\"type\":\"model.messages_snapshot\",\"x\":\"")).Raw(O("{\"type\":\"model.model_call_success\",\"x\":\"")).Usage("u-2", R2)` to `harness.Context.CopilotHome` (not active). Run `import --all --json` twice. | Run 1: exit 0, stderr empty; `sources[0]` (copilot) `recorded` 2, `malformedLines` 0, `unsupportedUsageShapes` 0, `skippedEvents` 2, `coverage` `"complete"`. Run 2: exit 0, stderr empty; `sessionsSkippedUnchanged` 1, `recorded` 0, `duplicate` 0. Neither stdout contains `C` or `xxxxxxxx`. |
+   to `harness.Context.CopilotHome`.
+2. Run `import --all --source copilot --json`, then `SqliteConnection.ClearAllPools()`.
+3. Expect:
+   - exit code 0;
+   - `SELECT hashed_name || '|' || tool_name FROM mcp_tool_names;` is exactly `["f3f23e35c9fc32bd46be8fb3989b4952f3dccaf5dbc4721da91359972275a9d5/74ef83b0e3a641bf9d96ddd6e6dcf473f87891e975cbc4782d0be0a03f8c8cb4|srv-tool"]`;
+   - `SELECT tool_name FROM span_links;` is exactly `["srv-tool"]`;
+   - none of `Canary("SERVER")`, `Canary("TOOL")`, `Canary("ARGS")`, `Canary("PROMPT")`, `Canary("RESULT")`, `Canary("ERRMSG")`, and `CopilotSessionLogs.Canary` is in the run's output or error, or, as UTF-8 bytes, in `ledger.db`, `ledger.db-wal`, or `ledger.db-shm` when they exist (read as IP1 reads them).
 
-Before relying on CS18's "SkippedEvents 2", check that `UserMessage()` counts as one skipped event (CS2 shows it does: `{not json` then `UserMessage()` gives SkippedEvents 1). If an existing exit-code rule makes run 1's exit code differ from 0 with no malformed lines, stop and report it.
+**Tests (`McpToolNameImportTests`).** Constants: `ExecJs` and `LedgerHash` as in Task 1; `SessionId` = `"0f8fad5b-d9cb-469f-a165-70867728950e"`; `S1` = `"11111111-1111-4111-8111-111111111111"`; `S2` = `"22222222-2222-4222-8222-222222222222"`; `Now` = 2026-11-23 12:00:00 UTC. `Mcp(log, id)` is `log.ToolStart(id, "computer-use-exec_js", mcpServerName: "computer-use", mcpToolName: "exec_js")`. Source-level tests read with `CopilotRecordTests.ReadAsync(home)`. Importer-level tests run `new LedgerImporter(JsonRateCardCalculator.LoadEmbedded(), new ManualTimeProvider(Now)).RunAsync(...)` with `Sources = [new ImportSourceRequest(new CopilotSessionLogSource(), home)]`, as `CopilotToolLinkTests.ImportAsync` does, and read rows with `LedgerSql`. `Names(db)` is `SELECT hashed_name || '|' || tool_name FROM mcp_tool_names ORDER BY hashed_name;`.
 
-**CS5's changed assertions.** `user.message` isn't in `Types`, so under D4 its oversized line is skipped. In `CS5_ALineLongerThan8MiBIsDiscardedUnread`, keep the name, the log, the byte-length assertion, and `AssertNoCanary(result)`. Replace every statement between the byte-length assertion and `AssertNoCanary(result)` with exactly:
-
-```csharp
-Assert.Equal(0, result.MalformedLines);
-Assert.Equal(2, result.SkippedEvents);
-Assert.Empty(result.Diagnostics);
-```
-
-(They were `MalformedLines` 1, `SkippedEvents` 1, and one `OversizedLine` diagnostic at line 2. CS20 and CS27 now cover the malformed path.)
+| ID | Name | Log or setup | Expected |
+|---|---|---|---|
+| ML1 | `ML1_AnMcpToolStart_TeachesItsName` | `new CopilotSessionLogs(SessionId).Usage("u1", S1, numToolCalls: 1)`, `Mcp(…, "t1")`, `.ToolComplete("t1", true)` | Status `Read`; `LearnedToolNames` is `[new LearnedToolName(ExecJs, "computer-use-exec_js")]`; one tool call, named `computer-use-exec_js`; `CopilotRecordTests.AssertNoCanary(result)` |
+| ML2 | `ML2_OnlyThreeValidStringsTeachAName` (theory, 6 rows) | After `session.start`, one `tool.execution_start` whose data is, by row: `no tool name`: `{toolCallId "t1", mcpServerName "computer-use", mcpToolName "exec_js"}`; `no MCP tool name`: `{toolCallId, toolName "computer-use-exec_js", mcpServerName "computer-use"}`; `a numeric server name`: `{toolCallId, toolName, mcpServerName 7, mcpToolName "exec_js"}`; `an empty MCP tool name`: `{toolCallId, toolName, mcpServerName "computer-use", mcpToolName ""}`; `a server name over 256 characters`: `{toolCallId, toolName, mcpServerName new string('s', 257), mcpToolName "exec_js"}`; `a repeated property`: the raw line `{"type":"tool.execution_start","data":{"toolCallId":"t1","toolName":"computer-use-exec_js","mcpServerName":"computer-use","mcpServerName":"other","mcpToolName":"exec_js"},"id":"00000000-0000-4000-8000-0000000000ff","timestamp":"2026-11-20T12:00:01.000Z","parentId":null}` | Each: status `Read`, `LearnedToolNames` empty |
+| ML3 | `ML3_EachNameIsLearnedOnce_InOrder` | `Mcp(log, "t1")`; `Mcp(log, "t2")`; `.ToolStart("t3", "ledger-get_branch_ledger", mcpServerName: "ledger", mcpToolName: "get_branch_ledger")`; `.ToolStart("t4", "computer-use-exec_js-v2", mcpServerName: "computer-use", mcpToolName: "exec_js")`; `.ToolStart("t5", "powershell")` | `LearnedToolNames` is exactly `[(ExecJs, "computer-use-exec_js"), (ExecJs, "computer-use-exec_js-v2"), (LedgerHash, "ledger-get_branch_ledger")]` |
+| ML4 | `ML4_AStartWithoutACallIdOrCompletion_StillTeachesItsName` | `.Event("tool.execution_start", {toolName "computer-use-exec_js", mcpServerName "computer-use", mcpToolName "exec_js"})` only | `LearnedToolNames` is `[(ExecJs, "computer-use-exec_js")]`; `ToolCalls` empty |
+| ML5 | `ML5_ALogThatIsntRead_TeachesNothing` | `new CopilotSessionLogs(SessionId, "1.0.102")` with `Mcp(…, "t1")` | Status `UnsupportedProducerVersion`; `LearnedToolNames` empty |
+| ML6 | `ML6_ImportRecordsTheNamesOfLiveSessionsAndOldToolCalls` | An initialized store at `<temp>/ledger.db` with `RecordAsync([ImportEntries.Live("s-live", S1)])`. Log `s-live`: `.Usage("u1", S1, numToolCalls: 1)`, `Mcp(…, "t1")`, `.ToolComplete("t1", true)`. Log `s-old`, started 2026-11-01 12:00:00 UTC: `.Usage("u2", S2, numToolCalls: 1)`, `.ToolStart("t2", "ledger-get_branch_ledger", mcpServerName: "ledger", mcpToolName: "get_branch_ledger")`, `.ToolComplete("t2", true)`. Import both. | The Copilot report has `OverlapSkipped` 1, `Recorded` 1, and `ToolLinksRecorded` 0. `Names` is `[ExecJs + "\|computer-use-exec_js", LedgerHash + "\|ledger-get_branch_ledger"]`. `SELECT COUNT(*) FROM span_links` is 0. |
+| ML7 | `ML7_AScopedImport_LearnsFromLogsOutOfScope` | Log `s-elsewhere` with `context: CopilotSessionLogs.Context(api, api, "main", "contoso/api", GitFixture.Sha1)`, where `api` = `<temp>/api`: `.Usage("u1", S1)`, `Mcp(…, "t1")`. Import with `RepositoryRoot = <temp>/repo` and `RepositorySlug = "swigerb/copilot-ledger"`. | `RecordsOutOfScope` 1 and `Recorded` 0; `Names` is `[ExecJs + "\|computer-use-exec_js"]` |
+| ML8 | `ML8_ADryRun_LearnsNothing` | Initialize the ledger; log `s-a` with `Mcp(…, "t1")`; import with `DryRun = true`, then without | 0 rows after the dry run; `[ExecJs + "\|computer-use-exec_js"]` after the import |
+| ML9 | `ML9_TheSmallestNameWins_WhateverTheOrder` | Two ledgers, each with its own home holding logs `s-a` and `s-b`, each log with one `tool.execution_start` of `computer-use`/`exec_js`. In ledger 1, `s-a`'s `toolName` is `computer-use-exec_js-v2` and `s-b`'s is `computer-use-exec_js`. In ledger 2, they're swapped. Import each. | `Names` is `[ExecJs + "\|computer-use-exec_js"]` in both |
+| ML10 | `ML10_ALogOfAnEarlierRevision_IsReadOnceMore` | Log `s-a`: `.Usage("u1", S1, numToolCalls: 1)`, `Mcp(…, "t1")`, `.ToolComplete("t1", true)`. Import (run 1). Run `DELETE FROM mcp_tool_names; UPDATE import_sessions SET import_revision = 1;` with `LedgerSql`. Import (run 2), then import again (run 3). | Run 1: `Recorded` 1 and `ToolLinksRecorded` 1. Run 2: `SessionsSkippedUnchanged` 0, `Duplicates` 1, `Recorded` 0; `Names` is `[ExecJs + "\|computer-use-exec_js"]`; `GetImportSessionAsync(Copilot, "s-a").ImportRevision` is 2. Run 3: `SessionsSkippedUnchanged` 1, `Recorded` 0. |
 
 **Docs (`docs/cli.md`):**
 
-- Report table row: `| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete. A longer line counts as a skipped event instead when its first 64 KiB show a top-level \`type\` that isn't one of the events import reads, the same rule as for shorter lines |`
-- In the JSON field list, change `` `skippedEvents` (events of other types) `` to `` `skippedEvents` (events of other types, including those longer than 8 MiB whose type shows in their first 64 KiB) ``.
-- In "Repairs" or "The import report", wherever the docs say a log with malformed lines is read again, add no new text. The behavior there is unchanged.
+- **Import allowlist.** Add these two rows right before `<!-- /import-allowlist -->`:
 
-**Acceptance:** CS5 passes with exactly the changed assertions above. All other existing tests pass unchanged. CS18–CS27, CX18, and OV1 pass. The reader's hash test vectors, if any, are unchanged. `git grep -n "Action<long, long> onOversized"` and `git grep -n "IgnoredOversizedTypes" -- src tests` find nothing, and `src/` names neither `model.model_call_success` nor `model.messages_snapshot`. `CopilotSessionLogSource.Types` is unchanged.
+  ```markdown
+  | `mcp_tool_names.hashed_name` | The name that Copilot CLI's live spans give an MCP tool: the SHA-256 of `data.mcpServerName` of `tool.execution_start`, `/`, and the SHA-256 of its `data.mcpToolName`, in lowercase hexadecimal | — |
+  | `mcp_tool_names.tool_name` | `data.toolName` of the same `tool.execution_start`; when logs name one tool differently, the first in ordinal order | — |
+  ```
 
-## Task 4: `premium_model_trivial_turn` Skips Routed Requests
+- **Read, never stored.** In the `- **Read, never stored:**` line, replace `Usage IDs, service request IDs, and tool call IDs are stored only as the SHA-256 hashes above.` with `Usage IDs, service request IDs, tool call IDs, and \`data.mcpServerName\` and \`data.mcpToolName\` of \`tool.execution_start\` are stored only as the SHA-256 hashes above.` Every phrase that IP5 pins stays.
+
+**Acceptance:**
+
+- ML1–ML10 and IP6 pass: **16 tests**, so 2,011 passed.
+- RR1 and RR8 pass with revision 2. IP1–IP5 pass with the changes above, which add assertions and weaken none.
+- `git grep -n -E 'arguments|toolTitle|"result"' -- src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (single quotes, in PowerShell) finds nothing and exits 1, as at `c6dc935`. `git diff HEAD~1 -- src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` adds no path to any path tree other than `data.mcpServerName` and `data.mcpToolName`.
+- No CLI, export, audit, or MCP file changes.
+
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
+
+## Task 4: Reports Show Readable MCP Tool Names
 
 **Files:**
 
-- `src/CopilotLedger.Core/Audit/AuditSpan.cs`
-- `src/CopilotLedger.Core/Audit/PremiumModelTrivialTurnRule.cs`
-- `src/CopilotLedger.Storage/SqliteLedgerStore.Audit.cs`
+- `src/CopilotLedger.Core/Audit/AuditReport.cs`
+- `src/CopilotLedger.Cli/Audit/AuditCommands.cs`
+- `src/CopilotLedger.Mcp/LedgerMcpTools.cs`
+- `src/CopilotLedger.Cli/Export/ExportModelBuilder.cs`
+- `src/CopilotLedger.Cli/Export/ExportRecords.cs`
+- `src/CopilotLedger.Cli/Export/ExportJson.cs`
+- `src/CopilotLedger.Cli/Export/ExportCommands.cs`
+- `src/CopilotLedger.Cli/Export/ExportReportModel.cs`
 - `docs/cli.md`
-- `tests/CopilotLedger.Tests/Audit/VelocityRuleTests.cs`
-- `tests/CopilotLedger.Tests/Cli/AuditCommandTests.cs`
-
-No schema, CLI, or JSON change.
+- new `tests/CopilotLedger.Tests/Cli/McpToolNameDisplayTests.cs`
+- new `tests/CopilotLedger.Tests/Audit/AuditToolNameTests.cs`
+- new `tests/CopilotLedger.Tests/Docs/SprintFifteenDocsTests.cs`
 
 **Contracts:**
 
 ```csharp
-// AuditSpan, after CostUsd
-public decimal? ListCostUsd { get; init; }   // the rate card's price beside a reported charge; null: the same as CostUsd
+// AuditReport
+// The report with each finding's Scope.Tool as McpToolNames.Display shows it, in the same order: the rules grouped and
+// ordered the stored names, so the same findings are shown. Throws ArgumentNullException for a null learned.
+public AuditReport WithToolNames(IReadOnlyDictionary<string, string> learned);
 
-// PremiumModelTrivialTurnRule
-private const decimal RoutedChargeRatio = 0.95m;   // charged at least 5% below list: Auto (10%) or Fusion (30%) routed it
+// ExportRecords
+public static ExportToolCallRecord ToolCall(ExportToolCallRow row, IReadOnlyDictionary<string, string> toolNames);   // ToolName = McpToolNames.Display(row.ToolName, toolNames)
+
+// ExportJson
+public static async Task WriteToolCallsAsync(
+    Stream stream,
+    LedgerExportSnapshot snapshot,
+    ExportInputs inputs,
+    IReadOnlyDictionary<string, string> toolNames,
+    CancellationToken cancellationToken);
+
+// ExportReportModel, after ChainTurns
+public required IReadOnlyDictionary<string, string> ToolNames { get; init; }   // learned MCP tool names by hashed name (LedgerExportSnapshot.GetMcpToolNamesAsync)
 ```
 
 **Algorithm:**
 
-1. **Store.** Append `list_cost_usd_pico` as the 26th column (index 25) of `ReadAuditSpansAsync`'s `SELECT`, after `ingest_source`. Set `ListCostUsd = rows.IsDBNull(25) ? null : PicoUsd.ToUsd(rows.GetInt64(25))`. No `COALESCE`.
-2. **Rule.** In the candidate loop, after the existing `continue` conditions and before the tier lookup, add: `if (span.ListCostUsd is decimal list && list > 0m && span.CostUsd <= list * RoutedChargeRatio) continue;`. Nothing else changes: grouping, thresholds, metrics, impact (still from rates, not `CostUsd`), and severity stay the same.
-3. Update `AuditSpan`'s and the rule's header comments in one line each to mention routed requests.
+1. **`WithToolNames`.** `ArgumentNullException.ThrowIfNull(learned)`. Return `this with { Findings = [.. Findings.Select(finding => finding.Scope.Tool is null ? finding : finding with { Scope = finding.Scope with { Tool = McpToolNames.Display(finding.Scope.Tool, learned) } })] }`.
+2. **`audit`** (`AuditCommands.RunAsync`). Declare `IReadOnlyDictionary<string, string> toolNames;` beside `input`. Inside the existing `await using (LedgerExportSnapshot snapshot …)` block, after `GetAuditInputAsync`, set `toolNames = await snapshot.GetMcpToolNamesAsync(cancellationToken);`. Append `.WithToolNames(toolNames)` to the `AuditAnalyzer.Report(...)` expression. The table, `--json`, `--local-llm`, `--show-llm-payload`, and `--fail-on` all use that report, so they all show the names, and `--fail-on` decides as before.
+3. **MCP `get_audit_findings`** (`LedgerMcpTools.AuditFindingsAsync`). The same as step 2, in its snapshot block and on its `AuditAnalyzer.Report(...)`.
+4. **Export** (`ExportModelBuilder.BuildAsync`):
+   1. After `LedgerFilter filter = inputs.Filter;`, read `IReadOnlyDictionary<string, string> toolNames = await snapshot.GetMcpToolNamesAsync(cancellationToken);`.
+   2. Right after `AuditReport audit = await AuditAsync(...)`, add `audit = audit.WithToolNames(toolNames);`. The existing repository rewrite stays after it.
+   3. Change `.Select(ExportRecords.ToolCall)` to `.Select(row => ExportRecords.ToolCall(row, toolNames))`.
+   4. Set `ToolNames = toolNames` in the model.
+5. **Bundle.** `ExportJson.WriteToolCallsAsync` passes its `toolNames` to `ExportRecords.ToolCall(row, toolNames)`. `ExportCommands.BundleEntries` passes `model.ToolNames`.
 
-**Test vectors (`AR7` theory, new cases in `PremiumCases` and the `switch`).** Let `At` be the existing `"at"` expected string, `"warning [requests=10 requests, outputTokens=1200 tokens, modelOutputRatePer1M=20 usd_per_1m_tokens, topQuartileOutputRatePer1M=15 usd_per_1m_tokens] 0.273 premium_model_trivial_turn"`. `Trivial(n)` spans cost `0.0312m`.
+Nothing else changes. In particular, `AuditAnalyzer`, the rules, the store's queries, `AuditJson`, `AuditText`, `ExportSvg`, and `HtmlReportWriter` are unchanged: they display what they're given.
 
-| Case | Input | Expected |
-|---|---|---|
-| `routed` | `Trivial(10)` with every `ListCostUsd = 0.0347m` (0.95 × 0.0347 = 0.032965 ≥ 0.0312) | `none` |
-| `one routed of ten` | `Trivial(10)`, the span whose ID ends in `5` with `ListCostUsd = 0.0347m` | `none` (9 left) |
-| `one routed of eleven` | `Trivial(11)`, the span whose ID ends in `5` with `ListCostUsd = 0.0347m` | `At` (10 left; impact 10 × 0.0273 = 0.273) |
-| `list equals charge` | `Trivial(10)` with `ListCostUsd = 0.0312m` | `At` |
-| `list within 5%` | `Trivial(10)` with `ListCostUsd = 0.0328m` (0.95 × 0.0328 = 0.03116 < 0.0312) | `At` |
-| `boundary skipped` | `Trivial(10)` with `CostUsd = 0.0285m, AiCredits = 2.85m, ListCostUsd = 0.0300m` (0.95 × 0.0300 = 0.0285) | `none` |
-| `boundary kept` | `Trivial(10)` with `CostUsd = 0.0286m, AiCredits = 2.86m, ListCostUsd = 0.0300m` | `At` |
-| `zero list` | `Trivial(10)` with `CostUsd = 0m, AiCredits = 0m, ListCostUsd = 0m` | `At` |
+**Display tests (`McpToolNameDisplayTests`).** Constants:
 
-If `Trivial(11)`'s span IDs make more than one end in `5`, select by `SpanId == AuditFixtures.Span(5, …).SpanId` instead. If `one routed of eleven`'s impact isn't exactly `0.273`, stop and report it.
+- `H` = `"48484848484848484848484848484848"`;
+- `ExecJs` as in Task 1;
+- `Short` = `"MCP tool 10be6bee/8453dc19"`;
+- `Learned` = `"computer-use-exec_js"`.
 
-**CLI test `AC10_RoutedRequests_LeaveThePremiumRule` (`AuditCommandTests`):**
+`Harness(root)` is `new CliHarness(root, new FakeCliPlatform(), new ManualTimeProvider(AuditSeeds.GeneratedAt, ManualTimeProvider.UtcMinus5))`.
 
-1. `AuditSeeds.CreateAsync(temp.Path)`, then the harness.
-2. Run `audit --json --rule premium_model_trivial_turn` (P0) and `audit --json --rule failed_tool_retry --rule cache_miss_streak --rule context_bloat` (O0).
-3. `LedgerSql.ExecuteAsync(db, "UPDATE spans SET list_cost_usd_pico = cost_usd_pico WHERE billing_channel = 'github_ai_credits'")`, then run P1.
-4. `LedgerSql.ExecuteAsync(db, "UPDATE spans SET list_cost_usd_pico = cost_usd_pico * 10 / 9 WHERE billing_channel = 'github_ai_credits' AND cost_usd_pico > 0")`, then run P2 and O2.
+`SeedAsync(root)`:
 
-Here `db` is `Path.Combine(temp.Path, "data", "ledger.db")`, as AC9 uses.
+1. `SqliteLedgerStore store = await AuditSeeds.CreateAsync(root);`.
+2. `AuditSeeds.LiveTrace h = new(H, "conv-h", GitFixture.Feature(root) with { PullRequestNumber = 42 });` and `string h0 = h.Agent(0, AuditSeeds.At("19:00:00"));`.
+3. `h.Request(1, h0, At("19:00:00"), "claude-haiku-4.5", 10_000, 8_000, 300)`.
+4. `h.Tool(1, h0, At("19:00:10"), ExecJs, 1, 2)`.
+5. `h.Request(2, h0, At("19:00:15"), …)`, with the same model and token counts.
+6. `h.Tool(2, h0, At("19:00:20"), ExecJs, 1, 2)`.
+7. `h.Request(3, h0, At("19:00:25"), …)`, with the same model and token counts.
+8. `h.Tool(3, h0, At("19:00:30"), ExecJs, 1, 2)`.
+9. `await h.RecordAsync(store)`.
+
+This adds one `failed_tool_retry` finding for H: warning; 3 failures, 2 requests, and `breakerChurnFailures` 5; an impact of 2 × $0.0043 = $0.0086 (F11).
+
+`LearnAsync(CliHarness cli)` writes `new CopilotSessionLogs("s-mcp").ToolStart("toolu-1", Learned, mcpServerName: "computer-use", mcpToolName: "exec_js").ToolComplete("toolu-1", true)` to `cli.Context.CopilotHome`, runs `import --all`, and asserts exit code 0.
+
+`HFinding(JsonElement findings)` is the single element whose `scope.traceId` is H.
+
+| ID | Name | Steps | Expected |
+|---|---|---|---|
+| MD1 | `MD1_AuditJson_ShowsTheShortForm_ThenTheLearnedName_WithTheSameFindings` | `SeedAsync`; `audit --json` (before); `LearnAsync`; `audit --json` (after) | Both exit 0. The H finding before and after: `ruleId` `failed_tool_retry`; `severity` `warning`; `scope.repository` `swigerb/copilot-ledger`; `scope.branch` `feature/ledger`; `scope.pullRequest` 42; `scope.agent` `(none)`; `scope.tool` `Short` before and `Learned` after; metrics, as `name`/`value`/`unit`: `failures` 3 `calls`, `requests` 2 `requests`, and `breakerChurnFailures` 5 `calls`; `estimatedImpactUsd`'s `GetDecimal()` is `0.0086m`; `windowStart` `2026-11-21T19:00:10.0000000+00:00`; `windowEnd` `2026-11-21T19:00:30.0000000+00:00`. `before.Out.Replace("\"tool\": \"" + Short + "\"", "\"tool\": \"" + Learned + "\"")` equals `after.Out` exactly. Neither output contains `ExecJs`. After learning, `SELECT DISTINCT tool_name FROM span_links WHERE trace_id = '<H>'` is `[ExecJs]`. |
+| MD2 | `MD2_TheAuditTable_NamesTheTool` | `SeedAsync`; `audit` (before); `LearnAsync`; `audit` (after) | Before contains `swigerb/copilot-ledger @ feature/ledger, (none), MCP tool 10be6bee/8453dc19`. After contains `swigerb/copilot-ledger @ feature/ledger, (none), computer-use-exec_js`, and not `Short`. Neither contains `ExecJs` or `ExecJs[..64]`. |
+| MD3 | `MD3_TheLocalModelPayload_NamesTheTool` | `SeedAsync`; `audit --local-llm http://127.0.0.1:11434/v1 --local-llm-model llama3.3 --show-llm-payload` before and after `LearnAsync`. Parse the body, then `messages[1].content` as the summary, as `AuditDocsTests.AD2` does | The summary's non-null `findings[].scope.tool` values, ordinal: `["MCP tool 10be6bee/8453dc19", "bash"]` before and `["bash", "computer-use-exec_js"]` after. Neither output contains `ExecJs[..64]`. |
+| MD4 | `MD4_TheExport_NamesTheTool_OnTheTimelineInTheBundleAndInTheFindings` | `SeedAsync`; `export --all-repos --since 7d --bundle` (before); `LearnAsync`; the same with `--force` (after). Each time, read the report with `ExportFiles.ReadReport` and `ExportFiles.Parse`, and the bundle with `ExportFiles.ReadZip`. | With `N` = `Short` before and `Learned` after: the report's `title` elements (by local name) include `14:00:10 · N · exit code 1`, `14:00:20 · N · exit code 1`, and `14:00:30 · N · exit code 1`; some `td` element's text starts with `swigerb/copilot-ledger @ feature/ledger, (none), N; `; `telemetry/tool-calls.json`'s `toolCalls` whose `traceId` is H are 3, each with `toolName` N; `telemetry/audit-findings.json`'s H finding has `scope.tool` N. Neither the report nor any bundle entry contains `ExecJs`. |
+| MD5 | `MD5_GetAuditFindings_NamesTheTool` | `GitFixture.Create(root)`; `SeedAsync`; an `McpTestHarness` with `AuditMcpTests`' context: `DatabasePath` `<root>/data/ledger.db`, `WorkingDirectory` `<root>/repo`, `GetEnvironmentVariable` `_ => null`, `GitResolver` `new FileSystemGitContextResolver(ceilingDirectory: root)`, the harness's clock, and `Version` `"9.9.9"`. Call `get_audit_findings` with `{}`; `LearnAsync`; call again. | The H finding's `scope.tool` is `Short`, then `Learned`. Neither text contains `ExecJs`. |
+
+**Core test (`AuditToolNameTests`).**
+
+`MD6_WithToolNames_ChangesOnlyTheToolOfEachFinding`:
+
+1. Build `input` = `AuditFixtures.Input([AuditFixtures.Span(1)], calls)` with `Rules = [AuditRuleIds.FailedToolRetry]`. `calls` are `AuditFixtures.Tool(n, TimeSpan.FromSeconds(10 * n), name, exitCode: 1, statusCode: 2)` for `n` = 1…9, where `name` is `ExecJs` for 1–3, `LedgerHash` for 4–6, and `"view"` for 7–9.
+2. `report` = `AuditAnalyzer.Report(input, AuditFixtures.Start, new AuditReportFilter { Since = "7d", Period = "last 7 days", ToUtc = AuditFixtures.Start }, AuditSeverity.Info, null)`.
+3. `resolved` = `report.WithToolNames(new Dictionary<string, string>(StringComparer.Ordinal) { [ExecJs] = "computer-use-exec_js" })`.
 
 Expected:
 
-- P0 and P1: `findingsTotal` 1.
-- P2: `findingsTotal` 0 and exit 0.
-- O2's `findings` array serializes identically to O0's (compare `GetRawText()` of `findings`).
+- `report.Findings`' tools are `[ExecJs, LedgerHash, "view"]`, and `resolved.Findings`' are `["computer-use-exec_js", "MCP tool fe14010b/eb20c464", "view"]`.
+- With `Scope.Tool` set to null in each, the two lists of findings are equal (record equality, in order).
+- `resolved.Shown.Count` equals `report.Shown.Count`.
+- `report.WithToolNames(null!)` throws `ArgumentNullException`.
 
-**Docs (`docs/cli.md`, "The rules"):**
+**Docs (`docs/cli.md`):**
 
-- Replace the `premium_model_trivial_turn` row's "Finds" cell with: `GitHub AI credits requests to a model in the top quarter of output prices, with 200 or fewer output tokens and no tool calls, per agent, model, and day, leaving out requests charged at least 5% below their list price`. The other cells are unchanged.
-- Add this bullet right after the **Tool calls.** bullet:
+- **New subsection.** Right after the `### Repairs` paragraph, before `### The import report`:
 
-  `- **Routed requests.** With Auto or Copilot Fusion, GitHub picks the model for each request and charges less than its list price: 10% less for Auto on paid plans, and 30% less for Fusion through November 30, 2026. gh-ledger knows a request's list price when Copilot reported its charge, so \`premium_model_trivial_turn\` leaves out requests charged at least 5% below their list price: you didn't choose their model. A routed request without a reported charge, or one charged at the list price, counts like any other.`
+  ```markdown
+  ### MCP tool names
 
-- The guide's audit samples don't change: the seeds' `list_cost_usd_pico` is NULL. `GuideSamplesTests` and `SprintThirteenDocsTests.DC1` must pass unchanged. If either fails, stop and report it.
+  Copilot CLI's live spans name a tool from an MCP server by two lowercase hexadecimal SHA-256 hashes, of the server's name and of the tool's name, joined by `/`. Its session log names the tool in clear, so each import learns the name from the logs it reads: `data.toolName` of `tool.execution_start`, such as `computer-use-exec_js`, the name that imported tool calls show. Export, audit, and the MCP server show it for live calls too. A tool that no log has named yet shows as `MCP tool` and the first 8 digits of each hash, such as `MCP tool 10be6bee/8453dc19`. The ledger keeps the hashes, and the audit's tool rules group calls by them.
+  ```
 
-**Acceptance:** all AR7 cases, AC1–AC10, AD1–AD3, and the guide sample tests pass, and no other audit test changes.
+- **Export.** In the paragraph that starts `The report shows summary cards`, after `It loads nothing and works without JavaScript.`, insert: `Tool calls and findings name MCP tools as [MCP tool names](#mcp-tool-names) describes.`
+- **Audit.** Right after the bullet that starts `- Tool calls are kept for 7 days`, add: `- The tool rules group calls by the tool name that the ledger keeps, and findings name MCP tools as [MCP tool names](#mcp-tool-names) describes.`
+- **Troubleshooting.** Replace the bullet that starts `- **Tool names are 129-character hashes.**` with: `- **A tool shows as \`MCP tool 10be6bee/8453dc19\`.** Copilot CLI's live spans name an MCP tool by hashes, and no session log that import has read has named that tool yet. After its session ends, run \`gh ledger import --all\`; see [MCP tool names](#mcp-tool-names).`
 
-## Task 5: Version 0.6.0
+**Docs test (`SprintFifteenDocsTests`, new).** A `RepositoryFile` helper as in `UpgradeDocsTests`, and `Text(params string[] parts)` reading a file with `\n` line endings.
 
-Follow `docs/releasing.md` step 1 **exactly**, with `0.6.0`. Skip step 2: `rates.json` is unchanged, and so is its `ratesVersion`.
+`DF1_TheReferenceDescribesMcpToolNames`:
 
-**Places to change, at `0f96a83`:**
+- `docs/cli.md` contains `### MCP tool names`, `McpToolNames.ShortForm(McpToolNames.Hash("computer-use", "exec_js"))`, and `[MCP tool names](#mcp-tool-names)`;
+- it doesn't contain `129-character`.
 
-- `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj` (`<Version>`, line 7)
-- `src/CopilotLedger.Cli/GhLedgerCli.cs` (the comment, line 18; the fallback after `??`, line 23)
-- `.github/workflows/ci.yml` (the smoke-test comparison, line 46)
-- Tests: `DaemonCommandTests.DM1` (line 24), `ReportCommandTests.StatusText` (line 648), `ExportCommandTests.EC5` (line 118), `ExportBundleTests.EB2` (line 56)
-- `docs/guide.md`: the `status-first` (line 53), `status` (line 169), and receipt (lines 536 and 547) samples
-- `docs/cli.md`: the `"toolVersion"` manifest sample (line 398)
-- `docs/releasing.md`: `git tag v0.6.0` and `git push origin v0.6.0` in step 4 (lines 26–27)
+**Acceptance:**
+
+- MD1–MD6 and DF1 pass: **7 tests**, so 2,018 passed.
+- Every existing audit, export, MCP, guide, and docs test passes unchanged: `AuditDocsTests`, `ExportAllowlistTests`, `GuideSamplesTests`, `SprintThirteenDocsTests`, `AuditMcpTests.AM1`, and `ExportAuditTests.EF2`.
+- `git diff HEAD~1 -- src/CopilotLedger.Core/Audit` changes only `AuditReport.cs`.
+
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
+
+## Task 5: `install --dry-run` Decides the Daemon Step as `install` Does
+
+**Files:**
+
+- `src/CopilotLedger.Cli/Daemon/DaemonCommands.cs`
+- `src/CopilotLedger.Cli/Install/InstallCommands.cs`
+- `docs/cli.md`
+- `tests/CopilotLedger.Tests/Cli/InstallCommandTests.cs`
+- `tests/CopilotLedger.Tests/Docs/SprintFifteenDocsTests.cs`
+
+**Contracts (all internal, in `DaemonCommands.cs`, namespace `CopilotLedger.Cli.Daemon`):**
+
+```csharp
+// What daemon start decides before it starts anything.
+internal enum DaemonStartOutcome
+{
+    AlreadyRunning,   // the daemon holds its lock
+    NotExecutable,    // this process isn't the gh-ledger executable
+    Blocked,          // the terminal's Windows job would stop the daemon, or can't be read
+    Start,
+}
+
+internal sealed record DaemonStartDecision
+{
+    public required DaemonStartOutcome Outcome { get; init; }
+    public int? ProcessId { get; init; }      // AlreadyRunning: daemon.json's processId; null when it can't be read
+    public string? Executable { get; init; }  // NotExecutable: the process's path; null when unknown
+    public string? JobError { get; init; }    // Blocked: why the job can't be read; null when the job blocks
+    public bool SignInItem { get; init; }     // Blocked: a sign-in item exists, or signInItemPlanned
+}
+
+// DaemonCommands
+// Decides daemon start without side effects: DaemonFiles.IsHeld opens and closes the lock file only when it exists, and
+// daemon.json, the process path, the job, and the sign-in item are only read. signInItemPlanned: install's dry run would
+// have registered the Windows sign-in item before starting the daemon.
+internal static DaemonStartDecision DecideStart(CliContext context, bool signInItemPlanned = false);
+
+// Writes what daemon start says for a decision other than Start, and returns its exit code: AlreadyRunning to standard
+// output, 0; NotExecutable and Blocked to standard error, 1. With dryRun, Blocked's first line starts "Wouldn't start the
+// gh-ledger daemon: " instead of "gh-ledger daemon not started: ". Throws ArgumentException for Start.
+internal static int WriteStartDecision(CliContext context, DaemonStartDecision decision, bool dryRun);
+```
+
+**Algorithm (`DecideStart`)** keeps `StartAsync`'s order:
+
+1. If `DaemonFiles.IsHeld(context)`, return `AlreadyRunning` with `ProcessId = DaemonFiles.TryReadState(context)?.ProcessId`.
+2. `executable = context.Platform.ProcessPath`. If `!GetExecutableName(executable).Equals("gh-ledger", StringComparison.OrdinalIgnoreCase)`, return `NotExecutable` with `Executable = executable`.
+3. `try { job = context.Platform.GetJobState(); } catch (Win32Exception ex) { jobError = ex.Message; }`. If `jobError is not null || DetachedLaunchPolicy.Decide(job) == DetachedLaunch.Blocked`, return `Blocked` with `JobError = jobError` and `SignInItem = signInItemPlanned || context.Platform.GetStartupCommand("CopilotLedger") is not null`.
+4. Return `Start`.
+
+**Algorithm (`WriteStartDecision`):**
+
+1. `AlreadyRunning`: write to `context.Out` `gh-ledger daemon is already running (pid <n>).`, or `gh-ledger daemon is already running.` without a pid. Return 0.
+2. `NotExecutable`: write to `context.Error` `Run this command from the gh-ledger executable (current process: <executable, or unknown>).` Return 1.
+3. `Blocked`. Let `reason` be `this terminal runs in a Windows job that stops the processes it started when it closes, so the daemon would stop with it.` when `JobError` is null, else `can't read this terminal's Windows job, so the daemon might stop when the terminal closes (<JobError>).`. Write to `context.Error`:
+   1. `(dryRun ? "Wouldn't start the gh-ledger daemon: " : "gh-ledger daemon not started: ") + reason`;
+   2. with `command = GhExtension.CommandName(context.Platform)`: `Run <command> daemon start from a regular terminal, or sign out and back in to start it from the sign-in item.` when `SignInItem`, else `Run <command> daemon start from a regular terminal.`
+
+   Return 1.
+4. `Start`: throw `new ArgumentException("Start has nothing to report.", nameof(decision))`.
+
+**Algorithm (`StartAsync`).** Replace its three checks (`DaemonCommands.cs:65–98`) with `DaemonStartDecision decision = DecideStart(context); if (decision.Outcome != DaemonStartOutcome.Start) { return WriteStartDecision(context, decision, dryRun: false); }`. Then `string executable = context.Platform.ProcessPath!;`; the rest, from `Directory.CreateDirectory(context.DataDirectory)`, is unchanged. Every message, stream, and exit code of `daemon start` stays as it is.
+
+**Algorithm (`InstallAsync`):**
+
+1. Declare `bool signInItemPlanned = false;` before the sign-in item block. Where the dry run writes `Would start gh-ledger when you sign in.`, also set `signInItemPlanned = context.Platform.IsWindows;`. Only Windows, because only there does `daemon start` read the sign-in item (`GetStartupCommand`).
+2. Replace the `if (dryRun) { … "Would start the gh-ledger daemon." … }` branch with:
+   1. `DaemonStartDecision decision = DaemonCommands.DecideStart(context, signInItemPlanned);`.
+   2. If `decision.Outcome == DaemonStartOutcome.Start`, write `Would start the gh-ledger daemon.` to `context.Out` and set `exitCode = 0`.
+   3. Otherwise, `exitCode = DaemonCommands.WriteStartDecision(context, decision, dryRun: true);`.
+
+   The `else` branch (`StartAsync`) and the final line are unchanged.
+
+**Tests (`InstallCommandTests`, reusing its `WindowsPlatform()`, `WindowsExtension`, `ManifestPath`, and `Normalize`).** Let:
+
+- `Job` = `Wouldn't start the gh-ledger daemon: this terminal runs in a Windows job that stops the processes it started when it closes, so the daemon would stop with it.`
+- `Unreadable` = `Wouldn't start the gh-ledger daemon: can't read this terminal's Windows job, so the daemon might stop when the terminal closes (Access is denied.).`
+- `SignIn(c)` = `Run <c> daemon start from a regular terminal, or sign out and back in to start it from the sign-in item.`
+- `Regular(c)` = `Run <c> daemon start from a regular terminal.`
+- `Sh` = `Warning: GitHub CLI needs sh.exe from Git for Windows to run shell aliases, so gh ledger won't work until Git for Windows is installed. Run gh-ledger directly.`
+
+The four blocked cases, as `TheoryData<string>`, build their platform as follows:
+
+- `job`: `WindowsPlatform()` with `JobState = new(true, 0x2000)`;
+- `unreadable`: `WindowsPlatform()` with `JobStateException = new Win32Exception(5, "Access is denied.")`;
+- `extension`: `WindowsPlatform()` with `ProcessPath = WindowsExtension`, `@"C:\Users\me\AppData\Local\GitHub CLI\extensions\gh-ledger\manifest.yml"` in `ExistingFiles`, and `JobState = new(true, 0x2000)`;
+- `no sign-in item`: `WindowsPlatform()` with `ProcessPath = Long`, where `Long` is `@"C:\" + new string('a', 250) + @"\gh-ledger.exe"`, and `JobState = new(true, 0x2000)`.
+
+| ID | Name | Vector | Expected |
+|---|---|---|---|
+| IN20 | `IN20_DryRun_ReportsARunningDaemon` (theory: `withState` true, false) | `WindowsPlatform()`; create `<temp>/data`; when `withState`, write `<temp>/data/daemon.json` as `{"schemaVersion":1,"processId":4242,"startedAt":"2026-11-24T12:00:00+00:00","endpoint":"http://localhost:4318","version":"9.9.9","databasePath":"ledger.db","importRules":1}`; hold `<temp>/data/daemon.lock` open with `FileMode.OpenOrCreate`, `FileAccess.ReadWrite`, and `FileShare.None` while running `install --dry-run` and then `install` | Let `line` be `gh-ledger daemon is already running (pid 4242).` with `withState`, else `gh-ledger daemon is already running.` The dry run: exit 0; `Error` empty; `Out` is exactly these lines, each followed by `\n`: `Would set COPILOT_OTEL_ENABLED=true for your user account.`, `Would set gh alias: gh ledger runs C:\tools\gh-ledger.exe.`, `Sh`, `Would start gh-ledger when you sign in.`, `line`, and `Dry run: no changes made.` After the dry run, `UserVariableWrites`, `StartupCommandWrites`, `ProcessRuns`, and `DetachedStarts` are empty, there's no `install.json`, and `daemon.json`'s text is unchanged. The install: exit 0; `Out` contains `line + "\n"` and ends with `gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n`; `DetachedStarts` empty. |
+| IN21 | `IN21_DryRun_InABlockingJob_SaysItWouldntStartTheDaemon` (theory, the 4 cases) | `install --dry-run` | Exit 1. `Out` and `Error`, by case, below. In every case `UserVariableWrites`, `StartupCommandWrites`, `ProcessRuns`, and `DetachedStarts` are empty, and there's no `install.json`. |
+| IN22 | `IN22_DryRun_DecidesTheDaemonLikeInstall` (theory, the 4 cases) | `install --dry-run` in one temporary directory, and `install` in another, each with a new platform of the case | Both exit 1. Splitting each `Error` on `\n` gives 3 parts, the last empty. The second lines are equal. The real first line starts with `gh-ledger daemon not started: `, and the dry first line is `Wouldn't start the gh-ledger daemon: ` plus the rest of the real one. The real run's `DetachedStarts` is empty. |
+
+IN21's expected output, each line followed by `\n`:
+
+- `job`: `Out` is `Would set COPILOT_OTEL_ENABLED=true for your user account.`, `Would set gh alias: gh ledger runs C:\tools\gh-ledger.exe.`, `Sh`, `Would start gh-ledger when you sign in.`, and `Dry run: no changes made.`. `Error` is `Job` and `SignIn("gh-ledger")`.
+- `unreadable`: `Out` as `job`. `Error` is `Unreadable` and `SignIn("gh-ledger")`.
+- `extension`: `Out` is `Would set COPILOT_OTEL_ENABLED=true for your user account.`, `gh ledger runs this GitHub CLI extension, so no alias is needed.`, `Would start gh-ledger when you sign in.`, and `Dry run: no changes made.`. `Error` is `Job` and `SignIn("gh ledger")`.
+- `no sign-in item`: `Out` is `Would set COPILOT_OTEL_ENABLED=true for your user account.`, `Would set gh alias: gh ledger runs <Long>.`, `Sh`, `Warning: the gh-ledger path is too long for a sign-in command, so gh-ledger won't start when you sign in. Run gh-ledger daemon start after you sign in.`, and `Dry run: no changes made.`. `Error` is `Job` and `Regular("gh-ledger")`.
+
+**Docs (`docs/cli.md`).** Replace the paragraph that starts `Then restart the GitHub Copilot app, VS Code, and open terminals. \`--dry-run\`` with exactly:
+
+`Then restart the GitHub Copilot app, VS Code, and open terminals. \`--dry-run\` prints the changes without making them, and exits with the code that \`install\` would. For the daemon, it says that it's already running, with its pid; or, in a terminal whose Windows job would stop it, \`Wouldn't start the gh-ledger daemon:\` with the reason and hint that \`daemon start\` gives; or \`Would start the gh-ledger daemon.\``
+
+**Docs test (`SprintFifteenDocsTests`).**
+
+`DF2_TheReferenceSaysWhatTheInstallDryRunReportsForTheDaemon`:
+
+- `docs/cli.md` doesn't contain `but always says \`Would start the gh-ledger daemon.\``;
+- it contains `` `Wouldn't start the gh-ledger daemon:` ``.
+
+**Acceptance:**
+
+- IN20–IN22 and DF2 pass: **11 tests**, so 2,029 passed.
+- IN1–IN19, DJ1–DJ7, and DM1–DM7 pass unchanged; IN9 proves the unchanged case.
+- `SprintThirteenDocsTests.DC1` passes unchanged: the refusal block it pins isn't edited.
+
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
+
+## Task 6: Help Names `gh ledger` Under the Extension
+
+**Files:**
+
+- new `src/CopilotLedger.Cli/Install/ExtensionHelpAction.cs`
+- `src/CopilotLedger.Cli/GhLedgerCli.cs`
+- `docs/cli.md`
+- `docs/quickstart.md`
+- new `tests/CopilotLedger.Tests/Cli/ExtensionHelpTests.cs`
+- `tests/CopilotLedger.Tests/Docs/SprintFifteenDocsTests.cs`
+
+**Contract:**
+
+```csharp
+using System.CommandLine;
+using System.CommandLine.Help;
+using System.CommandLine.Invocation;
+
+namespace CopilotLedger.Cli.Install;
+
+// --help, and the help after a parse error, of the GitHub CLI extension: System.CommandLine's help, whose usage line names
+// the root command by the executable's name (rootName), with "gh ledger" in its place. Everything else is unchanged.
+internal sealed class ExtensionHelpAction(HelpAction help, string rootName) : SynchronousCommandLineAction
+{
+    public override bool ClearsParseErrors => help.ClearsParseErrors;
+
+    public override int Invoke(ParseResult parseResult);
+
+    // help with "gh ledger" in place of rootName in its usage line: the first line after the first empty line that equals
+    // "  " + rootName or starts with "  " + rootName + " ". The help's other lines, and its line breaks (newLine), are kept.
+    internal static string Rewrite(string help, string rootName, string newLine);
+}
+```
+
+**Algorithm (`Invoke`):**
+
+1. `InvocationConfiguration configuration = parseResult.InvocationConfiguration;` and `TextWriter output = configuration.Output;`.
+2. `StringWriter buffer = new(CultureInfo.InvariantCulture) { NewLine = output.NewLine };`.
+3. `configuration.Output = buffer;`. Then `int exitCode; try { exitCode = help.Invoke(parseResult); } finally { configuration.Output = output; }`.
+4. `output.Write(Rewrite(buffer.ToString(), rootName, output.NewLine));`, then return `exitCode`.
+
+**Algorithm (`Rewrite`):**
+
+1. `string[] lines = help.Split(newLine);`.
+2. `int blank = Array.IndexOf(lines, string.Empty);` If it's negative, return `help`.
+3. `string prefix = "  " + rootName;`. For `i` from `blank + 1` to the last line, at the first `lines[i]` that equals `prefix` or starts with `prefix + " "` (ordinal), set `lines[i] = "  gh ledger" + lines[i][prefix.Length..]` and stop.
+4. Return `string.Join(newLine, lines)`.
+
+**Algorithm (`GhLedgerCli.InvokeAsync`).** After the last `root.Add(...)` and before `root.Parse(args)`:
+
+```csharp
+if (GhExtension.IsInstalled(context.Platform))
+{
+    HelpOption help = root.Options.OfType<HelpOption>().Single();
+    help.Action = new ExtensionHelpAction((HelpAction)help.Action!, root.Name);
+}
+```
+
+Add `using System.CommandLine.Help;`. Nothing else in `GhLedgerCli` changes. A binary the user built gets no wrapper, so its help is byte-for-byte as before.
+
+**Tests (`ExtensionHelpTests`).** Every test sets `CultureInfo.CurrentCulture` and `CultureInfo.CurrentUICulture` to `CultureInfo.InvariantCulture` and restores them in `finally`. Definitions:
+
+- `Extension()` is a `FakeCliPlatform` with `IsWindows = true` and `ProcessPath = @"C:\Users\me\AppData\Local\GitHub CLI\extensions\gh-ledger\gh-ledger.exe"`, and `@"C:\Users\me\AppData\Local\GitHub CLI\extensions\gh-ledger\manifest.yml"` in `ExistingFiles`;
+- `Built()` is `new FakeCliPlatform()`;
+- `root` is `System.CommandLine.RootCommand.ExecutableName`.
+
+Each run uses its own `CliHarness` over the test's temporary directory.
+
+| ID | Name | Vector | Expected |
+|---|---|---|---|
+| HL1 | `HL1_UnderTheExtension_OnlyTheUsageLineChanges` (theory, 7 rows of `(string[] args, int exitCode, string usage)`) | `(["--help"], 0, "[command] [options]")`; `(["import", "--help"], 0, "import [options]")`; `(["budget", "set", "--help"], 0, "budget set <credits> [options]")`; `(["daemon", "stop", "-h"], 0, "daemon stop [options]")`; `(["budget", "set"], 1, "budget set <credits> [options]")`; `(["daemon"], 1, "daemon [command] [options]")`; `(["imprt"], 1, "[command] [options]")`. Run `args` with `Built()` and with `Extension()`. | Both exit with `exitCode`. Exactly one line of the built `Out` is `"  " + root + " " + usage`. The extension's `Out` equals the built `Out` with `"\n  " + root + " " + usage + "\n"` replaced by `"\n  gh ledger " + usage + "\n"`. The two `Error`s are equal. |
+| HL2 | `HL2_DaemonStopsHelp_IsTheDefaultExceptForTheName` (theory: `extension` false, true) | `daemon stop --help` with `Built()` or `Extension()` | Exit 0; `Error` empty; `Out` is exactly `"Description:\n  Stop the running daemon.\n\nUsage:\n  " + name + " daemon stop [options]\n\nOptions:\n  -?, -h, --help  Show help and usage information\n\n"`, where `name` is `root` for the built binary and `gh ledger` for the extension |
+| HL3 | `HL3_UnderTheExtension_EveryCommandsUsageLineStartsWithGhLedger` | With `Extension()`, start from the root (no path). For each path, run `[.. path, "--help"]`; the usage line is the line after the line `Usage:`. In the `Commands:` section, up to its first empty line, every line that matches `^  (?<name>[a-z][a-z-]*)( \|$)` adds the path `[.. path, name]`. Visit breadth-first. | Every run exits 0, and its usage line starts with `string.Join(' ', ["  gh ledger", .. path])` followed by a space. Exactly 29 runs. |
+
+**Docs:**
+
+- `docs/cli.md`: in the paragraph that starts `This page writes commands as`, delete the sentence `` `--help` usage lines say `gh-ledger`; with the extension, type `gh ledger`. `` (and the space before it). Nothing else in the paragraph changes.
+- `docs/quickstart.md`: the last line, `Run any command with \`--help\` for its options. The help shows the program's own name, \`gh-ledger\`; with the extension, type \`gh ledger\`.`, becomes `Run any command with \`--help\` for its options.`
+- `docs/guide.md` is unchanged in this task: Task 7 removes its sentence about messages and `--help` once the messages say `gh ledger` too.
+
+**Docs test (`SprintFifteenDocsTests`).**
+
+`DF3_HelpIsNoLongerDescribedAsNamingGhLedger`:
+
+- `docs/cli.md` doesn't contain `` `--help` usage lines say ``;
+- `docs/quickstart.md` doesn't contain `The help shows the program's own name`.
+
+**Acceptance:**
+
+- HL1–HL3 and DF3 pass: **11 tests**, so 2,040 passed.
+- No test that existed before this task changes.
+- `git diff HEAD~1 -- src` changes only `GhLedgerCli.cs` and adds `ExtensionHelpAction.cs`.
+
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
+
+## Task 7: Command Hints Name `gh ledger` Under the Extension
+
+**Files:**
+
+- `src/CopilotLedger.Cli/Breaker/BreakerCommands.cs`
+- `src/CopilotLedger.Otlp/Breaker/CircuitFlagFile.cs`
+- `src/CopilotLedger.Otlp/Breaker/CircuitBreakerMonitor.cs`
+- `src/CopilotLedger.Mcp/LedgerMcpContext.cs`
+- `src/CopilotLedger.Mcp/LedgerMcpTools.cs`
+- `src/CopilotLedger.Cli/Mcp/McpCommand.cs`
+- `src/CopilotLedger.Cli/Daemon/DaemonHost.cs`
+- `src/CopilotLedger.Cli/Rates/RatesCommands.cs`
+- `src/CopilotLedger.Cli/Install/StartupItem.cs`
+- `docs/guide.md`
+- new `tests/CopilotLedger.Tests/Cli/ExtensionHintTests.cs`
+- `tests/CopilotLedger.Tests/Otlp/CircuitBreakerMonitorTests.cs`
+- `tests/CopilotLedger.Tests/Docs/SprintFifteenDocsTests.cs`
+
+**Contracts:**
+
+```csharp
+// CircuitFlagFile
+public static string Render(
+    string repositoryRoot,
+    IReadOnlyList<BreakerTrip> openTrips,
+    string command = BreakerMessages.DefaultCommand);   // the file's text; openTrips is non-empty; command starts each resetCommand
+
+public static async Task SyncAsync(
+    SqliteLedgerStore store,
+    string repositoryRoot,
+    string command = BreakerMessages.DefaultCommand,
+    CancellationToken cancellationToken = default);     // Render(…, command) when it writes
+
+// LedgerMcpContext
+public string Command { get; init; } = "gh-ledger";     // how results name gh-ledger in reset commands; gh ledger mcp passes GhExtension.CommandName
+```
+
+**The eight hints.** In the `command` column, `CommandName` is `GhExtension.CommandName(context.Platform)`.
+
+| # | Where (at `c6dc935`) | New text | `command` |
+|---|---|---|---|
+| 1 | `BreakerCommands.cs:282` | `Reset a trip with: <command> breaker reset --id <id>` | `CommandName` |
+| 2 | `LedgerMcpTools.cs:953` | `resetCommand`: `<command> breaker reset --id <n>` | `_context.Command` |
+| 3 | `LedgerMcpTools.cs:956` | `… The user can reset it with: <command> breaker reset --id <n>` | `_context.Command` |
+| 4 | `CircuitFlagFile.cs:58–59` | `resetCommand`: `<command> breaker reset --id <n>` | the `command` parameter |
+| 5 | `DaemonHost.cs:149` | `Port <port> is in use. Stop the other program, or run <command> daemon run --port <port>.` | `CommandName` |
+| 6 | `RatesCommands.cs:106` | `Created <path>. Add your prices, then run: <command> rates validate` | `CommandName` |
+| 7 | `StartupItem.cs:17` | `Warning: the gh-ledger path is too long for a sign-in command, so gh-ledger won't start when you sign in. Run <command> daemon start after you sign in.` | `CommandName` |
+| 8 | `StartupItem.cs:83` | `Warning: the gh-ledger path has characters that a desktop autostart entry can't run, so gh-ledger won't start when you sign in. Run <command> daemon start after you sign in.` | `CommandName` |
+
+**Callers that pass the command:**
+
+- `BreakerCommands.SyncFlagFilesAsync`: `CircuitFlagFile.SyncAsync(store, root, GhExtension.CommandName(context.Platform), cancellationToken)`.
+- `CircuitBreakerMonitor.RecordTripAsync`: `CircuitFlagFile.SyncAsync(_store, trip.RepositoryRoot, _command, CancellationToken.None)`. The daemon already passes `AlertDispatcher.Command`.
+- `McpCommand`: add `Command = GhExtension.CommandName(context.Platform),` to the `LedgerMcpContext`.
+
+Every other `gh-ledger` text in `src` stays (D9).
+
+**Tests (`ExtensionHintTests`).** Definitions:
+
+- `Platform(bool extension)`: `new FakeCliPlatform()` when false. When true, a `FakeCliPlatform` with `IsWindows = true`, `ProcessPath = @"C:\Users\me\AppData\Local\GitHub CLI\extensions\gh-ledger\gh-ledger.exe"`, and the manifest beside it in `ExistingFiles`.
+- `Now` = 2026-11-24 12:00:00 UTC.
+- `Trip()` = `NewBreakerTrip { Rule = CreditVelocity, TraceId = new string('1', 32), Repository = "swigerb/copilot-ledger", Branch = "feature/ledger", TrippedAt = Now.AddMinutes(-30), Detail = "180.00 AI credits in 5 minutes", WindowCostUsd = 1.80m, WindowMinutes = 5 }`.
+
+The `(bool extension, string command)` theories have two rows: `(false, "gh-ledger")` and `(true, "gh ledger")`.
+
+| ID | Name | Vector | Expected |
+|---|---|---|---|
+| XH1 | `XH1_BreakerStatus_NamesTheCommand` (theory) | Record `Trip()` through an initialized store; `breaker status` | Exit 0; `Out` ends with `"\nReset a trip with: " + command + " breaker reset --id <id>\n"` |
+| XH2 | `XH2_TheFlagFile_NamesTheCommand` (theory) | `GitFixture.Create(temp.Path)`; record `Trip() with { RepositoryRoot = repo }`; `breaker config --flag-file on` | Exit 0; `<repo>/.copilot-ledger/CIRCUIT_OPEN`'s `openTrips[0].resetCommand` is `command + " breaker reset --id 1"` |
+| XH3 | `XH3_McpWarnings_NameTheCommand` (theory, rows `(null, "gh-ledger")` and `("gh ledger", "gh ledger")`) | `GitFixture.Create(root)`; `AuditSeeds.CreateAsync(root)`; record `Trip() with { TraceId = AuditSeeds.R, ConversationId = "conv-r", TrippedAt = AuditSeeds.At("15:01:00") }`; an `McpTestHarness` with `AuditMcpTests`' context (Task 4's MD5), plus `Command = <the row's value>` when it isn't null; call `get_branch_ledger` with `{}` | The text's first line is exactly `WARNING: gh-ledger circuit breaker is open for swigerb/copilot-ledger @ feature/ledger: 180.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: <command> breaker reset --id 1`. The structured `circuitBreaker.openTrips[0].resetCommand` is `<command> breaker reset --id 1`. |
+| XH4 | `XH4_RatesInit_NamesTheCommand` (theory) | `rates init` | Exit 0; `Error` empty; `Out` is `"Created " + harness.Context.RatesOverlayPath + ". Add your prices, then run: " + command + " rates validate\n"` |
+| XH5 | `XH5_UnregisterableSignInItems_NameTheExtensionsCommand` (theory, rows `windows` and `linux`) | `windows`: a `FakeCliPlatform` with `IsWindows = true`, `ProcessPath = @"C:\" + new string('a', 220) + @"\GitHub CLI\extensions\gh-ledger\gh-ledger.exe"`, the manifest beside it, and `gh` at `C:\gh\gh.exe`. `linux`: `IsWindows = false`, `HomeDirectory` a new `<temp>/home` holding `.zshrc` `export FOO=1`, `ShellPath = "/bin/zsh"`, `ProcessPath = "/home/me/my$data/gh/extensions/gh-ledger/gh-ledger"`, the manifest beside it, and `gh` at `/usr/bin/gh`. Run `install --dry-run`. | Exit 0. `Out` contains, followed by `\n`: for `windows`, `Warning: the gh-ledger path is too long for a sign-in command, so gh-ledger won't start when you sign in. Run gh ledger daemon start after you sign in.`; for `linux`, `Warning: the gh-ledger path has characters that a desktop autostart entry can't run, so gh-ledger won't start when you sign in. Run gh ledger daemon start after you sign in.` |
+| XH6 | `XH6_APortInUse_NamesTheCommand` (theory) | A `CliHarness` with `Platform(extension)` and `new ManualTimeProvider(Now)`. Call `GhLedgerCli.InvokeAsync(["daemon", "run", "--port", "4319"], harness.Context with { Out = output, Error = error, ConfigureWebHost = builder => { builder.UseTestServer(); builder.ConfigureServices(services => services.AddHostedService(_ => new PortInUse())); } })`, with new `StringWriter`s. `PortInUse` is a private `IHostedService` whose `StartAsync` throws `new IOException("Address already in use")` and whose `StopAsync` completes (F8). | Returns 1. `output`, with `\r\n` as `\n`, is exactly `"2026-11-24T12:00:00.0000000+00:00 Port 4319 is in use. Stop the other program, or run " + command + " daemon run --port 4319.\n"`. `error` is empty. |
+
+**Test in `CircuitBreakerMonitorTests`.**
+
+`BM13_TheFlagFile_NamesTheDaemonsCommand`:
+
+1. `Harness.CreateAsync(temp, BreakerSettings.Default with { FlagFile = true }, command: "gh ledger")`.
+2. Ingest `TraceHRequest(1)` to `TraceHRequest(6)`, as BM7 does.
+
+Expected: the flag file's `openTrips[0].resetCommand` is `gh ledger breaker reset --id 1`. BM7 still expects `gh-ledger` with the default command.
+
+**Docs (`docs/guide.md`):**
+
+- In the paragraph that starts `The samples come from one example`, delete the sentence `` Where a message or `--help` says `gh-ledger <command>`, run `gh ledger <command>`. `` (and the space before it).
+- `breaker-status` sample: `Reset a trip with: gh-ledger breaker reset --id <id>` becomes `Reset a trip with: gh ledger breaker reset --id <id>`.
+- `mcp` sample: in its first line, its `"resetCommand"`, and its `"warnings"` entry, `gh-ledger breaker reset --id 1` becomes `gh ledger breaker reset --id 1`. `WARNING: gh-ledger circuit breaker is open` stays: it names the product.
+
+`GuideSamplesTests.GS2` (`breaker-status`) and `GS7` (`mcp`) check them, unchanged.
+
+**Docs test (`SprintFifteenDocsTests`).**
+
+`DF4_TheGuideShowsTheExtensionsCommandInHints`:
+
+- `docs/guide.md` contains `Reset a trip with: gh ledger breaker reset --id <id>`;
+- it contains neither `` Where a message or `--help` says `` nor `gh-ledger breaker reset`.
+
+**Acceptance:**
+
+- XH1–XH6, BM13, and DF4 pass: **14 tests**, so 2,054 passed.
+- Every existing test passes unchanged, including:
+  - `BreakerCommandTests` BC2 and BC5;
+  - `InstallCommandTests` IN14;
+  - `RatesCommandTests`;
+  - `LedgerMcpServerTests`;
+  - `CircuitBreakerMonitorTests` BM7;
+  - `GuideSamplesTests`.
+
+  The built binary's and the default context's texts are unchanged.
+- `git grep -n -E "gh-ledger (breaker reset|daemon run --port|rates validate|daemon start after)" -- src` finds nothing.
+
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
+
+## Task 8: Version 0.7.0
+
+Follow `docs/releasing.md` step 1 **exactly**, with `0.7.0`. Skip step 2: `rates.json` is unchanged, and so is its `ratesVersion`.
+
+**Places to change (line numbers at `c6dc935`; Tasks 3–7 move some `docs/cli.md` lines):**
+
+- `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`: `<Version>` (line 7).
+- `src/CopilotLedger.Cli/GhLedgerCli.cs`: the comment (line 18) and the fallback after `??` (line 23).
+- `.github/workflows/ci.yml`: the smoke test's comparison (line 46).
+- Tests:
+  - `DaemonCommandTests.DM1` (line 24);
+  - `ReportCommandTests.StatusText` (line 648);
+  - `ExportCommandTests.EC5` (line 118);
+  - `ExportBundleTests.EB2` (line 56).
+- `docs/guide.md`: the `status-first` and `status` samples (lines 55 and 173), and the receipt (lines 539 and 550).
+- `docs/cli.md`: the manifest sample's `"toolVersion"`.
+- `docs/releasing.md`: `git tag v0.7.0` and `git push origin v0.7.0` in step 4 (lines 24–25).
 
 **Leave:**
 
-- the mentions that step 1 and `VersionPlacesTests.Places` list: `which gh-ledger 0.5.0 builds in` (cli.md), `Upgrading from 0.5.0 or earlier keeps the rows you have` (configuration.md), `and gh-ledger 0.5.0 builds it in` (guide.md), and `` such as `v0.5.0-rc.1` `` (releasing.md);
+- the versions that step 1 says to leave: `gh-ledger 0.4.1 and earlier` in the assets table, the prerelease tag `v0.5.0-rc.1`, and the other mentions to leave in `VersionPlacesTests.Places`;
 - the comments in `GuideSamplesTests`, `ModelResolutionTests`, and `RatesUpdateTests`;
 - the earlier daemon's `daemon.json` in `ImportCommandTests`;
 - `docs/test-reports/` and `.github/plans/`.
 
-Don't touch `VersionPlacesTests.cs` unless VR1–VR3 fail. If they do, stop and report it.
+Don't touch `VersionPlacesTests.cs` unless VR1–VR3 fail; if they do, stop and report it.
 
 **Acceptance:**
 
-- `git grep -n -E "(^|[^0-9.])0\.5\.0([^0-9]|$)" -- README.md docs/*.md .github/workflows src tests` lists only the "Leave" mentions.
-- `git grep -n -E "(^|[^0-9.])0\.6\.0([^0-9]|$)" -- README.md docs/*.md .github/workflows src tests` lists exactly the "Places to change".
-- `VersionPlacesTests`, `GuideSamplesTests`, and the four named tests pass.
-- `git diff 0f96a83 -- src/CopilotLedger.Core/Pricing/rates.json global.json` is empty.
+- `git grep -n -E "(^|[^0-9.])0\.7\.0([^0-9]|$)" -- README.md ':(glob)docs/*.md' .github/workflows src tests` lists exactly the places above: 15 lines. The `:(glob)` pathspec keeps `docs/test-reports/` out, as VR3 does; a plain `docs/*.md` would match it too.
+- `git grep -n -E "(^|[^0-9.])0\.6\.0([^0-9]|$)" -- README.md ':(glob)docs/*.md' .github/workflows src tests` finds nothing.
+- `VersionPlacesTests`, `GuideSamplesTests`, and the four named tests pass. The count stays 2,054.
+- `git diff c6dc935 -- src/CopilotLedger.Core/Pricing/rates.json global.json` is empty.
 
-## Task 6: Release Provenance Attestations
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
+
+## Task 9: 0.6.0 → 0.7.0 Upgrade Docs and the 0.6.0 Report's Update
 
 **Files:**
 
-- `.github/workflows/release.yml`
-- `docs/releasing.md`
 - `docs/cli.md`
-- New `tests/CopilotLedger.Tests/Docs/ReleaseWorkflowTests.cs`
+- `docs/guide.md`
+- `docs/test-reports/2026-11-24-live-e2e-0.6.0-windows.md`
+- `tests/CopilotLedger.Tests/Docs/UpgradeDocsTests.cs`
 
-**Workflow (`release.yml`).** Change only the `release` job:
+**Docs (`docs/cli.md`):**
 
-```yaml
-  release:
-    needs: [build, rates]
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-    steps:
-      # checkout, download-artifact, and "Add the rates and checksums" unchanged
-      - name: Attest the binaries and rates
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: |
-            dist/gh-ledger-windows-amd64.exe
-            dist/gh-ledger-windows-arm64.exe
-            dist/gh-ledger-linux-amd64
-            dist/gh-ledger-linux-arm64
-            dist/gh-ledger-darwin-amd64
-            dist/gh-ledger-darwin-arm64
-            dist/rates.json
-            dist/rates.v2.json
-      # "Create the release" unchanged
-```
+- **Repairs.** Append to the paragraph under `### Repairs`: ` An import also reads once more each log that gh-ledger 0.6.0 or earlier imported, to learn the names of the MCP tools that ran in it; see [MCP tool names](#mcp-tool-names).` It names the versions, so it stays true after later releases; Task 3 couldn't name 0.6.0 before the bump (D10).
+- **Ledger format.** In the `**Ledger format.**` paragraph:
+  - replace `and an earlier gh-ledger can't open the ledger after that: it stops with` with `and gh-ledger 0.5.0 and earlier can't open the ledger after that: they stop with`;
+  - replace `run \`gh ledger import --all\` once to repair earlier imports and charges;` with `run \`gh ledger import --all\` once to repair earlier imports and charges and to learn the names of MCP tools;`.
 
-Top-level `permissions: contents: read`, `on:` (including `workflow_dispatch:`), `concurrency`, and the `build` and `rates` jobs are unchanged. The new step goes after "Add the rates and checksums" and before "Create the release", so a failed attestation stops before any release exists.
+  The paragraph keeps `format 7`, never says `format 6`, and keeps everything else (UD2–UD4).
+- **Upgrading from 0.6.0.** Insert this paragraph right after the `**Upgrading from 0.5.0.**` paragraph and before the first fenced block:
 
-**Docs (`docs/releasing.md`):**
+  `**Upgrading from 0.6.0.** gh-ledger 0.6.0 uses ledger format 7 too, so it can still open the ledger after you upgrade. Follow the steps below; the first \`gh ledger import --all\` reads every session log again to learn the names of MCP tools. To go back, stop the daemon, run \`gh extension remove ledger\` and \`gh extension install swigerb/gh-ledger --pin v0.6.0\`, and start the daemon; you don't need the copy.`
 
-- Step 3: replace "It never creates a release, even when it's started from a tag." with: `It never creates a release or an attestation, even when it's started from a tag: only the release job, which runs for a pushed tag, has the \`id-token: write\` and \`attestations: write\` permissions that attesting needs.`
-- In the paragraph after step 4, change "and creates the release with these assets:" to: `attests the six binaries, \`rates.json\`, and \`rates.v2.json\` with \`actions/attest-build-provenance\`, and creates the release with these assets:`
-- New section `## Verify a release`, before `## Update the pinned actions`:
+**Docs (`docs/guide.md`, "Upgrade or uninstall"):**
 
-  ````markdown
-  ## Verify a release
+- Replace `Then repair what an earlier version recorded; see [Repairs](cli.md#repairs):` with `Then repair what an earlier version recorded, and learn the names of MCP tools; see [Repairs](cli.md#repairs):`.
+- In the paragraph that starts `Keep the copy until you're sure you'll stay on the new release.`, insert after that first sentence: `To go back to gh-ledger 0.6.0, stop the daemon, run \`gh extension remove ledger\` and then \`gh extension install swigerb/gh-ledger --pin v0.6.0\`, and start the daemon; 0.6.0 opens the same ledger.` The rest of the paragraph, including its `--pin v0.5.0` sentence, is unchanged.
 
-  Each release's binaries, `rates.json`, and `rates.v2.json` have a build provenance attestation: a signed statement, stored by GitHub and recorded in Sigstore's public log, that the Release workflow of this repository built the file with that SHA-256 digest from the tagged commit. gh-ledger 0.5.0 and earlier have none. To check a release's assets:
+**Docs (`docs/test-reports/2026-11-24-live-e2e-0.6.0-windows.md`).** Under `## Gaps found`, after the gaps table and its following blank line, and before the paragraph that starts `**The test suite.**`, add one line and a blank line:
 
-  ```shell
-  gh release download <tag> --repo swigerb/gh-ledger --dir gh-ledger-<tag>
-  gh attestation verify gh-ledger-<tag>/gh-ledger-linux-amd64 --repo swigerb/gh-ledger --signer-workflow swigerb/gh-ledger/.github/workflows/release.yml --source-ref refs/tags/<tag>
-  ```
+`**Update:** gh-ledger 0.7.0 fixes all three: [#90](https://github.com/swigerb/gh-ledger/issues/90), [#91](https://github.com/swigerb/gh-ledger/issues/91), and [#92](https://github.com/swigerb/gh-ledger/issues/92).`
 
-  Repeat the second command for each asset. `gh-ledger-checksums.txt` isn't attested: it's computed from the attested files. The Windows binaries aren't signed with Authenticode.
-  ````
+Nothing else in the report changes. `docs/test-reports/` is outside VR3's and PN2's scans.
 
-**Docs (`docs/cli.md`, "Get gh-ledger").** After the paragraph that ends "keep working.", add:
+**Test (`UpgradeDocsTests`).**
 
-````markdown
-**Verify the binary.** Releases have a build provenance attestation for each binary, which shows that this repository's Release workflow built it. To check the one gh installed, run, with the path above for your platform:
+`UD6_TheUpgradeFrom060_KeepsFormat7AndGoesBackWithThePin`:
 
-```shell
-gh attestation verify "<path to gh-ledger>" --repo swigerb/gh-ledger --signer-workflow swigerb/gh-ledger/.github/workflows/release.yml
-```
-
-It exits with 0 when an attestation matches the file's SHA-256 digest, and fails otherwise. gh-ledger 0.5.0 and earlier have no attestations, and the Windows binaries aren't signed with Authenticode. See [Verify a release](releasing.md#verify-a-release).
-````
-
-**Tests (`ReleaseWorkflowTests`, text only, no YAML package).** Reuse the `RepositoryFile` helper pattern from the other docs tests.
-
-| ID | Name | Assertion |
-|---|---|---|
-| RW1 | `RW1_EveryActionIsPinnedToACommit` | For every `.github/workflows/*.yml`, every line whose trimmed text starts with `uses:` or `- uses:` matches `^\s*(- )?uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$`, and at least 9 such lines exist in total. |
-| RW2 | `RW2_TheReleaseJobAttestsTheBinariesAndRates_BeforeItReleases` | `release.yml`'s lines, trimmed: exactly one is `uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2`. Its index is greater than that of `- name: Add the rates and checksums` and less than that of `- name: Create the release`. The eight lines after `subject-path: \|` are exactly the eight paths above, in order. |
-| RW3 | `RW3_OnlyTheTagReleaseJobMayAttest` | Across all workflows, `id-token: write` and `attestations: write` each occur exactly once, in `release.yml`, in the block that follows `    permissions:` after `  release:`, whose three lines are exactly `      contents: write`, `      id-token: write`, `      attestations: write`. `release.yml`'s first `permissions:` block is `permissions:\n  contents: read\n`. It contains the line `    if: github.event_name == 'push' && github.ref_type == 'tag'` and the line `  workflow_dispatch:`. |
-| RW4 | `RW4_TheDocsShowHowToVerify` | `docs/cli.md` and `docs/releasing.md` each contain `gh attestation verify ` and `--repo swigerb/gh-ledger --signer-workflow swigerb/gh-ledger/.github/workflows/release.yml`. `docs/releasing.md` contains `## Verify a release` and `--source-ref refs/tags/<tag>`. Both say `Authenticode`. |
+1. In the cli.md steps (`**Upgrading or removing the extension.**` … `## The daemon`):
+   - exactly one line starts with `**Upgrading from 0.6.0.**`, and its index is greater than the `**Upgrading from 0.5.0.**` line's and less than the first fenced line's;
+   - it contains `format 7`, `gh ledger import --all`, `gh extension remove ledger`, `gh extension install swigerb/gh-ledger --pin v0.6.0`, and `you don't need the copy`;
+   - it contains neither `format 6` nor `GhLedgerCli.Version`.
+2. In the guide steps (`## Upgrade or uninstall` … `To remove gh-ledger, undo \`install\`:`):
+   - a line containing `gh extension install swigerb/gh-ledger --pin v0.6.0` comes after the line `gh ledger import --all`;
+   - it doesn't contain `GhLedgerCli.Version`.
+3. In `docs/cli.md`, the first non-empty line after the line `### Repairs` contains `each log that gh-ledger 0.6.0 or earlier imported` and `[MCP tool names](#mcp-tool-names)`.
 
 **Acceptance:**
 
-- RW1–RW4 pass.
-- `git diff 0f96a83 -- .github/workflows/ci.yml .github/workflows/receipt.yml` shows only Task 5's version line.
-- The new docs name `0.5.0` and never `0.6.0` (VR3 passes).
-- Don't run the workflow; no push or tag.
+- UD1–UD6, VR1–VR3, `ProductNameTests`, `GuideSamplesTests`, and `SprintFifteenDocsTests` pass: **1 test** added, so 2,055 passed.
+- The cli.md steps still read stop → copy → upgrade → start → import (UD1).
+- `git grep -n -E "(^|[^0-9.])0\.7\.0([^0-9]|$)" -- README.md ':(glob)docs/*.md' .github/workflows src tests` still lists exactly Task 8's 15 lines. The report's new line is under `docs/test-reports/`, which that pathspec and VR3 leave out.
 
-## Task 7: 0.5.0 → 0.6.0 Upgrade Docs
+**Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
 
-**Files:** `docs/cli.md`, `docs/guide.md`, `tests/CopilotLedger.Tests/Docs/UpgradeDocsTests.cs`.
+## Task 10: Final Verification (no product change)
 
-**Docs (`docs/cli.md`).** Insert this paragraph right after the `**Ledger format.**` paragraph and before "To upgrade, close the Copilot sessions…". It must come before the first fenced block (UD2), and the Ledger format line itself is unchanged except for Task 2's sentence (UD3):
+In a clean tree, at the commit after Task 9:
 
-`**Upgrading from 0.5.0.** gh-ledger 0.5.0 uses ledger format 6, and this version upgrades it to format 7 the first time it opens it, and 0.5.0 can't open it after that. Follow the steps below in order: close the Copilot sessions and apps that use the MCP server and stop the daemon, copy your data directory, upgrade, start the daemon, and run \`gh ledger import --all\` once. To go back, stop the daemon, run \`gh extension remove ledger\` and \`gh extension install swigerb/gh-ledger --pin v0.5.0\`, put the copy in place of your data directory, and start the daemon.`
+1. **Gates.**
+   - `dotnet build CopilotLedger.slnx`: 0 warnings, 0 errors.
+   - `dotnet test CopilotLedger.slnx`: 0 failed, 0 skipped, **2,055** passed.
+   - `dotnet test CopilotLedger.slnx -- xUnit.ParallelizeTestCollections=false`: the same counts.
 
-After the existing `gh extension upgrade ledger` / `gh ledger daemon start` block, and before the overlay troubleshooting paragraph, add: `Then run \`gh ledger import --all\` once; see [Repairs](#repairs).` The sentence has no fenced block, so UD1's order still holds.
+   Record both.
+2. **Publish.** Run `dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r win-x64 -o "$env:TEMP\gh-ledger-final"`; on another OS, use its RID. Then `& "$env:TEMP\gh-ledger-final\gh-ledger.exe" --version` must print exactly `0.7.0`.
+3. **Smoke test.** Set `COPILOT_LEDGER_HOME` and `COPILOT_HOME` to new folders under a new temporary directory, and never use port 4318 or start the daemon. Run and check:
+   1. `rates validate` exits 0.
+   2. `--help`'s usage line is `  gh-ledger [command] [options]`.
+   3. `breaker status` exits 0 and prints `Circuit breaker: closed`.
+   4. `import --all --json` exits 0.
+   5. Copy the binary to `<temp>\gh\extensions\gh-ledger\gh-ledger.exe`, and create an empty `<temp>\gh\extensions\gh-ledger\manifest.yml`. From that copy, `--help`'s usage line is `  gh ledger [command] [options]`, and `daemon stop --help`'s is `  gh ledger daemon stop [options]`.
+   6. Optionally, from that copy, run `install --dry-run` and record its output and exit code without making them a gate: 0 in a regular terminal, and 1 with `Wouldn't start the gh-ledger daemon:` in a terminal whose job would stop the daemon. It only reads the environment.
 
-**Docs (`docs/guide.md`).** After the paragraph that follows the `gh ledger import --all` block ("It reads each session log again once…"), and before "To remove gh-ledger, undo `install`:", add:
-
-`If you upgraded from gh-ledger 0.5.0 and need to go back, stop the daemon, run \`gh extension remove ledger\` and then \`gh extension install swigerb/gh-ledger --pin v0.5.0\`, put the copy you made in place of your data directory, and start the daemon. 0.5.0 can't open the ledger this version upgraded, and the copy doesn't have what gh-ledger recorded after you made it.`
-
-**Test (`UpgradeDocsTests`):**
-
-`UD5_TheUpgradeFrom050_CanBeRolledBackWithThePinAndTheCopy`:
-
-1. Take the cli.md steps (`**Upgrading or removing the extension.**` … `## The daemon`):
-   - exactly one line starts with `**Upgrading from 0.5.0.**`, and its index is greater than the `**Ledger format.**` line's and less than the first fenced line's;
-   - that line contains `format 6`, `format 7`, `gh ledger daemon stop` *or* `stop the daemon`, `copy your data directory`, `gh ledger import --all`, and `gh extension install swigerb/gh-ledger --pin v0.5.0`.
-2. In the guide steps (`## Upgrade or uninstall` … `To remove gh-ledger, undo \`install\`:`), a line containing `gh extension install swigerb/gh-ledger --pin v0.5.0` comes after the line `gh ledger import --all`.
-3. Neither added text contains `0.6.0`.
-
-**Acceptance:**
-
-- UD1–UD5, VR1–VR3, `GuideSamplesTests`, and `ProductNameTests` pass.
-- In `docs/cli.md`, the steps still read in this order: stop → copy → upgrade → start → import.
-
-## Task 8: Import Benchmark Report
-
-**Files:** new `docs/test-reports/<yyyy-MM-dd>-import-benchmark.md`, using the date the after-run is measured. `docs/test-reports/` is outside VR3's and PN2's scan, but write "gh-ledger" for the product all the same.
-
-**Procedure:**
-
-```powershell
-dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r win-x64 -o "$env:TEMP\gh-ledger-bench-after"
-pwsh -NoProfile -File tests/benchmarks/Measure-ImportSpeed.ps1 -Binary "$env:TEMP\gh-ledger-bench-after\gh-ledger.exe"
-```
-
-Use the same machine as Task 1 if possible, and say in the report whether it is.
-
-**Report contents, in this order:**
-
-1. Title `# Import speed benchmark`.
-2. What was measured: the generated session (Records, the two 9 MiB lines of types import never reads, after record Records/2, Copilot 1.0.114 shape), and that only generated data was read, with temporary `COPILOT_HOME` and `COPILOT_LEDGER_HOME`.
-3. Environment: OS, processors, .NET SDK (`dotnet --version`), and the before and after commits (`0f96a83` with Task 1's script, and this task's parent commit).
-4. The command lines above.
-5. The before table (from Task 1's commit body, verbatim) and the after table (verbatim), then a three-row comparison table `| Run | Before (s) | After (s) | Change |`.
-6. Results against these targets, each marked met or not met:
-   - after run 1: exit 0, recorded = Records, malformed lines 0, skipped events 2, and seconds ≤ 20% of before run 1;
-   - after run 2: skipped unchanged 1, recorded 0, duplicate 0, exit 0;
-   - after run 3: duplicate = Records, recorded 0, malformed lines 0, exit 0, seconds ≤ 10.
-
-Record a missed target as not met. Don't tune code in this task. If a target is missed, report it in the commit body, and the architect will add a task.
-
-**Acceptance:** the report exists with every section, and its after numbers come from one script run whose full output is also pasted into the commit body. No code changes.
-
-## Task 9: Final Verification (no product change)
-
-Run, in a clean tree:
-
-1. `dotnet build CopilotLedger.slnx` must report 0 warnings and 0 errors. `dotnet test CopilotLedger.slnx` must report 0 failed and 0 skipped, with a passed count above 1,921. Record the count.
-2. `dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r win-x64 -o "$env:TEMP\gh-ledger-final"`, then `& "$env:TEMP\gh-ledger-final\gh-ledger.exe" --version` must print exactly `0.6.0`. Use the matching RID on another OS. Then run `rates validate` with `COPILOT_LEDGER_HOME` set to a new temporary directory; it must exit 0.
-3. Money: `git diff 0f96a83 -- src | Select-String -Pattern '\b(double|float)\b|REAL|Math\.Round'` finds no added line about money. The benchmark script is outside `src`.
-4. Privacy:
-   - `git diff 0f96a83 -- src` adds no column, no table, and no stored field;
-   - Task 3 keeps nothing from a prefix;
-   - CS18–CS27 and OV1 assert that the canary never appears.
-5. Boundaries:
-   - `git diff 0f96a83 --stat -- global.json src/CopilotLedger.Core/Pricing/rates.json` is empty;
-   - `git diff 0f96a83 -- src/CopilotLedger.Storage/LedgerMigrations.cs` adds only `Indexes`;
-   - no `.csproj` gains a `PackageReference`;
-   - the `UsageAuthority.cs` diff is empty.
-6. Contracts: the only public or internal contract changes are those in the global rules (compare `git diff 0f96a83 -- src`).
-7. Docs:
-   - `docs/configuration.md` is unchanged (no pricing configuration changed);
-   - `docs/cli.md` describes the index, the dry-run note, the oversized rule, the routed rule, the verification command, and the 0.5.0 upgrade;
-   - `docs/releasing.md` describes attestations and the manual-run rule;
-   - no release notes file was added.
-8. Check off this task, and commit with the results in the body.
-
-## Review after Task 9 (2026-11-24, `ledger-architect`)
-
-Reviewed `0f96a83..81d6bf9` (13 commits, 38 files) against this plan, issues #82, #80, and #77, and `.github/copilot-instructions.md`.
-
-- `dotnet build CopilotLedger.slnx`: 0 warnings, 0 errors.
-- `dotnet test CopilotLedger.slnx`: 1,960 passed, 0 failed, 0 skipped. That's 1,921 plus the 39 this sprint adds: LX 6, CS 17 (theory rows included), CX18, OV1, AR7 8, AC10, RW 4, UD5.
-- A `win-x64` Release publish prints `0.6.0`, and `rates validate` exits 0 against an empty `COPILOT_LEDGER_HOME`.
-- Re-checked:
-  - F1: `v4.2.2` is still the latest release and still points to `4d10147…`. Its `create-storage-record` input applies only with `push-to-registry`, so the job needs no `artifact-metadata` permission.
-  - F6 and F7: the Auto 10% and Fusion 30% (through November 30, 2026) text is unchanged on docs.github.com.
-- No money `double`, `float`, `REAL`, or `Math.Round` was added. There's no new column, table, package, or `global.json` or `rates.json` change, and `UsageAuthority.cs` and `docs/configuration.md` are unchanged.
-- The version places match VR3, and the benchmark report's numbers and percentages match the Task 1 and Task 8 commit bodies.
-- Not a defect: `AuditQueryTests` gained `ListCostUsd = 0.0272m` in its expected record. Live rows store their list price, so the record's new property has to be in the expected value. That's not a weakened assertion.
-- Not a defect: `JsonlLineReader`'s copy branch (`lineLength < PrefixBytes`) only runs when `maxLineBytes` is under 64 KiB, so no product path reaches it. With 8 MiB, the prefix is always already in `line`.
-
-Findings that need a fix:
-
-- **R1 (minor, test gap).** LX6 writes `Usage("u-1", "r-1")` and `Usage("u-2", "r-2")`. `UsageIdentity.NormalizeServiceRequestId` rejects those IDs (PA2), so both dry runs report `unsupportedUsageShapes` 2 and never call `UsageAuthority.GatherAsync`. "Decides the same" is therefore never tested, and that's the claim behind D3 and the `--dry-run` docs sentence ("its results are the same"). The planning probe (a scratch copy outside the repository, deleted afterward) found that with `R1` and `R2`, both runs exit 2 with `recordsParsed` 2, `unsupportedUsageShapes` 0, `ambiguousOverlap` 2, `recorded` 0, and one `ambiguousOverlap` diagnostic with count 2, and their stdout is identical. `ambiguousOverlap` comes from the indexed `canonical_usage_id IS NULL` live-span subquery. Fixed by Task 10.
-- **R2 (minor, docs mismatch).** In `docs/cli.md`, the report table's Malformed lines row and the `skippedEvents` JSON note give the 64 KiB rule for every source. Codex's `OnOversized` ignores the prefix (CX18), so a Codex line longer than 8 MiB is always malformed. The plan's own Task 3 text caused this. Fixed by Task 11.
-
-## Task 10: LX6 Reaches the Live-Span Lookups
-
-**Files:** `tests/CopilotLedger.Tests/Storage/ConversationLiveIndexTests.cs` only. No product, docs, or other test change.
-
-**Changes:**
-
-1. Add `using System.Text.Json;`.
-2. Add these private constants to `ConversationLiveIndexTests`, the same values as Task 3's:
-
-   ```csharp
-   private const string R1 = "11111111-1111-4111-8111-111111111111";
-   private const string R2 = "22222222-2222-4222-8222-222222222222";
-   ```
-
-3. In `LX6_ADryRun_NeverCreatesTheIndex_AndDecidesTheSame`, change `.Usage("u-1", "r-1")` to `.Usage("u-1", R1)` and `.Usage("u-2", "r-2")` to `.Usage("u-2", R2)`. Keep the name, the setup, and every existing assertion: the index count is 0 after A and 1 after B, and exit codes and stdout are equal.
-4. After the existing assertions, assert for **each** of `first` and `second`. A private static local function or helper, such as `AssertDeferred(CliRun run)`, is fine:
-   - `run.ExitCode` is 2;
-   - parse `run.Out` with `JsonDocument`, and take `sources[0]`:
-     - `source` is `"copilot"`;
-     - `recordsParsed` is 2;
-     - `unsupportedUsageShapes` is 0;
-     - `ambiguousOverlap` is 2;
-     - `recorded` is 0;
-   - root `diagnostics` has exactly one element, with `code` `"ambiguousOverlap"` and `count` 2.
-
-If any of these values differs, stop and report it. Don't change the setup to make it pass.
-
-**Acceptance:**
-
-- LX6 passes with the new assertions. The test count stays 1,960.
-- `git grep -n '"r-1"\|"r-2"' -- tests/CopilotLedger.Tests/Storage/ConversationLiveIndexTests.cs` finds nothing.
-- `git diff HEAD~1 --stat` lists only `ConversationLiveIndexTests.cs` and this plan file. The plan file changes only to check off this task.
-
-**Verification:** `dotnet build CopilotLedger.slnx` (0 warnings, 0 errors), then `dotnet test CopilotLedger.slnx` (0 failed, 0 skipped). Record `Tests: <n> passed` in the commit body.
-
-## Task 11: The Oversized Rule Is Copilot's
-
-**Files:** `docs/cli.md` only.
-
-**Changes:**
-
-1. Replace the report table's Malformed lines row with exactly:
-
-   `| Malformed lines | Lines that aren't one JSON event, are longer than 8 MiB, or are incomplete. A longer Copilot line counts as a skipped event instead when its first 64 KiB show a top-level \`type\` that isn't one of the events import reads, the same rule as for shorter lines. A longer Codex line is always malformed |`
-
-2. In the JSON field list, replace `` `skippedEvents` (events of other types, including those longer than 8 MiB whose type shows in their first 64 KiB) `` with `` `skippedEvents` (events of other types, including Copilot events longer than 8 MiB whose type shows in their first 64 KiB) ``.
-
-No other text changes. The new text names no version, and the product is written "gh-ledger" wherever it's named.
-
-**Acceptance:**
-
-- `Select-String -Path docs/cli.md -SimpleMatch 'A longer Copilot line counts as a skipped event'` and `… -SimpleMatch 'including Copilot events longer than 8 MiB'` each find one line.
-- `Select-String -Path docs/cli.md -SimpleMatch 'A longer line counts as a skipped event'` finds nothing.
-- `git diff HEAD~1 --stat` lists only `docs/cli.md` and this plan file.
-- Every docs test passes unchanged: `VersionPlacesTests`, `ProductNameTests`, `UpgradeDocsTests`, `GuideSamplesTests`, and `ReleaseWorkflowTests`.
-- The test count stays 1,960.
-
-**Verification:** `dotnet build CopilotLedger.slnx`, then `dotnet test CopilotLedger.slnx`. Record `Tests: <n> passed` in the commit body. After this task, hand back to `ledger-architect` for review mode.
+   Delete the temporary directory afterward.
+4. **Money.** `git diff c6dc935 -- src | Select-String -Pattern '\b(double|float)\b|REAL|Math\.Round'` finds no added line about money.
+5. **Privacy.**
+   - `git diff c6dc935 -- src` adds one table (`mcp_tool_names`, two columns) and no column to any other table.
+   - `ToolStartPaths` gains only `data.mcpServerName` and `data.mcpToolName`.
+   - IP1, IP3, and IP6 assert that no canary reaches the ledger or the output.
+6. **Boundaries.**
+   - `git diff c6dc935 --stat -- global.json src/CopilotLedger.Core/Pricing/rates.json` is empty.
+   - `git diff c6dc935 -- src/CopilotLedger.Storage/LedgerMigrations.cs` adds only `Tables`.
+   - `LedgerMigrations.Migrations` still ends at 7 (UD4).
+   - No `.csproj` gains a `PackageReference`.
+   - `DaemonState.CurrentImportRules` is still 1.
+7. **Contracts.** The only public or internal contract changes are those in the global rules; compare `git diff c6dc935 -- src`.
+8. **Docs.**
+   - `git grep -n -E "129-character|but always says .Would start|usage lines say .gh-ledger.|program's own name|Where a message or .--help. says" -- README.md ':(glob)docs/*.md'` finds nothing. The dated reports under `docs/test-reports/` keep their text, so the pathspec leaves them out.
+   - `docs/cli.md` describes MCP tool names, the reread, the dry run's daemon step, and the 0.6.0 upgrade.
+   - `docs/configuration.md` is unchanged: no pricing configuration changed.
+   - No release notes file was added.
+9. Check off this task, and commit with the results in the body.
 
 ## Tests added this sprint
 
-| Task | File | Tests |
+| Task | File | Tests (theory rows counted) |
 |---|---|---|
-| 2 | `Storage/ConversationLiveIndexTests.cs` | LX1–LX6 |
-| 3 | `Import/CopilotSessionGateTests.cs` | CS18–CS27 |
-| 3 | `Import/CodexRolloutTests.cs` | CX18 |
-| 3 | `Cli/ImportOversizedTests.cs` | OV1 |
-| 4 | `Audit/VelocityRuleTests.cs` | AR7: 8 new cases |
-| 4 | `Cli/AuditCommandTests.cs` | AC10 |
-| 6 | `Docs/ReleaseWorkflowTests.cs` | RW1–RW4 |
-| 7 | `Docs/UpgradeDocsTests.cs` | UD5 |
+| 1 | `Telemetry/McpToolNamesTests.cs` | MN1–MN6: 24 |
+| 2 | `Storage/McpToolNameStoreTests.cs` | MT1–MT8: 11 |
+| 3 | `Import/McpToolNameImportTests.cs` | ML1–ML10: 15 |
+| 3 | `Cli/ImportPrivacyTests.cs` | IP6: 1 |
+| 4 | `Cli/McpToolNameDisplayTests.cs` | MD1–MD5: 5 |
+| 4 | `Audit/AuditToolNameTests.cs` | MD6: 1 |
+| 4 | `Docs/SprintFifteenDocsTests.cs` | DF1: 1 |
+| 5 | `Cli/InstallCommandTests.cs` | IN20–IN22: 10 |
+| 5 | `Docs/SprintFifteenDocsTests.cs` | DF2: 1 |
+| 6 | `Cli/ExtensionHelpTests.cs` | HL1–HL3: 10 |
+| 6 | `Docs/SprintFifteenDocsTests.cs` | DF3: 1 |
+| 7 | `Cli/ExtensionHintTests.cs` | XH1–XH6: 12 |
+| 7 | `Otlp/CircuitBreakerMonitorTests.cs` | BM13: 1 |
+| 7 | `Docs/SprintFifteenDocsTests.cs` | DF4: 1 |
+| 9 | `Docs/UpgradeDocsTests.cs` | UD6: 1 |
 
-Changed, with assertions unchanged:
+Total: 95, from 1,960 to 2,055.
 
-- the format-downgrade fixtures (Task 2);
-- the four version tests (Task 5).
+Changed tests, each as strong as before:
 
-Changed assertions:
+- `ImportRepairTests` RR1 and RR8 expect import revision 2 (Task 3).
+- `ImportPrivacyTests` (Task 3): `LeftEmpty` and IP3 include `mcp_tool_names`, and the fixture's `toolu-3` is an MCP tool call.
+- `CopilotSessionLogs.ToolStart` takes optional `mcpServerName` and `mcpToolName` (Task 3).
+- The four version tests (Task 8).
 
-- `CS5_ALineLongerThan8MiBIsDiscardedUnread` (Task 3, PA2): an oversized `user.message` is now a skipped event.
-- `LX6_ADryRun_NeverCreatesTheIndex_AndDecidesTheSame` (Task 10, R1): valid service request IDs, and assertions on what both dry runs decided. Nothing is loosened.
+The guide's `breaker-status` and `mcp` samples change, and `GuideSamplesTests` checks them unchanged (Task 7).
 
-## After Task 11 (orchestrator)
+## After Task 10 (orchestrator)
 
-Hand back to `ledger-architect` for review mode. Release notes for 0.6.0 aren't committed to the repository: the coordinator's final report drafts them from this plan and the Task 8 report. Don't push, tag, open a PR, or create a release from a builder run.
+Hand back to `ledger-architect` for review mode. Release notes for 0.7.0 aren't committed to the repository: the architect's planning report drafts them, and the coordinator publishes them with the release. Don't push, tag, open a PR, or create a release from a builder run.
 
 ## Deferred to later sprints
 
-- **S14-1.** `--dry-run` on a ledger without the index stays slow (D3). Making `LedgerSnapshot` use an in-memory temporary index, or the importer cache conversation facts in dry runs, is deferred.
-- **S14-2.** Showing routed (Auto/Fusion) requests and their discount in reports, receipts, and MCP extends S12-2. So does telling a Fusion request from a chosen model after the Fusion discount ends (A3).
-- **S14-3.** Moving from `actions/attest-build-provenance` to `actions/attest` (F2), and attesting `gh-ledger-checksums.txt` or an SBOM.
-- **S14-4.** Authenticode signing of the Windows binaries (#77, out of scope; D8).
-- **S14-5.** Confirming against a real 1.0.115 log, with consent, which event types grow past 8 MiB (A1), and widening the prefix if `type` is ever later than 64 KiB (A2).
-- **Carried from Sprint 12** (see `.github/plans/archive/sprint-12.md`):
-  - S12-1 to S12-8, and S12-10 to S12-12, unchanged;
-  - S12-9 (profiling the duplicate path on large stores) is done by Tasks 1, 2, and 8.
-- Everything Sprint 11 deferred, unchanged (see `.github/plans/archive/sprint-11.md`, "Deferred to later sprints").
+- **S15-1.** Learning MCP tool names from open sessions without `--include-active`, or from a source other than session logs, so a live call shows its name before its session ends (A3).
+- **S15-2.** Naming the command per platform in shared artifacts that always say `gh ledger`: the audit recommendation for `velocity_near_breaker`, receipts, and export's report text (D9).
+- **S15-3.** Replacing `ExtensionHelpAction` with System.CommandLine's own usage name for the root command (`RootCommand.HelpName` on the project's `main`; not in 2.0.15) once a release that has it is adopted.
+- **S15-4.** Confirming that the GitHub Copilot app and VS Code's Agent Host hash MCP tool names as Copilot CLI does (A1).
+- **S15-5.** Per-source import revisions, so a change that concerns only Copilot logs doesn't read Codex rollouts again (D6).
+- **S15-6.** `install --dry-run` can't foresee a sign-in item registration that would fail (D7).
+- **Carried from Sprint 14** (see `.github/plans/archive/sprint-14.md`): S14-1 to S14-5, unchanged; and from Sprint 12, S12-1 to S12-8 and S12-10 to S12-12, unchanged (S12-9 was done by Sprint 14).
+- Everything Sprint 11 deferred, unchanged (see `.github/plans/archive/sprint-11.md`, "Deferred to later sprints"), except Sprint 5's "`gh ledger` in every message", which Tasks 6 and 7 finish for help and command hints. Product and executable names stay `gh-ledger`, and S15-2 tracks the shared artifacts.
