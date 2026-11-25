@@ -119,8 +119,21 @@ public sealed class LedgerSnapshotTests
         ];
 
         ImportRecordResult dry;
-        await using (LedgerSnapshot snapshot = await LedgerSnapshot.OpenAsync(path))
+        // As while the daemon has the ledger open: a connection outside the pools keeps -wal and -shm, so the snapshot reads
+        // through the WAL whatever other tests' pool clearing closes.
+        await using (SqliteConnection daemon = new($"Data Source={path};Pooling=False"))
         {
+            await daemon.OpenAsync();
+            await using (SqliteCommand read = daemon.CreateCommand())
+            {
+                read.CommandText = "SELECT COUNT(*) FROM spans;";
+                await read.ExecuteScalarAsync();
+            }
+
+            SqliteConnection.ClearAllPools();
+            Assert.True(File.Exists(path + "-wal"));
+            Assert.True(File.Exists(path + "-shm"));
+            await using LedgerSnapshot snapshot = await LedgerSnapshot.OpenAsync(path);
             dry = await snapshot.EvaluateAsync(entries);
         }
 
@@ -175,6 +188,7 @@ public sealed class LedgerSnapshotTests
             AmbiguousOverlap = 0,
         };
         await store.RecordImportedAsync([], checkpoint);
+        SqliteConnection.ClearAllPools();
 
         await using LedgerSnapshot snapshot = await LedgerSnapshot.OpenAsync(path);
 

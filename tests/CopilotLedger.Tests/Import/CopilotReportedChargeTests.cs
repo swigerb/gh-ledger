@@ -4,6 +4,7 @@ using CopilotLedger.Core.Pricing;
 using CopilotLedger.Storage;
 using CopilotLedger.Storage.Import;
 using CopilotLedger.Tests.TestSupport;
+using Microsoft.Data.Sqlite;
 
 namespace CopilotLedger.Tests.Import;
 
@@ -132,6 +133,7 @@ public sealed class CopilotReportedChargeTests
         AddMalformed(log, "u4", 4, JsonValue.Create(9_007_199_254_740_993));
         AddMalformed(log, "u5", 5, new JsonObject());
         log.Write(CopilotHome(temp));
+        SqliteConnection.ClearAllPools();
 
         ImportReport dry = await RunAsync(temp, request => request with { DryRun = true });
 
