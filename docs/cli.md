@@ -81,9 +81,11 @@ Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` pr
 
 **Upgrading or removing the extension.** On Windows, gh can't replace or delete the binary while the daemon or a Copilot session's `ledger` MCP server runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. First stop the daemon, and close the Copilot sessions and apps that use the MCP server.
 
-**Ledger format.** gh-ledger upgrades the ledger to format 7 the first time it opens it, and an earlier gh-ledger can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` After upgrading, run `gh ledger import --all` once to repair earlier imports and charges; see [Repairs](#repairs). That can't be undone, so copy your data directory first. To go back to an earlier release, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin <tag>`, put the copy in place of your data directory, and start the daemon.
+**Ledger format.** gh-ledger upgrades the ledger to format 7 the first time it opens it, and gh-ledger 0.5.0 and earlier can't open the ledger after that: they stop with `Database user_version <n> is newer than the supported version <m>.` After upgrading, run `gh ledger import --all` once to repair earlier imports and charges and to learn the names of MCP tools; see [Repairs](#repairs). That can't be undone, so copy your data directory first. To go back to an earlier release, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin <tag>`, put the copy in place of your data directory, and start the daemon.
 
 **Upgrading from 0.5.0.** gh-ledger 0.5.0 uses ledger format 6 and can't open a format 7 ledger. Close the Copilot sessions and apps that use the MCP server, stop the daemon, copy your data directory, upgrade, start the daemon, and run `gh ledger import --all` once, as these steps show. To go back, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy in place of your data directory, and start the daemon. The copy lacks what gh-ledger recorded after you made it.
+
+**Upgrading from 0.6.0.** gh-ledger 0.6.0 uses ledger format 7 too, so it can still open the ledger after you upgrade. Follow the steps below; the first `gh ledger import --all` reads every session log again to learn the names of MCP tools. To go back, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin v0.6.0`, and start the daemon; you don't need the copy.
 
 ```shell
 gh ledger daemon stop
@@ -202,7 +204,7 @@ Importing again records nothing twice and finishes a stopped import. `import` re
 
 ### Repairs
 
-When an import reads a log that an earlier gh-ledger imported, it repairs what was recorded from it: it reprices imported requests with the rates in use (`Repriced`), gives live requests that the daemon priced at the rate card the valid charge their log reports (`Live repriced`), and moves tool calls attached to the wrong request (`Tool links relinked`; tool calls older than 7 days aren't kept). Each request keeps its list price beside its charge. A dry run reports the same counts and changes nothing.
+When an import reads a log that an earlier gh-ledger imported, it repairs what was recorded from it: it reprices imported requests with the rates in use (`Repriced`), gives live requests that the daemon priced at the rate card the valid charge their log reports (`Live repriced`), and moves tool calls attached to the wrong request (`Tool links relinked`; tool calls older than 7 days aren't kept). Each request keeps its list price beside its charge. A dry run reports the same counts and changes nothing. An import also reads once more each log that gh-ledger 0.6.0 or earlier imported, to learn the names of the MCP tools that ran in it; see [MCP tool names](#mcp-tool-names).
 
 ### MCP tool names
 

@@ -886,13 +886,13 @@ Invalid rates overlay: C:\Users\you\.copilot-ledger\rates.json: githubAiCredits.
 
 The overlay lists a model name that the new release builds in, here an alias of `claude-haiku-4.5`. Remove the entry that the message names, and start the daemon again. See [Which model prices a request](configuration.md#which-model-prices-a-request).
 
-Then repair what an earlier version recorded; see [Repairs](cli.md#repairs):
+Then repair what an earlier version recorded, and learn the names of MCP tools; see [Repairs](cli.md#repairs):
 
 ```shell
 gh ledger import --all
 ```
 
-Keep the copy until you're sure you'll stay on the new release. To go back to gh-ledger 0.5.0 after upgrading from it, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy in place of your data directory, and start the daemon; you lose what gh-ledger recorded after the copy. For other releases, see [Install and uninstall](cli.md#install-and-uninstall).
+Keep the copy until you're sure you'll stay on the new release. To go back to gh-ledger 0.6.0, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin v0.6.0`, and start the daemon; 0.6.0 opens the same ledger. To go back to gh-ledger 0.5.0 after upgrading from it, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy in place of your data directory, and start the daemon; you lose what gh-ledger recorded after the copy. For other releases, see [Install and uninstall](cli.md#install-and-uninstall).
 
 To remove gh-ledger, undo `install`:
 
