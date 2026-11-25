@@ -1,0 +1,48 @@
+name: Bug report
+description: gh-ledger does something different from what its docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Don't paste prompts, responses, tool output, or your ledger (`ledger.db`): gh-ledger never needs them. Remove repository names, branch names, and paths that you don't want to make public. To report a security problem, follow the [security policy](https://github.com/swigerb/gh-ledger/security/policy) instead.
+  - type: input
+    id: version
+    attributes:
+      label: gh-ledger version
+      description: The output of `gh ledger --version`.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Your operating system, and the Copilot client and its version, such as Copilot CLI 1.0.115 or VS Code with Copilot.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The commands you ran, in order.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: What gh-ledger printed, and its exit code.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `gh ledger status`
+      description: Optional. It shows the daemon, the ledger path, the rates version, Copilot's export setting, and your recent spend. Remove anything you don't want to make public.
+      render: text

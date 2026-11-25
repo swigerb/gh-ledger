@@ -45,6 +45,8 @@ The ledger stays on your machine. gh-ledger keeps metadata, such as models, toke
 - [Command reference](docs/cli.md): every command and option, and troubleshooting
 - [Configuration](docs/configuration.md): pricing, the rates overlay, and data files
 - [PR receipt action](https://github.com/swigerb/copilot-ledger-action): post receipts on pull requests
+- [Contributing](CONTRIBUTING.md): build, test, and send changes
+- [Security policy](SECURITY.md): report a vulnerability privately
 - [Releasing](docs/releasing.md): for maintainers
 - [Test reports](docs/test-reports/): live end-to-end test results
 

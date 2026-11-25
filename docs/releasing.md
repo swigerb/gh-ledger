@@ -2,9 +2,11 @@
 
 Releases are GitHub Releases of this repository: `gh extension install swigerb/gh-ledger` installs their binaries, and `gh ledger rates update` downloads their `rates.v2.json`. The PR receipt action is released from [its own repository](https://github.com/swigerb/copilot-ledger-action).
 
+Work lands on `dev`, and releases are tagged on `main`, which changes only through a pull request that passes CI (`build-test` on Ubuntu and Windows); the rule applies to admins too. Other branches are deleted when their pull request merges.
+
 ## Cut a release
 
-1. Change the version everywhere it's written, and merge that change:
+1. Change the version everywhere it's written, and merge that change into `dev`:
    - `<Version>` in `src/CopilotLedger.Cli/CopilotLedger.Cli.csproj`;
    - in `src/CopilotLedger.Cli/GhLedgerCli.cs`, the `AssemblyInformationalVersionAttribute` comment and the fallback after `??`;
    - the version that the smoke test in `.github/workflows/ci.yml` compares with;
@@ -17,8 +19,8 @@ Releases are GitHub Releases of this repository: `gh extension install swigerb/g
 2. If `src/CopilotLedger.Core/Pricing/rates.json` changed since the latest release, set its `ratesVersion` to the date of the change (`yyyy-MM-dd`), later than the latest release's. `gh ledger rates update` only takes rates with a later version, and the Release workflow fails when `rates.json` changed but its `ratesVersion` didn't move forward. In the same change, replace the old date wherever it's shown; the tests fail until every place matches:
    - the samples in `docs/guide.md`: `status-first`, `status`, `rates-validate`, `rates-update`, and `audit`. The `rates-update` sample and `GuideSamplesTests.GS4` download version `2026-12-15`; if that isn't later than the new date, change it in both;
    - the tests that expect it, such as `ReportCommandTests` (including `StatusText`), `RatesCommandTests`, `RatesUpdateTests`, `RateOverlayTests`, `JsonRateCardCalculatorTests`, the audit and export tests, and `TestSupport/PublishedRates.cs` and `TestSupport/AuditOutputs.cs`. `RatesUpdateTests` downloads versions before, equal to, and after the old date; keep each in the same place relative to the new one.
-3. Optional: run the Release workflow on `main` from the Actions tab. A manual run builds all six binaries, smoke-tests the three that GitHub's runners can run (`win-x64`, `linux-x64`, and `osx-arm64`), checks `ratesVersion`, and uploads the binaries as workflow artifacts. It never creates a release or an attestation: only the release job, which runs for a pushed tag, has the `id-token: write` and `attestations: write` permissions.
-4. Tag the merged commit and push the tag:
+3. Optional: run the Release workflow on `dev` from the Actions tab. A manual run builds all six binaries, smoke-tests the three that GitHub's runners can run (`win-x64`, `linux-x64`, and `osx-arm64`), checks `ratesVersion`, and uploads the binaries as workflow artifacts. It never creates a release or an attestation: only the release job, which runs for a pushed tag, has the `id-token: write` and `attestations: write` permissions.
+4. Open a pull request from `dev` to `main`. When CI passes, merge it with a merge commit, not a squash, so that `dev` and `main` keep one history. Then tag the merge commit on `main` and push the tag:
 
    ```shell
    git tag v0.7.0
