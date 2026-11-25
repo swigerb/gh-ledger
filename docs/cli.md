@@ -73,7 +73,7 @@ gh ledger uninstall [--dry-run]
 - Sets the `gh ledger` alias for a binary you built, when `gh` is on `PATH`. On Windows, the alias needs `sh.exe` from Git for Windows.
 - Starts the daemon. If that fails, the other changes stay, and `install` exits with 1.
 
-Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` prints the changes without making them, but always says `Would start the gh-ledger daemon.`, even when the daemon is running or would be refused.
+Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` prints the changes without making them, and exits with the code that `install` would. For the daemon, it says that it's already running, with its pid; or, in a terminal whose Windows job would stop it, `Wouldn't start the gh-ledger daemon:` with the reason and hint that `daemon start` gives; or `Would start the gh-ledger daemon.`
 
 `install` and `status` warn about variables that keep telemetry from reaching gh-ledger, such as an `OTEL_EXPORTER_OTLP_ENDPOINT` other than `http://localhost:4318` or `http://127.0.0.1:4318`. `install` also warns that the daemon started at sign-in sees `COPILOT_LEDGER_HOME` only if your sign-in environment sets it. `status` warns when `install.json` names another executable; run `install` from the copy you want to keep.
 

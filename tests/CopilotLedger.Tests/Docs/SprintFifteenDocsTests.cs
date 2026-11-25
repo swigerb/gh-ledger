@@ -18,6 +18,21 @@ public sealed class SprintFifteenDocsTests
         Assert.DoesNotContain("129-character", cli, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DF2_TheReferenceSaysWhatTheInstallDryRunReportsForTheDaemon()
+    {
+        string cli = Text("docs", "cli.md");
+
+        Assert.DoesNotContain(
+            "but always says `Would start the gh-ledger daemon.`",
+            cli,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "`Wouldn't start the gh-ledger daemon:`",
+            cli,
+            StringComparison.Ordinal);
+    }
+
     private static string Text(params string[] parts) =>
         File.ReadAllText(RepositoryFile(parts)).ReplaceLineEndings("\n");
 
