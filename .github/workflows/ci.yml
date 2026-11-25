@@ -43,7 +43,7 @@ jobs:
         env:
           COPILOT_LEDGER_HOME: ${{ runner.temp }}/copilot-ledger
         run: |
-          test "$(./artifacts/gh-ledger/gh-ledger --version | tr -d '\r')" = "0.6.0"
+          test "$(./artifacts/gh-ledger/gh-ledger --version | tr -d '\r')" = "0.7.0"
           ./artifacts/gh-ledger/gh-ledger rates validate
           started=$(./artifacts/gh-ledger/gh-ledger daemon start | tr -d '\r')
           echo "$started"

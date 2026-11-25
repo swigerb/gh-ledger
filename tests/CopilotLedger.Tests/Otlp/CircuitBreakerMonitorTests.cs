@@ -444,6 +444,29 @@ public sealed class CircuitBreakerMonitorTests
         Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
     }
 
+    [Fact]
+    public async Task BM13_TheFlagFile_NamesTheDaemonsCommand()
+    {
+        using TempDirectory temp = new();
+        Harness harness = await Harness.CreateAsync(
+            temp,
+            BreakerSettings.Default with { FlagFile = true },
+            command: "gh ledger");
+        for (int request = 1; request <= 6; request++)
+        {
+            await harness.Ingestor.IngestAsync(TraceHRequest(request));
+        }
+
+        using JsonDocument flag = JsonDocument.Parse(
+            await FileRetry.ReadAllTextAsync(
+                Path.Combine(harness.Repo, ".copilot-ledger", "CIRCUIT_OPEN")));
+        JsonElement trip =
+            Assert.Single(flag.RootElement.GetProperty("openTrips").EnumerateArray());
+        Assert.Equal(
+            "gh ledger breaker reset --id 1",
+            trip.GetProperty("resetCommand").GetString());
+    }
+
     private static void AssertTripH(BreakerTrip trip, string repo)
     {
         Assert.Equal(1, trip.Id);

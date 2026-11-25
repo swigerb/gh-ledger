@@ -139,4 +139,4 @@ To remove gh-ledger, run `gh ledger uninstall`. If you registered the MCP server
 | `daemon run`, `daemon start`, `daemon stop` | The local receiver for Copilot's telemetry |
 | `mcp` | The MCP server that Copilot runs |
 
-Run any command with `--help` for its options. The help shows the program's own name, `gh-ledger`; with the extension, type `gh ledger`.
+Run any command with `--help` for its options.

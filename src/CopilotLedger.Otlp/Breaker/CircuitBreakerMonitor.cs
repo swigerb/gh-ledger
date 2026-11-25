@@ -169,6 +169,7 @@ public sealed class CircuitBreakerMonitor
             await CircuitFlagFile.SyncAsync(
                 _store,
                 trip.RepositoryRoot,
+                _command,
                 CancellationToken.None);
         }
         catch (Exception ex) when (

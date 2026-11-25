@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Help;
 using System.Reflection;
 using CopilotLedger.Cli.Audit;
 using CopilotLedger.Cli.Breaker;
@@ -15,12 +16,12 @@ namespace CopilotLedger.Cli;
 
 public static class GhLedgerCli
 {
-    // AssemblyInformationalVersionAttribute: "0.6.0"
+    // AssemblyInformationalVersionAttribute: "0.7.0"
     public static string Version { get; } =
         typeof(GhLedgerCli).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion
-        ?? "0.6.0";
+        ?? "0.7.0";
 
     // Builds a new RootCommand, parses args, and invokes it with
     // new InvocationConfiguration { Output = context.Out, Error = context.Error, ProcessTerminationTimeout = null }.
@@ -55,6 +56,12 @@ public static class GhLedgerCli
         root.Add(AuditCommands.Create(context));
         root.Add(ImportCommands.Create(context));
         root.Add(McpCommand.Create(context));
+
+        if (GhExtension.IsInstalled(context.Platform))
+        {
+            HelpOption help = root.Options.OfType<HelpOption>().Single();
+            help.Action = new ExtensionHelpAction((HelpAction)help.Action!, root.Name);
+        }
 
         return root.Parse(args).InvokeAsync(
             new InvocationConfiguration

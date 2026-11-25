@@ -118,6 +118,55 @@ public sealed class UpgradeDocsTests
         Assert.DoesNotContain(CopilotLedger.Cli.GhLedgerCli.Version, guideLines[rollback], StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void UD6_TheUpgradeFrom060_KeepsFormat7AndGoesBackWithThePin()
+    {
+        string[] cliLines = Steps("cli.md", "**Upgrading or removing the extension.**", "## The daemon");
+        string upgrade = Assert.Single(
+            cliLines,
+            line => line.StartsWith("**Upgrading from 0.6.0.**", StringComparison.Ordinal));
+        int upgradeLine = Array.IndexOf(cliLines, upgrade);
+        int previousUpgrade = Array.FindIndex(
+            cliLines,
+            line => line.StartsWith("**Upgrading from 0.5.0.**", StringComparison.Ordinal));
+        int firstBlock = Array.FindIndex(cliLines, line => line.StartsWith("```", StringComparison.Ordinal));
+
+        Assert.True(upgradeLine > previousUpgrade && upgradeLine < firstBlock);
+        Assert.Contains("format 7", upgrade, StringComparison.Ordinal);
+        Assert.Contains("gh ledger import --all", upgrade, StringComparison.Ordinal);
+        Assert.Contains("gh extension remove ledger", upgrade, StringComparison.Ordinal);
+        Assert.Contains("gh extension install swigerb/gh-ledger --pin v0.6.0", upgrade, StringComparison.Ordinal);
+        Assert.Contains("you don't need the copy", upgrade, StringComparison.Ordinal);
+        Assert.DoesNotContain("format 6", upgrade, StringComparison.Ordinal);
+        Assert.DoesNotContain(CopilotLedger.Cli.GhLedgerCli.Version, upgrade, StringComparison.Ordinal);
+
+        string[] guideLines = Steps("guide.md", "## Upgrade or uninstall", "To remove gh-ledger, undo `install`:");
+        int repair = Array.FindIndex(guideLines, line => line == "gh ledger import --all");
+        int rollback = Array.FindIndex(
+            guideLines,
+            line => line.Contains(
+                "gh extension install swigerb/gh-ledger --pin v0.6.0",
+                StringComparison.Ordinal));
+
+        Assert.True(repair >= 0 && rollback > repair);
+        Assert.DoesNotContain(CopilotLedger.Cli.GhLedgerCli.Version, guideLines[rollback], StringComparison.Ordinal);
+
+        string[] cli = File.ReadAllLines(RepositoryFile("docs", "cli.md"));
+        int repairs = Array.FindIndex(cli, line => line == "### Repairs");
+
+        Assert.True(repairs >= 0);
+        int repairsText = Array.FindIndex(
+            cli,
+            repairs + 1,
+            line => !string.IsNullOrWhiteSpace(line));
+        Assert.True(repairsText > repairs);
+        Assert.Contains(
+            "each log that gh-ledger 0.6.0 or earlier imported",
+            cli[repairsText],
+            StringComparison.Ordinal);
+        Assert.Contains("[MCP tool names](#mcp-tool-names)", cli[repairsText], StringComparison.Ordinal);
+    }
+
     // The lines of docs/<file> from the first line that starts with start up to, not including, the next line that starts
     // with end.
     private static string[] Steps(string file, string start, string end)

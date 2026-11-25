@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Security;
 using System.Text.Json;
 using CopilotLedger.Cli;
@@ -7,6 +8,13 @@ namespace CopilotLedger.Tests.Cli;
 
 public sealed class InstallCommandTests
 {
+    private const string Job =
+        "Wouldn't start the gh-ledger daemon: this terminal runs in a Windows job that stops the processes it started when it closes, so the daemon would stop with it.";
+    private const string Unreadable =
+        "Wouldn't start the gh-ledger daemon: can't read this terminal's Windows job, so the daemon might stop when the terminal closes (Access is denied.).";
+    private const string Sh =
+        "Warning: GitHub CLI needs sh.exe from Git for Windows to run shell aliases, so gh ledger won't work until Git for Windows is installed. Run gh-ledger directly.";
+
     [Fact]
     public async Task IN1_FreshWindowsInstallMakesOnlyFakePlatformChanges()
     {
@@ -854,6 +862,202 @@ public sealed class InstallCommandTests
             arguments);
         Assert.DoesNotContain("no alias is needed", run.Out);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IN20_DryRun_ReportsARunningDaemon(bool withState)
+    {
+        using TempDirectory temp = new();
+        FakeCliPlatform platform = WindowsPlatform();
+        await using CliHarness harness = new(temp.Path, platform);
+        string data = Path.Combine(temp.Path, "data");
+        Directory.CreateDirectory(data);
+        string statePath = Path.Combine(data, "daemon.json");
+        const string state =
+            "{\"schemaVersion\":1,\"processId\":4242,\"startedAt\":\"2026-11-24T12:00:00+00:00\",\"endpoint\":\"http://localhost:4318\",\"version\":\"9.9.9\",\"databasePath\":\"ledger.db\",\"importRules\":1}";
+        if (withState)
+        {
+            await File.WriteAllTextAsync(statePath, state);
+        }
+
+        using FileStream held = new(
+            Path.Combine(data, "daemon.lock"),
+            FileMode.OpenOrCreate,
+            FileAccess.ReadWrite,
+            FileShare.None);
+
+        CliRun dryRun = await harness.RunAsync("install", "--dry-run");
+
+        string line = withState
+            ? "gh-ledger daemon is already running (pid 4242)."
+            : "gh-ledger daemon is already running.";
+        Assert.Equal(0, dryRun.ExitCode);
+        Assert.Equal(string.Empty, dryRun.Error);
+        Assert.Equal(
+            $"Would set COPILOT_OTEL_ENABLED=true for your user account.\n" +
+            "Would set gh alias: gh ledger runs C:\\tools\\gh-ledger.exe.\n" +
+            Sh + "\n" +
+            "Would start gh-ledger when you sign in.\n" +
+            line + "\n" +
+            "Dry run: no changes made.\n",
+            dryRun.Out);
+        Assert.Empty(platform.UserVariableWrites);
+        Assert.Empty(platform.StartupCommandWrites);
+        Assert.Empty(platform.ProcessRuns);
+        Assert.Empty(platform.DetachedStarts);
+        Assert.False(File.Exists(ManifestPath(temp.Path)));
+        if (withState)
+        {
+            Assert.Equal(state, await File.ReadAllTextAsync(statePath));
+        }
+        else
+        {
+            Assert.False(File.Exists(statePath));
+        }
+
+        CliRun install = await harness.RunAsync("install");
+
+        Assert.Equal(0, install.ExitCode);
+        Assert.Contains(line + "\n", install.Out, StringComparison.Ordinal);
+        Assert.EndsWith(
+            "gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n",
+            install.Out);
+        Assert.Empty(platform.DetachedStarts);
+    }
+
+    public static TheoryData<string> BlockedDaemonCases => new()
+    {
+        "job",
+        "unreadable",
+        "extension",
+        "no sign-in item",
+    };
+
+    [Theory]
+    [MemberData(nameof(BlockedDaemonCases))]
+    public async Task IN21_DryRun_InABlockingJob_SaysItWouldntStartTheDaemon(
+        string caseName)
+    {
+        using TempDirectory temp = new();
+        FakeCliPlatform platform = BlockedDaemonPlatform(caseName);
+        await using CliHarness harness = new(temp.Path, platform);
+
+        CliRun run = await harness.RunAsync("install", "--dry-run");
+
+        string expectedOut = caseName switch
+        {
+            "job" or "unreadable" =>
+                "Would set COPILOT_OTEL_ENABLED=true for your user account.\n" +
+                "Would set gh alias: gh ledger runs C:\\tools\\gh-ledger.exe.\n" +
+                Sh + "\n" +
+                "Would start gh-ledger when you sign in.\n" +
+                "Dry run: no changes made.\n",
+            "extension" =>
+                "Would set COPILOT_OTEL_ENABLED=true for your user account.\n" +
+                "gh ledger runs this GitHub CLI extension, so no alias is needed.\n" +
+                "Would start gh-ledger when you sign in.\n" +
+                "Dry run: no changes made.\n",
+            "no sign-in item" =>
+                "Would set COPILOT_OTEL_ENABLED=true for your user account.\n" +
+                $"Would set gh alias: gh ledger runs {Long}.\n" +
+                Sh + "\n" +
+                "Warning: the gh-ledger path is too long for a sign-in command, so gh-ledger won't start when you sign in. Run gh-ledger daemon start after you sign in.\n" +
+                "Dry run: no changes made.\n",
+            _ => throw new ArgumentOutOfRangeException(nameof(caseName)),
+        };
+        string expectedError = caseName switch
+        {
+            "job" => Job + "\n" + SignIn("gh-ledger") + "\n",
+            "unreadable" =>
+                Unreadable + "\n" + SignIn("gh-ledger") + "\n",
+            "extension" =>
+                Job + "\n" + SignIn("gh ledger") + "\n",
+            "no sign-in item" =>
+                Job + "\n" + Regular("gh-ledger") + "\n",
+            _ => throw new ArgumentOutOfRangeException(nameof(caseName)),
+        };
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Equal(expectedOut, run.Out);
+        Assert.Equal(expectedError, run.Error);
+        Assert.Empty(platform.UserVariableWrites);
+        Assert.Empty(platform.StartupCommandWrites);
+        Assert.Empty(platform.ProcessRuns);
+        Assert.Empty(platform.DetachedStarts);
+        Assert.False(File.Exists(ManifestPath(temp.Path)));
+    }
+
+    [Theory]
+    [MemberData(nameof(BlockedDaemonCases))]
+    public async Task IN22_DryRun_DecidesTheDaemonLikeInstall(string caseName)
+    {
+        using TempDirectory dryRoot = new();
+        FakeCliPlatform dryPlatform = BlockedDaemonPlatform(caseName);
+        await using CliHarness dryHarness = new(dryRoot.Path, dryPlatform);
+        CliRun dry = await dryHarness.RunAsync("install", "--dry-run");
+
+        using TempDirectory installRoot = new();
+        FakeCliPlatform installPlatform = BlockedDaemonPlatform(caseName);
+        await using CliHarness installHarness =
+            new(installRoot.Path, installPlatform);
+        CliRun install = await installHarness.RunAsync("install");
+
+        Assert.Equal(1, dry.ExitCode);
+        Assert.Equal(1, install.ExitCode);
+        string[] dryLines = dry.Error.Split('\n');
+        string[] installLines = install.Error.Split('\n');
+        Assert.Equal(3, dryLines.Length);
+        Assert.Equal(3, installLines.Length);
+        Assert.Equal(string.Empty, dryLines[2]);
+        Assert.Equal(string.Empty, installLines[2]);
+        Assert.Equal(installLines[1], dryLines[1]);
+        const string installPrefix = "gh-ledger daemon not started: ";
+        Assert.StartsWith(installPrefix, installLines[0]);
+        Assert.Equal(
+            "Wouldn't start the gh-ledger daemon: " +
+            installLines[0][installPrefix.Length..],
+            dryLines[0]);
+        Assert.Empty(installPlatform.DetachedStarts);
+    }
+
+    private static FakeCliPlatform BlockedDaemonPlatform(string caseName)
+    {
+        FakeCliPlatform platform = WindowsPlatform();
+        switch (caseName)
+        {
+            case "job":
+                platform.JobState = new(true, 0x2000);
+                break;
+            case "unreadable":
+                platform.JobStateException =
+                    new Win32Exception(5, "Access is denied.");
+                break;
+            case "extension":
+                platform.ProcessPath = WindowsExtension;
+                platform.ExistingFiles.Add(
+                    @"C:\Users\me\AppData\Local\GitHub CLI\extensions\gh-ledger\manifest.yml");
+                platform.JobState = new(true, 0x2000);
+                break;
+            case "no sign-in item":
+                platform.ProcessPath = Long;
+                platform.JobState = new(true, 0x2000);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(caseName));
+        }
+
+        return platform;
+    }
+
+    private static string SignIn(string command) =>
+        $"Run {command} daemon start from a regular terminal, or sign out and back in to start it from the sign-in item.";
+
+    private static string Regular(string command) =>
+        $"Run {command} daemon start from a regular terminal.";
+
+    private static readonly string Long =
+        @"C:\" + new string('a', 250) + @"\gh-ledger.exe";
 
     private static FakeCliPlatform UnixPlatform(string root)
     {

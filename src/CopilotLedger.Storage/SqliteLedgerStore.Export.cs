@@ -22,6 +22,23 @@ public sealed partial class SqliteLedgerStore
                COALESCE((SELECT owner.ingest_source FROM spans AS owner WHERE owner.id = span_links.owner_span_row_id), 'otlp')
         """;
 
+    internal static async Task<IReadOnlyDictionary<string, string>> ReadMcpToolNamesAsync(
+        SqliteTransaction snapshot,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = snapshot.Connection!.CreateCommand();
+        command.Transaction = snapshot;
+        command.CommandText = "SELECT hashed_name, tool_name FROM mcp_tool_names;";
+        Dictionary<string, string> names = new(StringComparer.Ordinal);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            names.Add(reader.GetString(0), reader.GetString(1));
+        }
+
+        return names;
+    }
+
     // The execute_tool links that count, start in the filter's period, and belong to a prompt chain with a selected span: one
     // in temp.export_selected_chains, which LedgerExportSnapshot fills for the filter before every tool-call read
     // (SelectExportChainsAsync). The unary + keeps the trace term off span_links' primary key, so a page seeks

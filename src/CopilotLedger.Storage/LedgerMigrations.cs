@@ -2,6 +2,20 @@ namespace CopilotLedger.Storage;
 
 internal static class LedgerMigrations
 {
+    // Tables that every ledger of the latest format has. Opening the ledger adds one that's missing, without changing
+    // user_version: an earlier build of the same format ignores it.
+    // mcp_tool_names: the names that import learned for MCP tools whose live spans Copilot names by hashes (McpToolNames).
+    public static IReadOnlyList<(string Name, string Sql)> Tables { get; } =
+    [
+        ("mcp_tool_names",
+         """
+         CREATE TABLE IF NOT EXISTS mcp_tool_names (
+             hashed_name TEXT NOT NULL PRIMARY KEY CHECK (length(hashed_name) = 129),
+             tool_name   TEXT NOT NULL CHECK (length(tool_name) BETWEEN 1 AND 256)
+         ) STRICT, WITHOUT ROWID;
+         """),
+    ];
+
     // Indexes that every ledger of the latest format has. Opening the ledger adds one that's missing, without changing
     // user_version: SQLite keeps an index current for every writer, including an earlier build of the same format.
     // ix_spans_conversation_live: the importer's per-record live-span lookups (UsageAuthority), which name 'otlp' literally

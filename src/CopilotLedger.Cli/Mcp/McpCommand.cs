@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using CopilotLedger.Cli.Install;
 using CopilotLedger.Cli.Rates;
 using CopilotLedger.Core.Git;
 using CopilotLedger.Mcp;
@@ -29,6 +30,7 @@ internal static class McpCommand
                 DatabasePath = context.DatabasePath,
                 WorkingDirectory = context.WorkingDirectory,
                 GetEnvironmentVariable = context.Platform.GetEnvironmentVariable,
+                Command = GhExtension.CommandName(context.Platform),
                 GitResolver = new FileSystemGitContextResolver(),
                 TimeProvider = context.TimeProvider,
                 Version = GhLedgerCli.Version,

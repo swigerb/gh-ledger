@@ -2,7 +2,7 @@
 
 This guide walks through everyday gh-ledger tasks. To install gh-ledger and try each command, see the [quickstart](quickstart.md). For every option, see the [command reference](cli.md).
 
-The samples come from one example: the GitHub CLI extension on Windows, in the `contoso/webapp` repository on the `feature/search` branch, at 16:30 on 2026-11-21 (UTC-5), with a month of spend, a Foundry BYOK rates overlay, a budget, and an open circuit-breaker trip. A test checks that each output is exactly what gh-ledger prints. Where a message or `--help` says `gh-ledger <command>`, run `gh ledger <command>`.
+The samples come from one example: the GitHub CLI extension on Windows, in the `contoso/webapp` repository on the `feature/search` branch, at 16:30 on 2026-11-21 (UTC-5), with a month of spend, a Foundry BYOK rates overlay, a budget, and an open circuit-breaker trip. A test checks that each output is exactly what gh-ledger prints.
 
 - [Set up gh-ledger](#set-up-gh-ledger)
 - [Backfill history after installing](#backfill-history-after-installing)
@@ -52,7 +52,7 @@ gh ledger status
 ```
 
 ```text
-gh-ledger 0.6.0 (GitHub CLI extension)
+gh-ledger 0.7.0 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 16:20
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
 Rates:   2026-11-23
@@ -170,7 +170,7 @@ gh ledger status
 ```
 
 ```text
-gh-ledger 0.6.0 (GitHub CLI extension)
+gh-ledger 0.7.0 (GitHub CLI extension)
 Daemon:  running (pid 4242) on http://localhost:4318 since 2026-11-21 08:02
 Ledger:  C:\Users\you\.copilot-ledger\ledger.db
 Rates:   2026-11-23+contoso-2026-11
@@ -449,7 +449,7 @@ Flag file: off. Notifications: on.
 
 Trip 1 at 2026-11-21 11:21: contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt
   rule credit_velocity, trace 0f3c9a7e5d1b4f2a8c6e0d9b7a5c00b2, session 7d4e1c2a-5b3f-4e8d-9a6c-0000000000b2
-Reset a trip with: gh-ledger breaker reset --id <id>
+Reset a trip with: gh ledger breaker reset --id <id>
 ```
 <!-- /sample -->
 
@@ -536,7 +536,7 @@ The action posts the receipt as a comment on the pull request:
 > | GitHub AI Credits | `mai-code-2` | 1 | 0 | 300,000 | 15,000 | 18.75 credits ($0.19) | Unpriced | $0.00 |
 > | Local | `qwen3.8-27b` | 1 | 0 | 300,000 | 9,000 | $0.00 | Unpriced | $0.17 |
 >
-> Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.6.0
+> Repository `contoso/webapp` • 4 prompts • commit `4f9c2e1d8b7a` • generated 2026-11-21 21:30 UTC by gh-ledger 0.7.0
 >
 > To check these totals, run `gh ledger branch --since all --json` in the repository and compare the `feature/search` row.
 >
@@ -547,7 +547,7 @@ The action posts the receipt as a comment on the pull request:
 >   "branch": "feature/search",
 >   "commit": "4f9c2e1d8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d",
 >   "generatedAt": "2026-11-21T21:30:00.0000000+00:00",
->   "generator": "gh-ledger 0.6.0",
+>   "generator": "gh-ledger 0.7.0",
 >   "totals": {
 >     "spans": 8,
 >     "unpricedSpans": 0,
@@ -755,7 +755,7 @@ Then ask Copilot, for example, "How much has this branch cost so far?" Copilot c
 
 <!-- sample: mcp -->
 ```text
-WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1
+WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh ledger breaker reset --id 1
 {
   "repository": "contoso/webapp",
   "branch": "feature/search",
@@ -795,12 +795,12 @@ WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 
         "currentSession": false,
         "trippedAt": "2026-11-21T16:21:32.0000000+00:00",
         "detail": "252.00 AI credits in 5 minutes",
-        "resetCommand": "gh-ledger breaker reset --id 1"
+        "resetCommand": "gh ledger breaker reset --id 1"
       }
     ]
   },
   "warnings": [
-    "WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh-ledger breaker reset --id 1"
+    "WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 252.00 AI credits in 5 minutes on one prompt (trip 1). Stop and ask the user before continuing. The user can reset it with: gh ledger breaker reset --id 1"
   ]
 }
 ```
@@ -886,13 +886,13 @@ Invalid rates overlay: C:\Users\you\.copilot-ledger\rates.json: githubAiCredits.
 
 The overlay lists a model name that the new release builds in, here an alias of `claude-haiku-4.5`. Remove the entry that the message names, and start the daemon again. See [Which model prices a request](configuration.md#which-model-prices-a-request).
 
-Then repair what an earlier version recorded; see [Repairs](cli.md#repairs):
+Then repair what an earlier version recorded, and learn the names of MCP tools; see [Repairs](cli.md#repairs):
 
 ```shell
 gh ledger import --all
 ```
 
-Keep the copy until you're sure you'll stay on the new release. To go back to gh-ledger 0.5.0 after upgrading from it, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy in place of your data directory, and start the daemon; you lose what gh-ledger recorded after the copy. For other releases, see [Install and uninstall](cli.md#install-and-uninstall).
+Keep the copy until you're sure you'll stay on the new release. To go back to gh-ledger 0.6.0, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin v0.6.0`, and start the daemon; 0.6.0 opens the same ledger. To go back to gh-ledger 0.5.0 after upgrading from it, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy in place of your data directory, and start the daemon; you lose what gh-ledger recorded after the copy. For other releases, see [Install and uninstall](cli.md#install-and-uninstall).
 
 To remove gh-ledger, undo `install`:
 

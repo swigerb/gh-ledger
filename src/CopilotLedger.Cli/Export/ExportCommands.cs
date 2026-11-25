@@ -343,7 +343,9 @@ internal static class ExportCommands
             new("telemetry/prompt-chains.json", (stream, token) => stream.WriteAsync(chains, token).AsTask()),
             new("telemetry/spans.json", (stream, token) => ExportJson.WriteSpansAsync(stream, snapshot, inputs, token)),
             new("telemetry/summary.json", (stream, token) => stream.WriteAsync(summary, token).AsTask()),
-            new("telemetry/tool-calls.json", (stream, token) => ExportJson.WriteToolCallsAsync(stream, snapshot, inputs, token)),
+            new(
+                "telemetry/tool-calls.json",
+                (stream, token) => ExportJson.WriteToolCallsAsync(stream, snapshot, inputs, model.ToolNames, token)),
         ];
     }
 

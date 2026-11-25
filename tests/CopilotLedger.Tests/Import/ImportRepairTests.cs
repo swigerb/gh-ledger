@@ -33,7 +33,7 @@ public sealed class ImportRepairTests
             await LedgerSql.RowsAsync(
                 Database(temp), "SELECT cost_usd_pico, charge_source, list_cost_usd_pico FROM spans;"));
         Assert.Equal(
-            1,
+            2,
             (await (await StoreAsync(temp)).GetImportSessionAsync(ImportSourceKind.Copilot, "s-a"))!.ImportRevision);
     }
 
@@ -164,7 +164,7 @@ public sealed class ImportRepairTests
         ImportSessionCheckpoint checkpoint =
             (await store.GetImportSessionAsync(ImportSourceKind.Copilot, "s-a"))!;
         Assert.True(checkpoint.Complete);
-        Assert.Equal(1, checkpoint.ImportRevision);
+        Assert.Equal(2, checkpoint.ImportRevision);
         Assert.Equal(1L, await LedgerSql.ScalarAsync(Database(temp), "SELECT COUNT(*) FROM spans;"));
         Assert.True(File.Exists(path));
     }

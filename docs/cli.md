@@ -2,7 +2,7 @@
 
 gh-ledger runs a local OpenTelemetry receiver at `http://localhost:4318`, records GitHub Copilot's per-request usage in a SQLite ledger on your machine, and reports AI spend by repository, branch, pull request, model, agent, and prompt. To get started, see the [quickstart](quickstart.md). For walkthroughs, see the [user guide](guide.md).
 
-This page writes commands as `gh ledger <command>`, the GitHub CLI extension. For a binary you built, run `<folder>/gh-ledger <command>`. `--help` usage lines say `gh-ledger`; with the extension, type `gh ledger`. gh-ledger keeps its files in `~/.copilot-ledger` (`%USERPROFILE%\.copilot-ledger` on Windows), or in the directory that `COPILOT_LEDGER_HOME` names; see [configuration.md](configuration.md).
+This page writes commands as `gh ledger <command>`, the GitHub CLI extension. For a binary you built, run `<folder>/gh-ledger <command>`. gh-ledger keeps its files in `~/.copilot-ledger` (`%USERPROFILE%\.copilot-ledger` on Windows), or in the directory that `COPILOT_LEDGER_HOME` names; see [configuration.md](configuration.md).
 
 ## Commands at a glance
 
@@ -73,7 +73,7 @@ gh ledger uninstall [--dry-run]
 - Sets the `gh ledger` alias for a binary you built, when `gh` is on `PATH`. On Windows, the alias needs `sh.exe` from Git for Windows.
 - Starts the daemon. If that fails, the other changes stay, and `install` exits with 1.
 
-Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` prints the changes without making them, but always says `Would start the gh-ledger daemon.`, even when the daemon is running or would be refused.
+Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` prints the changes without making them. For the daemon, it says that it's already running, with its pid; or, in a terminal whose Windows job would stop it, `Wouldn't start the gh-ledger daemon:` with the reason and hint that `daemon start` gives, and exits with 1, as `install` would; or `Would start the gh-ledger daemon.` It starts nothing, so it can't tell whether the daemon would fail to start, for example because of an invalid rates overlay; if it does, `install` exits with 1.
 
 `install` and `status` warn about variables that keep telemetry from reaching gh-ledger, such as an `OTEL_EXPORTER_OTLP_ENDPOINT` other than `http://localhost:4318` or `http://127.0.0.1:4318`. `install` also warns that the daemon started at sign-in sees `COPILOT_LEDGER_HOME` only if your sign-in environment sets it. `status` warns when `install.json` names another executable; run `install` from the copy you want to keep.
 
@@ -81,9 +81,11 @@ Then restart the GitHub Copilot app, VS Code, and open terminals. `--dry-run` pr
 
 **Upgrading or removing the extension.** On Windows, gh can't replace or delete the binary while the daemon or a Copilot session's `ledger` MCP server runs it, so `gh extension upgrade ledger` and `gh extension remove ledger` fail. First stop the daemon, and close the Copilot sessions and apps that use the MCP server.
 
-**Ledger format.** gh-ledger upgrades the ledger to format 7 the first time it opens it, and an earlier gh-ledger can't open the ledger after that: it stops with `Database user_version <n> is newer than the supported version <m>.` After upgrading, run `gh ledger import --all` once to repair earlier imports and charges; see [Repairs](#repairs). That can't be undone, so copy your data directory first. To go back to an earlier release, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin <tag>`, put the copy in place of your data directory, and start the daemon.
+**Ledger format.** gh-ledger upgrades the ledger to format 7 the first time it opens it, and gh-ledger 0.5.0 and earlier can't open the ledger after that: they stop with `Database user_version <n> is newer than the supported version <m>.` After upgrading, run `gh ledger import --all` once to repair earlier imports and charges and to learn the names of MCP tools; see [Repairs](#repairs). That can't be undone, so copy your data directory first. To go back to an earlier release, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin <tag>`, put the copy in place of your data directory, and start the daemon.
 
 **Upgrading from 0.5.0.** gh-ledger 0.5.0 uses ledger format 6 and can't open a format 7 ledger. Close the Copilot sessions and apps that use the MCP server, stop the daemon, copy your data directory, upgrade, start the daemon, and run `gh ledger import --all` once, as these steps show. To go back, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy in place of your data directory, and start the daemon. The copy lacks what gh-ledger recorded after you made it.
+
+**Upgrading from 0.6.0.** gh-ledger 0.6.0 uses ledger format 7 too, so it can still open the ledger after you upgrade. Follow the steps below; the first `gh ledger import --all` reads every session log again to learn the names of MCP tools. To go back, stop the daemon, run `gh extension remove ledger` and `gh extension install swigerb/gh-ledger --pin v0.6.0`, and start the daemon; you don't need the copy.
 
 ```shell
 gh ledger daemon stop
@@ -202,7 +204,11 @@ Importing again records nothing twice and finishes a stopped import. `import` re
 
 ### Repairs
 
-When an import reads a log that an earlier gh-ledger imported, it repairs what was recorded from it: it reprices imported requests with the rates in use (`Repriced`), gives live requests that the daemon priced at the rate card the valid charge their log reports (`Live repriced`), and moves tool calls attached to the wrong request (`Tool links relinked`; tool calls older than 7 days aren't kept). Each request keeps its list price beside its charge. A dry run reports the same counts and changes nothing.
+When an import reads a log that an earlier gh-ledger imported, it repairs what was recorded from it: it reprices imported requests with the rates in use (`Repriced`), gives live requests that the daemon priced at the rate card the valid charge their log reports (`Live repriced`), and moves tool calls attached to the wrong request (`Tool links relinked`; tool calls older than 7 days aren't kept). Each request keeps its list price beside its charge. A dry run reports the same counts and changes nothing. An import also reads once more each log that gh-ledger 0.6.0 or earlier imported, to learn the names of the MCP tools that ran in it; see [MCP tool names](#mcp-tool-names).
+
+### MCP tool names
+
+Copilot CLI's live spans name a tool from an MCP server by two lowercase hexadecimal SHA-256 hashes, of the server's name and of the tool's name, joined by `/`. Its session log names the tool in clear, so each import learns the name from the logs it reads: `data.toolName` of `tool.execution_start`, such as `computer-use-exec_js`, the name that imported tool calls show. Export, audit, and the MCP server show it for live calls too. A tool that no log has named yet shows as `MCP tool` and the first 8 digits of each hash, such as `MCP tool 10be6bee/8453dc19`. The ledger keeps the hashes, and the audit's tool rules group calls by them.
 
 ### The import report
 
@@ -256,9 +262,11 @@ These are the only fields import keeps, and where each comes from. Fields in no 
 | `import_sessions.complete`, `import_sessions.records_recorded`, `import_sessions.records_duplicate`, `import_sessions.records_overlap`, `import_sessions.records_ambiguous`, `import_sessions.imported_at_unix_ms`, `import_sessions.import_revision` | The import's own results | The import's own results |
 | `import_record_aliases.source`, `import_record_aliases.record_key_sha256` | `copilot`, and SHA-256 of the record's usage ID, or of a compaction's service request ID, or a BYOK compaction's `data.compactionAttemptId` | `codex`, and SHA-256 of `payload.response_id` |
 | `import_record_aliases.span_row_id`, `import_record_aliases.resolution`, `import_record_aliases.recorded_at_unix_ms` | Kept by the ledger | Kept by the ledger |
+| `mcp_tool_names.hashed_name` | The name that Copilot CLI's live spans give an MCP tool: the SHA-256 of `data.mcpServerName` of `tool.execution_start`, `/`, and the SHA-256 of its `data.mcpToolName`, in lowercase hexadecimal | — |
+| `mcp_tool_names.tool_name` | `data.toolName` of the same `tool.execution_start`; when logs name one tool differently, the first in ordinal order | — |
 <!-- /import-allowlist -->
 
-- **Read, never stored:** each line's `type`. From Copilot logs: `data.producer`, `data.version`, and `data.copilotVersion` of `session.start`; the working directory, `data.context.cwd`, which only `--repo` uses; each event's `agentId`, and `data.toolCallId` of `subagent.started`, which tie a sub-agent's events to its name; `data.usage.isByok`, `data.usage.provider.kind`, `data.usage.initiator`, and `data.usage.parentToolCallId` of usage records; and `data.success`, `data.compactionTokensUsed.requestCount`, and `data.compactionTokensUsed.provider.kind` of compactions, which decide how a record is read. The envelope `id` and `parentId` of `assistant.message`, `tool.execution_start`, and `tool.execution_complete`, `data.apiCallId` of `assistant.message`, and `data.usage.apiCallId` of usage records tie a tool call to the request that asked for it. `data.usage.copilotUsage.totalNanoAiu` of usage records and `data.compactionTokensUsed.copilotUsage.totalNanoAiu` of compactions, the charge Copilot reports for the request, are kept only as that charge in `spans.cost_usd_pico` and as `spans.charge_source`. `data.compactionAttemptId` of compactions is stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `data.compactionTokensUsed.copilotUsage` are present decides how a compaction is read. Usage IDs, service request IDs, and tool call IDs are stored only as the SHA-256 hashes above. From Codex rollouts: `payload.id` (the thread ID), `payload.cli_version`, and `payload.cwd` of `session_meta`; `payload.turn_id` of `turn_context`, which ties each turn's model to its records; and `payload.thread_id`, `payload.session_id`, `payload.turn_id`, and `payload.root_turn_id` of `token_usage_record`.
+- **Read, never stored:** each line's `type`. From Copilot logs: `data.producer`, `data.version`, and `data.copilotVersion` of `session.start`; the working directory, `data.context.cwd`, which only `--repo` uses; each event's `agentId`, and `data.toolCallId` of `subagent.started`, which tie a sub-agent's events to its name; `data.usage.isByok`, `data.usage.provider.kind`, `data.usage.initiator`, and `data.usage.parentToolCallId` of usage records; and `data.success`, `data.compactionTokensUsed.requestCount`, and `data.compactionTokensUsed.provider.kind` of compactions, which decide how a record is read. The envelope `id` and `parentId` of `assistant.message`, `tool.execution_start`, and `tool.execution_complete`, `data.apiCallId` of `assistant.message`, and `data.usage.apiCallId` of usage records tie a tool call to the request that asked for it. `data.usage.copilotUsage.totalNanoAiu` of usage records and `data.compactionTokensUsed.copilotUsage.totalNanoAiu` of compactions, the charge Copilot reports for the request, are kept only as that charge in `spans.cost_usd_pico` and as `spans.charge_source`. `data.compactionAttemptId` of compactions is stored only as the SHA-256 hashes above, and whether `data.compactionTokensUsed.provider` and `data.compactionTokensUsed.copilotUsage` are present decides how a compaction is read. Usage IDs, service request IDs, tool call IDs, and `data.mcpServerName` and `data.mcpToolName` of `tool.execution_start` are stored only as the SHA-256 hashes above. From Codex rollouts: `payload.id` (the thread ID), `payload.cli_version`, and `payload.cwd` of `session_meta`; `payload.turn_id` of `turn_context`, which ties each turn's model to its records; and `payload.thread_id`, `payload.session_id`, `payload.turn_id`, and `payload.root_turn_id` of `token_usage_record`.
 - **Never read:** every other field and event, including message content (`content`, `transformedContent`), reasoning (`reasoningText`, `reasoningOpaque`, `reasoningBlocks`, `encryptedContent`), tool requests (`toolRequests`), tool arguments and results, error messages, compaction summaries (`summaryContent`), checkpoint paths, instructions, and attachments. Import skips a line once its `type` shows that it isn't one of the events above, and reads logs in place.
 
 ## Circuit breaker
@@ -341,7 +349,7 @@ gh ledger export [--format html] [--out <path>] [--bundle] [--repo <key> | --all
 | `--generated-at` | Now | The UTC generation time to record, such as `2026-11-21T21:30:00Z`, to reproduce an export. |
 | `--force` | | Replace existing files that aren't read-only. |
 
-The report shows summary cards, coverage notes, a zoomable timeline of each session's requests and tool calls, cost by model and agent, cache efficiency, prompt chains, spend tables, breaker trips and budgets, and up to 100 audit findings. It loads nothing and works without JavaScript. Standard output names the files, request count, scope, and period, never a folder. With an invalid rates overlay, export warns and leaves `premium_model_trivial_turn` and repriced estimates out of the findings.
+The report shows summary cards, coverage notes, a zoomable timeline of each session's requests and tool calls, cost by model and agent, cache efficiency, prompt chains, spend tables, breaker trips and budgets, and up to 100 audit findings. It loads nothing and works without JavaScript. Tool calls and findings name MCP tools as [MCP tool names](#mcp-tool-names) describes. Standard output names the files, request count, scope, and period, never a folder. With an invalid rates overlay, export warns and leaves `premium_model_trivial_turn` and repriced estimates out of the findings.
 
 ### The bundle
 
@@ -351,7 +359,7 @@ The ZIP holds `manifest.json`, `report.html`, and five `telemetry/` files: `audi
 {
   "schemaVersion": 1,
   "tool": "gh-ledger",
-  "toolVersion": "0.6.0",
+  "toolVersion": "0.7.0",
   "generatedAtUtc": "2026-11-21T21:30:00.0000000+00:00",
   "ratesVersions": ["2026-11-23"],
   "apiRateCards": [{ "ratesVersion": "2026-11-23", "sha256": "<64 hexadecimal digits>" }],
@@ -458,6 +466,7 @@ The output counts the findings by severity and rule, lists them, most severe fir
 - Impacts are billed USD at the rates in use. A local request's impact is $0, and one that includes a request without a billed price is unknown (`-`, or `null` in JSON). Findings can overlap, so don't add impacts together.
 - `turn_velocity`, `tool_loop`, `failed_tool_retry`, `context_growth`, and `cache_miss_streak` follow one agent invocation at a time, so they skip Codex requests and imported requests of named sub-agents, which have none that the ledger can tell apart.
 - Tool calls are kept for 7 days, so the tool rules can't see older ones, and `premium_model_trivial_turn` skips requests whose tool count is unknown.
+- The tool rules group calls by the tool name that the ledger keeps, and findings name MCP tools as [MCP tool names](#mcp-tool-names) describes.
 - `premium_model_trivial_turn` skips requests charged at least 5% below list price, because Auto or Copilot Fusion picked their model.
 - A request without cache counters is never a cache miss; it ends a streak.
 
@@ -564,5 +573,5 @@ gh-ledger never stores prompt or response content, working directories, or remot
 - **`daemon.log` says `Warning: could not record spans`.** The ledger couldn't be written, for example on a full disk, and Copilot is told to retry. Fix the cause it names.
 - **`Database user_version <n> is newer than the supported version <m>.`** A newer gh-ledger upgraded the ledger. Upgrade gh-ledger, or restore your copy; see [Install and uninstall](#install-and-uninstall).
 - **`import` exits with code 2.** The warnings say what wasn't imported. Leave out sessions from before Copilot CLI 1.0.103 with `--since`. Open sessions are skipped, without affecting coverage, unless you pass `--include-active`.
-- **Tool names are 129-character hashes.** Copilot CLI's live spans name an MCP tool `sha256(server)/sha256(tool)` in lowercase hexadecimal, so the export timeline and audit findings show that name. Imported tool calls keep the readable name from the session log.
+- **A tool shows as `MCP tool 10be6bee/8453dc19`.** Copilot CLI's live spans name an MCP tool by two SHA-256 hashes, of its server's name and of its own name, and reports show the first 8 digits of each until an import learns the tool's name from a session log that ran it. After the session ends, run `gh ledger import --all`. Logs that import doesn't read, such as those of Copilot versions it doesn't support, name nothing; see [MCP tool names](#mcp-tool-names).
 - **A console window flashes at sign-in.** Windows 11 24H2 and later start gh-ledger without one.

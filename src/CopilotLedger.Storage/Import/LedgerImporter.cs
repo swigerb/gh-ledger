@@ -10,7 +10,7 @@ namespace CopilotLedger.Storage.Import;
 // run decides the same way on a read-only snapshot (LedgerSnapshot) and writes nothing.
 public sealed class LedgerImporter
 {
-    public const int CurrentImportRevision = 1;
+    public const int CurrentImportRevision = 2;   // 2: every log is read once more, to learn its MCP tools' names
 
     // The daemon prunes span_links older than this; older tool calls aren't imported.
     public static readonly TimeSpan ToolLinkRetention = TimeSpan.FromDays(7);
@@ -294,10 +294,16 @@ public sealed class LedgerImporter
             }
         }
 
-        // The checkpoint follows the log's last batch. A log is complete when every one of its records was resolved; a crash
-        // before the checkpoint only makes the next run read the log again, and its records resolve as duplicates.
+        // The log's learned MCP tool names, then its checkpoint, follow its last batch. A log is complete when every one of its
+        // records was resolved; a crash before the checkpoint only makes the next run read the log again, and its records
+        // resolve as duplicates.
         if (store is not null)
         {
+            if (result.LearnedToolNames.Count > 0)
+            {
+                await store.RecordMcpToolNamesAsync(result.LearnedToolNames, cancellationToken);
+            }
+
             await store.RecordImportedAsync(
                 [],
                 new ImportSessionCheckpoint

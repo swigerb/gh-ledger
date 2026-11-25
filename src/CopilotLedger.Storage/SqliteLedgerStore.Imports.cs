@@ -8,6 +8,50 @@ namespace CopilotLedger.Storage;
 // Session-log records that gh ledger import records, under the same authority rules as live spans (UsageAuthority).
 public sealed partial class SqliteLedgerStore
 {
+    // Records names that import learned. Validates the whole batch first, then keeps the ordinally smallest name for each
+    // hashed tool in one BEGIN IMMEDIATE transaction.
+    public async Task RecordMcpToolNamesAsync(
+        IReadOnlyList<LearnedToolName> names,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        EnsureInitialized();
+        foreach (LearnedToolName name in names)
+        {
+            if (name is null ||
+                !McpToolNames.IsHashed(name.HashedName) ||
+                name.ToolName is not { Length: >= 1 and <= 256 })
+            {
+                throw new ArgumentException(
+                    "Learned MCP tool names need a hashed name and a tool name of 1 to 256 characters.",
+                    nameof(names));
+            }
+        }
+
+        if (names.Count == 0)
+        {
+            return;
+        }
+
+        await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
+        await using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+        foreach (LearnedToolName name in names)
+        {
+            await using SqliteCommand command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO mcp_tool_names (hashed_name, tool_name) VALUES (@hashed_name, @tool_name)
+                ON CONFLICT (hashed_name) DO UPDATE SET tool_name = excluded.tool_name
+                WHERE excluded.tool_name < mcp_tool_names.tool_name;
+                """;
+            command.Parameters.AddWithValue("@hashed_name", name.HashedName);
+            command.Parameters.AddWithValue("@tool_name", name.ToolName);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     // Resolves each entry by the authority rules under one BEGIN IMMEDIATE transaction: inserts the Recorded ones with an
     // alias and the tool links they own, aliases the others that a row accounts for, adds the new tool links of a record read
     // again whose own row still counts, and writes checkpoint (when it isn't null) in the same transaction. Validates every
