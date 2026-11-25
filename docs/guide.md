@@ -1,8 +1,8 @@
 # gh-ledger user guide
 
-gh-ledger records what GitHub Copilot spends and shows it by repository, branch, model, agent, and prompt. This guide walks through everyday tasks, one scenario at a time. For every command and option, see the [command reference](cli.md).
+This guide walks through everyday gh-ledger tasks. To install gh-ledger and try each command, see the [quickstart](quickstart.md). For every option, see the [command reference](cli.md).
 
-The samples come from one example: gh-ledger installed as the GitHub CLI extension on Windows, used in the `contoso/webapp` repository on the `feature/search` branch at 16:30 on 2026-11-21, local time (UTC-5). After setup and backfill, every sample starts from the same state: a month of spend, a rates overlay with Foundry BYOK prices, a budget for `feature/search`, and an open circuit-breaker trip, so early samples show things that later sections explain. The [weekly waste review](#weekly-waste-review) uses a day of agent activity instead. A test runs every sample, so each one is exactly what gh-ledger prints. Your numbers will differ. gh-ledger's messages name its commands `gh-ledger <command>`; with the extension, run them as `gh ledger <command>`.
+The samples come from one example: the GitHub CLI extension on Windows, in the `contoso/webapp` repository on the `feature/search` branch, at 16:30 on 2026-11-21 (UTC-5), with a month of spend, a Foundry BYOK rates overlay, a budget, and an open circuit-breaker trip. A test checks that each output is exactly what gh-ledger prints. Where a message or `--help` says `gh-ledger <command>`, run `gh ledger <command>`.
 
 - [Set up gh-ledger](#set-up-gh-ledger)
 - [Backfill history after installing](#backfill-history-after-installing)
@@ -24,6 +24,8 @@ The samples come from one example: gh-ledger installed as the GitHub CLI extensi
 
 **Goal:** record what Copilot spends from now on.
 
+Install the extension, then run `install`:
+
 ```shell
 gh extension install swigerb/gh-ledger
 ```
@@ -42,7 +44,7 @@ gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open termin
 ```
 <!-- /sample -->
 
-On macOS and Linux, `install` sets the variable in your shell profile instead. Restart the apps and terminals as it says, send Copilot a prompt, and check that the prompt was recorded:
+Restart the apps and terminals as it says, send Copilot a prompt, and check that gh-ledger recorded it:
 
 <!-- sample: status-first -->
 ```shell
@@ -73,13 +75,15 @@ Last 30 days      66.7%  1 of 1 span
 ```
 <!-- /sample -->
 
-If no spans appear, fix any warnings that `status` shows, and see [Troubleshooting](cli.md#troubleshooting).
+- On macOS and Linux, `install` sets `COPILOT_OTEL_ENABLED` in your shell profile instead.
+- On Windows, run `install` from a regular terminal: from one whose job stops its processes when it closes and doesn't let them leave, such as the GitHub Copilot app's agent shell, it can't start the daemon. See [The daemon](cli.md#the-daemon).
+- If nothing is recorded, see [Troubleshooting](cli.md#troubleshooting).
 
 ## Backfill history after installing
 
 **Goal:** add the Copilot requests you made before you installed gh-ledger.
 
-gh-ledger records requests from the moment its daemon runs, but Copilot CLI and the GitHub Copilot app also keep a log of each session on your machine. `gh ledger import` records the requests in those logs, prices each one for the date it was made, and attributes it to the branch its session was on. See what it would record for this repository first:
+`gh ledger import` records the requests in Copilot's session logs on your machine, priced for the date each was made. Preview it for this repository:
 
 <!-- sample: import-dry-run -->
 ```shell
@@ -117,7 +121,7 @@ Dry run: nothing was written.
 ```
 <!-- /sample -->
 
-Two sessions from yesterday hold five requests, including one by the `explore` subagent and a compaction, the request that summarizes a long conversation. A session in `contoso/api` is out of scope, and the session you're in now is still open, so it's skipped: gh-ledger records it live. Import the five:
+Two sessions from yesterday hold these five requests. A session in `contoso/api` is out of scope, and the open session is skipped because the daemon records it live. Import them:
 
 <!-- sample: import -->
 ```shell
@@ -154,7 +158,7 @@ Recorded 5 requests: 42.86 AI credits ($0.43), API equivalent $0.39.
 ```
 <!-- /sample -->
 
-They now count in every report. Importing again records nothing twice, and a request that the daemon also recorded is charged once. Import reads only what pricing and attribution need, never your prompts or Copilot's responses. Use `--all` for every repository and `--source codex` for Codex's logs; see [Import past sessions](cli.md#import-past-sessions).
+Importing again never records a request twice, and a request that the daemon also recorded counts once. Use `--all` for every repository and `--source codex` for Codex's logs; see [Import past sessions](cli.md#import-past-sessions).
 
 ## See what you spent
 
@@ -210,11 +214,10 @@ fix/login-timeout      1         0      120.00       $1.20     $0.00          $1
 ```
 <!-- /sample -->
 
-- `AI credits` and `GitHub USD` are what GitHub bills; 1 AI credit is $0.01. `BYOK USD` is what Microsoft Foundry bills you directly, and `Local saved` is what local models saved you. `Unpriced` counts requests that have no price.
-- `API equiv USD` is what the same requests would cost at each model's API list price, for comparison only. It shows `Unpriced` when no request had a list price, `*` when some had none and are left out, such as MAI models and local models, and `~` when it's an estimate because some requests didn't report their cache use. See [API-equivalent prices](configuration.md#api-equivalent-prices).
-- In `status`, the second table compares what GitHub billed with the same requests at API list prices, and local savings with the local requests at API list prices. `GitHub/API` is their ratio, shown only when every GitHub request has both prices.
-- To compare with other prices, such as a price list your company negotiated, add `--pricing <file>` to `status`, `branch`, `agents`, `top-prompts`, or `export-pr`. Only the API-equivalent amounts change; see [Compare with other prices](configuration.md#compare-with-other-prices---pricing).
-- `branch` covers the current repository. Add `--all-repos` for every repository, `--since` for another period, such as `today`, `7d`, `all`, or a date, and `--json` for exact amounts.
+- `AI credits` and `GitHub USD` are what GitHub bills (1 AI credit is $0.01), `BYOK USD` is what Microsoft Foundry bills you, and `Local saved` is the cloud spend that local models avoided.
+- `API equiv USD` is the same requests at API list prices, for comparison only. `*` marks an amount that leaves out requests without a list price, such as MAI and local models; `~` marks an estimate. See [API-equivalent prices](configuration.md#api-equivalent-prices).
+- The second `status` table compares GitHub's charges and local savings with API list prices; `GitHub/API` needs both prices for every GitHub request.
+- `branch` covers the current repository. Add `--all-repos` for every repository, `--since` for another period, `--json` for exact amounts, or `--pricing <file>` to [compare with other prices](configuration.md#compare-with-other-prices---pricing).
 
 ## Find the most expensive prompts
 
@@ -235,7 +238,7 @@ Top 3 prompts by cost in all repositories (last 30 days)
 ```
 <!-- /sample -->
 
-Each row is one prompt you sent, with every model request Copilot made for it (`Spans`). `Agents` lists the named agents that worked on it, or `-` when only Copilot's default agent did. `top-prompts` and `agents` cover every repository unless you add `--repo`, for example `--repo contoso/webapp`.
+Each row is one prompt and the model requests Copilot made for it (`Spans`). `-` under `Agents` means only Copilot's default agent worked on it. Add `--repo` to report one repository.
 
 ## Compare agents
 
@@ -259,13 +262,13 @@ code-review      1         0      120.00       $1.20     $0.00          $1.20   
 ```
 <!-- /sample -->
 
-`(none)` is Copilot's default agent, which reports no name. Subagents such as `explore`, and your custom agents, report their own names.
+`(none)` is Copilot's default agent, which reports no name.
 
 ## Find context bloat
 
 **Goal:** find the prompts whose context grows on every request, and see how much of it the prompt cache absorbs.
 
-Every model request sends the conversation so far, so an agent's input grows as it works. Input that the model's prompt cache already holds costs much less than uncached input. See how much of the input the cache served, by model:
+Input that the prompt cache serves costs much less than uncached input. See the cache's share of input by model:
 
 <!-- sample: cache -->
 ```shell
@@ -285,9 +288,7 @@ gpt-6.1-sol          1               0    200,000         n/a          n/a      
 ```
 <!-- /sample -->
 
-`Hit %` is the share of input read from the cache. This example's Foundry BYOK and local endpoints report no cache counters, so their rows show `n/a`: unknown, not a 0% hit rate. Add `--by branch`, `--by pr`, or `--by agent` to group the rows another way.
-
-Find the prompts that sent the most uncached input, and those whose input grew the most:
+`n/a` means unknown, not 0%: this example's Foundry BYOK and local endpoints report no cache counters. To group rows another way, add `--by branch`, `--by pr`, or `--by agent`. Rank prompts by uncached input and by input growth:
 
 <!-- sample: cache-bloat -->
 ```shell
@@ -316,7 +317,7 @@ Est. uncached is an estimate: it counts all input of a request without cache cou
 ```
 <!-- /sample -->
 
-The prompt that tripped the circuit breaker leads both lists. See each of its requests:
+The prompt that tripped the circuit breaker leads both lists. List its requests:
 
 <!-- sample: cache-turns -->
 ```shell
@@ -336,13 +337,13 @@ Growth is the change in input from the previous request by the same agent invoca
 ```
 <!-- /sample -->
 
-Each request added 95,000 tokens of context. The cache served more of it each time, but every request still sent about 200,000 uncached tokens. Growth compares a request only with earlier requests of the same agent invocation and model, so a subagent's requests never mix with its parent's. To see every request of a Copilot session, use `--conversation <id>` instead of `--trace`, with the session ID that `--json` output shows as `conversationId`. For the columns and the JSON fields, see [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
+Each request added 95,000 tokens of context and still sent about 200,000 uncached tokens. To list a whole Copilot session, use `--conversation` with the `conversationId` from `--json` output. See [Prompt-cache efficiency](cli.md#prompt-cache-efficiency).
 
 ## Weekly waste review
 
 **Goal:** find the requests and tool calls that wasted AI credits this week, and what to change.
 
-`gh ledger audit` reviews the last 7 days of every repository with fixed rules: bursts of requests, tool loops, retried failing commands, bloated or growing context, prompt-cache misses, premium models on short requests without tool calls, and prompts near the circuit breaker. This section's sample uses a day of agent activity instead of the shared state:
+`gh ledger audit` checks the last 7 days of every repository against eight rules for wasted spend. This sample uses a day of agent activity:
 
 <!-- sample: audit -->
 ```shell
@@ -378,25 +379,27 @@ Recommendations:
 ```
 <!-- /sample -->
 
-Each finding is a review signal, not proof of waste. The explore subagent retried a failing `bash` command four times in a row, one less than the circuit breaker allows, and the three model requests between the failures cost about a cent; fixing the command's cause saves every retry. Twelve short questions without tool calls went to claude-opus-5.5, whose output price is in the top quarter of the rates; at mai-code-2's prices they would have cost $0.33 less. The estimates are billed USD at the rates in use, and findings can overlap, so they aren't added up.
+Findings are review signals, not proof of waste. Here, the `explore` subagent retried a failing `bash` command four times in a row, and twelve short questions to `claude-opus-5.5` cost $0.33 more than they would have at `mai-code-2`'s prices.
 
-To see one rule, use `--rule`, and repeat it for more; to see only the findings that matter most, use `--min-severity warning`. `--json` writes the findings with their metrics, scope, and thresholds. In a script, `--fail-on high` exits with code 2 when a High finding appears:
+To narrow the findings, use `--rule` or `--min-severity warning`. In a script, `--fail-on high` exits with code 2 when a High finding appears:
 
 ```shell
 gh ledger audit --since 1d --fail-on high
 ```
 
-To ask a local model for suggestions, pass the OpenAI-compatible endpoint of a server on this machine, such as Ollama or Foundry Local. gh-ledger sends it only a summary of the findings, with aliases instead of repository and branch names, and never stores the answer:
+To get suggestions from a model on this machine, such as one in Ollama or Foundry Local, pass its OpenAI-compatible endpoint. It receives only a summary of the findings, with repository and branch names aliased. `--show-llm-payload` prints the request without sending it.
 
 ```shell
 gh ledger audit --local-llm http://127.0.0.1:11434/v1 --local-llm-model llama3.3
 ```
 
-Add `--show-llm-payload` to see exactly what it would send, without sending it. For the rules, the JSON fields, and what the local model receives, see [Audit for wasted spend](cli.md#audit-for-wasted-spend).
+See [Audit for wasted spend](cli.md#audit-for-wasted-spend).
 
 ## Set a budget for a branch
 
 **Goal:** get an alert when a branch spends more than you planned.
+
+On the branch, set its budget in AI credits, and check it:
 
 <!-- sample: budget-set -->
 ```shell
@@ -418,7 +421,7 @@ contoso/webapp @ feature/search: 666.75 of 750.00 AI credits
 ```
 <!-- /sample -->
 
-Budgets count Foundry BYOK spend at $0.01 per AI credit, so the branch's 617.75 GitHub AI credits and $0.49 of BYOK spend make 666.75. When the branch passes its budget, the daemon shows a desktop notification once and writes this line to `daemon.log`:
+Budgets count Foundry BYOK spend at $0.01 per AI credit, so 617.75 AI credits and $0.49 make 666.75. When the branch passes its budget, the daemon shows a desktop notification once and writes this line to `daemon.log`:
 
 <!-- sample: budget-alert -->
 ```text
@@ -426,13 +429,13 @@ Budgets count Foundry BYOK spend at $0.01 per AI credit, so the branch's 617.75 
 ```
 <!-- /sample -->
 
-A budget doesn't block anything. Set it again to re-arm the alert, or remove it with `gh ledger budget clear`.
+A budget never blocks anything. Set it again to re-arm the alert, or remove it with `gh ledger budget clear`.
 
 ## Catch a runaway loop
 
 **Goal:** notice when an agent burns credits in a loop.
 
-The daemon trips the circuit breaker when one prompt spends more than 150 AI credits in 5 minutes, or makes 5 failed tool calls in a row. A trip shows a desktop notification and writes an `ALERT` line to `daemon.log`; it doesn't stop the agent. To see what tripped:
+The daemon trips the circuit breaker when one prompt spends more than 150 AI credits in 5 minutes or makes 5 failed tool calls in a row. A trip shows a desktop notification and writes an `ALERT` line to `daemon.log`; it doesn't stop the agent. See what tripped:
 
 <!-- sample: breaker-status -->
 ```shell
@@ -462,7 +465,7 @@ Reset 1 trip.
 ```
 <!-- /sample -->
 
-To change the limits, or to have the daemon write a flag file that a wrapper script can watch, see [Circuit breaker](cli.md#circuit-breaker).
+To change the limits, or to write a flag file for a wrapper script, see [Circuit breaker](cli.md#circuit-breaker).
 
 ## Post a receipt on a pull request
 
@@ -492,7 +495,7 @@ jobs:
       - uses: swigerb/copilot-ledger-action@v1
 ```
 
-On the pull request's branch, write the branch's receipt, then commit and push it:
+On the pull request's branch, write the receipt, then commit and push it:
 
 <!-- sample: export-pr -->
 ```shell
@@ -639,13 +642,13 @@ The action posts the receipt as a comment on the pull request:
 > </details>
 <!-- /sample -->
 
-Before you merge, run `gh ledger export-pr` again and push, so the receipt includes the latest spend; the action updates the same comment. See the [action's README](https://github.com/swigerb/copilot-ledger-action) for its inputs and the checks it makes.
+Before you merge, run `gh ledger export-pr` again and push; the action updates its comment. See the [action's README](https://github.com/swigerb/copilot-ledger-action).
 
 ## Attach a cost report to a pull request
 
 **Goal:** give reviewers a report of a branch's AI spend that opens anywhere, with the data behind it.
 
-In the repository, export the branch's report and its bundle:
+Export the branch's report and its data:
 
 <!-- sample: export -->
 ```shell
@@ -658,26 +661,45 @@ Wrote copilot-ledger-report.zip: report.html, manifest.json, and 5 telemetry fil
 ```
 <!-- /sample -->
 
-Open `copilot-ledger-report.html` in any browser. It works offline and without a server, and every chart has a table, so it reads well without JavaScript too. Attach both files to the pull request, or to an audit ticket. The ZIP holds the report, the data as JSON, and `manifest.json`, which lists each file's size and SHA-256 hash, so a reviewer can check that the files weren't changed after you wrote them.
+The report opens offline in any browser. Attach both files to the pull request; the ZIP adds the data as JSON and a `manifest.json` of each file's SHA-256 hash, which shows whether a file changed after the export. The manifest isn't signed, so it can't prove who wrote the files. Neither file holds prompts, responses, or local paths. The report covers the last 30 days; add `--since all` for the branch's whole history. See [Export a report](cli.md#export-a-report).
 
-- `--time-zone America/New_York` shows dates, times, and nights in another time zone than this computer's.
-- `--since all` covers the branch's whole history instead of the last 30 days.
-- `--include-local-paths` shows the local roots of repositories without a GitHub remote, which otherwise show as their folder names.
-- `--generated-at` with the manifest's `generatedAtUtc` writes the same files again from an unchanged ledger.
+Here's what each part of a report looks like, for a demo week in fictional repositories.
 
-See [Export a report](cli.md#export-a-report) for every option and the bundle's format.
+**Summary:** requests, spend in each billing channel, the API-equivalent comparison, local savings, the cache hit ratio, prompt chains, breaker trips, and budgets.
+
+![Summary cards: 438 requests, 1,417.69 GitHub AI credits, $0.41 Foundry BYOK, about $14.59 API equivalent, $1.88 saved by local models, 87.2% cache hit, 68 prompt chains, 1 open breaker trip, and 1 of 2 budgets exceeded](images/report-overview.png)
+
+**Timeline:** a row for each Copilot session, colored by model, over night shading. Hold Ctrl or Command and scroll to zoom, or drag across the overview to pick a range.
+
+![Timeline of 19 sessions over a week, with nights shaded and an overview strip below](images/report-timeline.png)
+
+**Cost by model and agent:** billed spend, or switch to the API-equivalent cost or local savings.
+
+![Bar charts of billed USD by model and by agent, with GitHub AI credits and Foundry BYOK in different colors](images/report-cost.png)
+
+**Cache efficiency:** the prompt-cache hit ratio by model and agent; models that report no cache counters show `n/a`.
+
+![Bar charts of prompt-cache hit ratio by model and by agent](images/report-cache.png)
+
+**Circuit breaker and budgets:** the breaker trips of these prompt chains, and the budgets of these branches.
+
+![A credit velocity trip on contoso/webapp fix/cart-totals, and two branch budgets, one within budget and one exceeded](images/report-breaker.png)
+
+**Audit findings:** most severe first, each with its scope, estimated impact, and recommendation.
+
+![Audit findings: a high failed-tool-retry finding, warnings for a cache-miss streak and a tool loop, and an info context-bloat finding](images/report-audit.png)
 
 ## Price Foundry BYOK and local models
 
 **Goal:** see what your Microsoft Foundry BYOK models cost, and what local models save you.
 
-gh-ledger records requests to local runtimes, such as Foundry Local and Ollama, at $0.00 and estimates what they saved. Foundry bills BYOK requests to you directly, not through GitHub, so gh-ledger records them unpriced until you add your prices. Create a rates overlay:
+gh-ledger records local requests, such as to Foundry Local or Ollama, at $0.00 and estimates what they saved. Foundry bills BYOK requests to you directly, so they stay unpriced until you add your prices to a rates overlay:
 
 ```shell
 gh ledger rates init
 ```
 
-Then edit `rates.json` in your data directory, `C:\Users\you\.copilot-ledger` here or `~/.copilot-ledger` on macOS and Linux, and list your models with the prices from your Azure pricing or invoice:
+Edit `rates.json` in your data directory, `C:\Users\you\.copilot-ledger` here (`~/.copilot-ledger` on macOS and Linux). Add each model with your Azure prices, and its deployment names as `aliases`, because Foundry requests often report those instead:
 
 <!-- sample: rates-overlay -->
 ```json
@@ -699,7 +721,7 @@ Then edit `rates.json` in your data directory, `C:\Users\you\.copilot-ledger` he
 ```
 <!-- /sample -->
 
-List your deployment names as `aliases`, because Foundry requests often report them instead of the model name. Check the file:
+Check the file:
 
 <!-- sample: rates-validate -->
 ```shell
@@ -711,7 +733,7 @@ C:\Users\you\.copilot-ledger\rates.json is valid. Rates version: 2026-11-23+cont
 ```
 <!-- /sample -->
 
-Restart the daemon, with `gh ledger daemon stop` and then `gh ledger daemon start`, so it prices new requests with your rates. BYOK spend then shows under `BYOK USD`, as in [See what you spent](#see-what-you-spent). For custom endpoints and local model names, see [configuration.md](configuration.md).
+Then restart the daemon, with `gh ledger daemon stop` and `gh ledger daemon start`, so it prices new requests with your rates. For every field, see [configuration.md](configuration.md).
 
 ## Ask Copilot about spend
 
@@ -729,7 +751,7 @@ On macOS and Linux:
 copilot mcp add ledger -- ~/.local/share/gh/extensions/gh-ledger/gh-ledger mcp
 ```
 
-Then ask Copilot, for example, "How much has this branch cost so far?" Copilot calls the `get_branch_ledger` tool. While the breaker is open or the branch is over its budget, the result starts with a `WARNING:` line; the data follows as JSON, indented here:
+Then ask Copilot, for example, "How much has this branch cost so far?" Copilot calls the `get_branch_ledger` tool. While the breaker is open or the branch is over its budget, the result starts with a `WARNING:` line, and the breaker's warning tells Copilot to stop and ask you. The JSON is indented here:
 
 <!-- sample: mcp -->
 ```text
@@ -784,11 +806,11 @@ WARNING: gh-ledger circuit breaker is open for contoso/webapp @ feature/search: 
 ```
 <!-- /sample -->
 
-The warning tells Copilot to stop and ask you before it continues. No tool can reset the breaker, and Copilot asks before it changes a budget. For the other tools, and for VS Code, see [MCP server](cli.md#mcp-server).
+No tool can reset the breaker, and only `set_branch_budget` changes anything. For the other tools, and for VS Code, see [MCP server](cli.md#mcp-server).
 
 ## Update rates
 
-**Goal:** price new requests with GitHub's latest prices before the next gh-ledger release.
+**Goal:** price new requests with the latest published rates.
 
 <!-- sample: rates-update -->
 ```shell
@@ -801,13 +823,13 @@ Restart the daemon to price new spans with them: gh ledger daemon stop, then gh 
 ```
 <!-- /sample -->
 
-Restart the daemon as it says. Requests already recorded keep the prices they were recorded with, and your overlay applies on top of the new rates.
+Requests already recorded keep their prices, and your overlay applies on top of the new rates. See [Update the rates](configuration.md#update-the-rates-gh-ledger-rates-update).
 
 ## Upgrade or uninstall
 
 **Goal:** move to a new gh-ledger release, or remove gh-ledger.
 
-The daemon runs the extension's binary, and so does every Copilot session that uses the `ledger` MCP server. Windows can't replace that file while either runs it, so before you upgrade, close the Copilot CLI sessions, the GitHub Copilot app, and VS Code if they use the MCP server, and stop the daemon:
+On Windows, gh can't replace the extension's binary while the daemon or a Copilot session that uses the `ledger` MCP server runs it. Close those sessions and apps, and stop the daemon:
 
 <!-- sample: daemon-stop -->
 ```shell
@@ -819,7 +841,7 @@ gh-ledger daemon stopped.
 ```
 <!-- /sample -->
 
-A new release can upgrade the ledger's format the first time it opens the ledger, and that can't be undone: an earlier release can't open the ledger afterward. So before you upgrade, copy your data directory to a new folder outside it: all of it, not only `ledger.db`, so that a `ledger.db-wal` file, which can hold the latest changes, comes with it. The data directory is `C:\Users\you\.copilot-ledger` here, or `~/.copilot-ledger` on macOS and Linux, unless `COPILOT_LEDGER_HOME` names another one. In PowerShell:
+A new release can upgrade the ledger's format, and that can't be undone: an earlier release can't open the ledger afterward. So first copy your whole data directory, including any `ledger.db-wal` file. In PowerShell:
 
 ```powershell
 $data = if ($env:COPILOT_LEDGER_HOME) { $env:COPILOT_LEDGER_HOME } else { "$HOME\.copilot-ledger" }
@@ -832,13 +854,13 @@ On macOS and Linux:
 cp -R "${COPILOT_LEDGER_HOME:-$HOME/.copilot-ledger}" "$HOME/copilot-ledger-backup-$(date +%Y%m%d-%H%M%S)"
 ```
 
-Keep the copy until you're sure you'll stay on the new release; [Upgrading or removing the extension](cli.md#install-and-uninstall) says how to go back with it. Upgrade the extension:
+Upgrade the extension:
 
 ```shell
 gh extension upgrade ledger
 ```
 
-Then start the daemon again, and reopen your Copilot apps:
+Start the daemon, and reopen your Copilot apps:
 
 <!-- sample: daemon-start -->
 ```shell
@@ -862,17 +884,15 @@ Invalid rates overlay: C:\Users\you\.copilot-ledger\rates.json: githubAiCredits.
 ```
 <!-- /sample -->
 
-A new release can build in a model name that your overlay also lists, and the daemon doesn't start until the overlay is valid. Here, the overlay prices `claude-haiku-4-5-20251001`, the name that Copilot CLI 1.0.114 reports for Claude Haiku 4.5: gh-ledger 0.4.1 didn't know it, so you may have added it yourself, and gh-ledger 0.5.0 builds it in. Remove the entry that the message names, run `gh ledger rates validate` again, and start the daemon. See [Which model prices a request](configuration.md#which-model-prices-a-request).
+The overlay lists a model name that the new release builds in, here an alias of `claude-haiku-4.5`. Remove the entry that the message names, and start the daemon again. See [Which model prices a request](configuration.md#which-model-prices-a-request).
 
-Once the daemon is running, repair what earlier versions imported:
+Then repair what an earlier version recorded; see [Repairs](cli.md#repairs):
 
 ```shell
 gh ledger import --all
 ```
 
-It reads each session log again once and fixes imported charges and tool calls; see [Repairs](cli.md#repairs).
-
-If you upgraded from gh-ledger 0.5.0 and need to go back, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy you made in place of your data directory, and start the daemon. 0.5.0 can't open the ledger this version upgraded, and the copy doesn't have what gh-ledger recorded after you made it.
+Keep the copy until you're sure you'll stay on the new release. To go back to gh-ledger 0.5.0 after upgrading from it, stop the daemon, run `gh extension remove ledger` and then `gh extension install swigerb/gh-ledger --pin v0.5.0`, put the copy in place of your data directory, and start the daemon; you lose what gh-ledger recorded after the copy. For other releases, see [Install and uninstall](cli.md#install-and-uninstall).
 
 To remove gh-ledger, undo `install`:
 
@@ -895,7 +915,7 @@ If you registered the MCP server, remove it, and remove the `ledger` entry from 
 copilot mcp remove ledger
 ```
 
-Then close the Copilot sessions and apps that still run it, and remove the extension:
+Then close the Copilot sessions and apps that still run gh-ledger, and remove the extension:
 
 ```shell
 gh extension remove ledger

@@ -27,9 +27,6 @@ public sealed class VersionPlacesTests
         ("tests/CopilotLedger.Tests/Cli/ExportBundleTests.cs", "(1, \"gh-ledger\", \"{version}\")", null),
         ("tests/CopilotLedger.Tests/Cli/ExportCommandTests.cs", "\"2026-11-20 22:00 by gh-ledger {version}\"", null),
         ("tests/CopilotLedger.Tests/Cli/ReportCommandTests.cs", "gh-ledger {version}", null),
-        ("docs/cli.md", "which gh-ledger 0.5.0 builds in", "`docs/cli.md`"),
-        ("docs/configuration.md", "Upgrading from 0.5.0 or earlier keeps the rows you have", "`docs/configuration.md`"),
-        ("docs/guide.md", "and gh-ledger 0.5.0 builds it in", "`docs/guide.md`"),
         ("docs/releasing.md", "such as `v0.5.0-rc.1`", "the prerelease tag"),
         ("tests/CopilotLedger.Tests/Docs/GuideSamplesTests.cs", "gh-ledger 0.5.0 builds the name in", "`GuideSamplesTests.HaikuOverlay`"),
     ];
