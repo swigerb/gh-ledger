@@ -55,4 +55,5 @@ dotnet test CopilotLedger.slnx
 - Namespaces follow folders, for example `CopilotLedger.Core.Pricing`, `CopilotLedger.Core.Git`, `CopilotLedger.Core.Telemetry`, and `CopilotLedger.Storage`.
 - Comment only non-obvious logic.
 - Pricing configuration is the embedded `src/CopilotLedger.Core/Pricing/rates.json` plus the optional user overlay `~/.copilot-ledger/rates.json`. When either one's schema or behavior changes, update `docs/configuration.md` in the same task.
+- Work lands on `dev`. `main` changes only through pull requests that pass CI; a release merges `dev` into `main` (see `docs/releasing.md`).
 - Don't commit, push, rewrite history, or create branches unless the user asks.
