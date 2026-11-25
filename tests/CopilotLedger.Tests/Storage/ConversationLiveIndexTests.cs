@@ -142,6 +142,7 @@ public sealed class ConversationLiveIndexTests
         await LedgerSql.ExecuteAsync(
             harness.Context.DatabasePath,
             "DROP INDEX ix_spans_conversation_live;");
+        SqliteConnection.ClearAllPools();
 
         CliRun first = await harness.RunAsync("import", "--all", "--dry-run", "--json");
 
@@ -151,6 +152,7 @@ public sealed class ConversationLiveIndexTests
                 harness.Context.DatabasePath,
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_spans_conversation_live';"));
         await new SqliteLedgerStore(harness.Context.DatabasePath).InitializeAsync();
+        SqliteConnection.ClearAllPools();
 
         CliRun second = await harness.RunAsync("import", "--all", "--dry-run", "--json");
 

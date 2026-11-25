@@ -4,6 +4,7 @@ using CopilotLedger.Core.Pricing;
 using CopilotLedger.Storage;
 using CopilotLedger.Storage.Import;
 using CopilotLedger.Tests.TestSupport;
+using Microsoft.Data.Sqlite;
 
 namespace CopilotLedger.Tests.Import;
 
@@ -248,6 +249,7 @@ public sealed class McpToolNameImportTests
         string database = Database(temp);
         await new SqliteLedgerStore(database).InitializeAsync();
         Mcp(new CopilotSessionLogs("s-a"), "t1").Write(temp.Path);
+        SqliteConnection.ClearAllPools();
 
         await ImportAsync(database, temp.Path, request => request with { DryRun = true });
         Assert.Empty(await Names(database));
