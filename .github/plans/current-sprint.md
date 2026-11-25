@@ -9,7 +9,7 @@
 | Branch | `swigerb-sprint-15-mcp-names-dry-run-help` |
 | Requirements | Issue [#90](https://github.com/swigerb/gh-ledger/issues/90) (live MCP tool calls are named by 129-character hashes), issue [#91](https://github.com/swigerb/gh-ledger/issues/91) (`install --dry-run` always says it would start the daemon), issue [#92](https://github.com/swigerb/gh-ledger/issues/92) and its comment (help usage lines and command hints say `gh-ledger` under the extension), docs that no longer describe these as limitations, version 0.7.0, and its 0.6.0 → 0.7.0 upgrade docs |
 | Status | Current sprint. Sprint 14's plan is archived verbatim at `.github/plans/archive/sprint-14.md` (SHA-256 `4F2DA37E44AC0BC0E3719151AC626912BA03CF87B3423EFD9D3472FF485413D5`). |
-| Amended | 2026-11-24, after Task 2 (`75d4131`): Task 3's ML5 becomes a two-row theory, so every count from Task 3 on is one higher (PA1). 2026-11-25, after Task 3 (`1744ecd`): Task 4's MD1 reads only H's tool calls in its last query, and Task 5's `DecideStart` sets `job` in its `catch`; no count changes (PA2). See "Plan amendments". |
+| Amended | 2026-11-24, after Task 2 (`75d4131`): Task 3's ML5 becomes a two-row theory, so every count from Task 3 on is one higher (PA1). 2026-11-25, after Task 3 (`1744ecd`): Task 4's MD1 reads only H's tool calls in its last query, and Task 5's `DecideStart` sets `job` in its `catch`; no count changes (PA2). 2026-11-25, after PA2 (`6896ad2`), with Task 4 in progress: a new Task 10 makes Task 3's IP6 read the ledger's files as IP1 does, so it passes alone and serially, and the final verification becomes Task 11; Task 5's IN20 says what its `withState: false` row asserts about `daemon.json`; no count changes (PA3). See "Plan amendments". |
 
 ## How to use this plan
 
@@ -74,7 +74,8 @@ Global rules for every task:
 - [ ] Task 7: Command Hints Name `gh ledger` Under the Extension (CopilotLedger.Cli, CopilotLedger.Otlp, CopilotLedger.Mcp, docs & tests). The eight hard-coded hints of #92's comment use `GhExtension.CommandName`, `BreakerMessages.DefaultCommand`, or `LedgerMcpContext.Command`. The guide's `breaker-status` and `mcp` samples follow.
 - [ ] Task 8: Version 0.7.0 (all version places, docs & tests). Step 1 of `docs/releasing.md`, exactly. Rates unchanged.
 - [ ] Task 9: 0.6.0 → 0.7.0 Upgrade Docs and the 0.6.0 Report's Update (docs & tests). The format stays 7, the first import reads every log again once, and going back is a pinned install without the copy. `UpgradeDocsTests.UD6`. An `**Update:**` line in the 0.6.0 test report's "Gaps found".
-- [ ] Task 10: Final Verification (no product change). Build and test gates, serial tests, a `publish` whose `--version` is `0.7.0`, smoke tests with temporary homes, and money, privacy, boundary, and docs sweeps.
+- [ ] Task 10: IP6 Reads the Ledger as IP1 Does (tests only). PA3: IP6 clears the connection pools after its last query and reads `ledger.db`, `-wal`, and `-shm` through a `FileShare.ReadWrite | FileShare.Delete` stream, as IP1 does, so it passes alone and in a serial run. Its name, setup, and assertions are unchanged.
+- [ ] Task 11: Final Verification (no product change). Build and test gates, serial tests, a `publish` whose `--version` is `0.7.0`, smoke tests with temporary homes, and money, privacy, boundary, and docs sweeps.
 
 ## Starting point
 
@@ -134,8 +135,9 @@ Global rules for every task:
 
 ## Plan amendments
 
-- **PA1 (2026-11-24, after Task 2 at `75d4131`; plan-text repair, no behavior change).** Task 3's ML5 paired a Copilot `1.0.102` log with `UnsupportedProducerVersion`, but the gate (`CopilotSessionLogSource`'s `Start`) gives a version below 1.0.103 `AggregateOnly` and one above 1.0.115 `UnsupportedProducerVersion`, as `CopilotSessionGateTests.CS2` pins. `ledger-builder` stopped on it, as the global rules say: 2,010 passed and 1 failed (ML5 only). ML5 is now a theory of `(string version, SessionLogStatus status)` with the rows `("1.0.102", SessionLogStatus.AggregateOnly)` and `("1.0.116", SessionLogStatus.UnsupportedProducerVersion)`, each asserting its status and an empty `LearnedToolNames`. That covers logs on both sides of the window: an older Copilot's, and a newer one's, which users get when Copilot updates past the window before gh-ledger does. Its name and claim, that a log whose status isn't `Read` teaches nothing, are unchanged. The second row adds one test, so Task 3 adds 17, and every later running total is one higher: 2,012 after Task 3, 2,019 after Task 4, 2,030 after Task 5, 2,041 after Task 6, 2,055 after Tasks 7 and 8, and 2,056 after Task 9 and in Task 10. "Tests added this sprint" counts ML1–ML10 as 16, for a total of 96, from 1,960 to 2,056. Checked on a scratch copy of the working tree with ML5 as this theory, outside the repository and deleted afterward: 0 warnings, 0 errors, and 2,012 passed, 0 failed, 0 skipped; both rows also pass with `xUnit.ParallelizeTestCollections=false`. Changed: the Amended row; Task 3's ML5 row and acceptance; the counts in Tasks 4–9's acceptance and Task 10's gates; and "Tests added this sprint". Unchanged: Tasks 1 and 2 and their text; every contract, algorithm, fixture, and docs text; ML1–ML4, ML6–ML10, and IP6; the decisions; and the task order.
-- **PA2 (2026-11-25, after Task 3 at `1744ecd`; plan-text repair, no behavior change).** Task 4's MD1 ended with `SELECT DISTINCT tool_name FROM span_links WHERE trace_id = '<H>'` is `[ExecJs]`. But `AuditSeeds.LiveTrace` also stores H's `invoke_agent` link (`Agent`) and its three `chat` links (`Request` under an agent), whose `tool_name` is NULL, so the query gives `["null", ExecJs]` (`LedgerSql.RowsAsync` writes NULL as `null`). `ledger-builder` stopped on it, as the global rules say: 2,018 passed and 1 failed (MD1 only). The query is now `SELECT DISTINCT tool_name FROM span_links WHERE trace_id = '<H>' AND operation_name = 'execute_tool'`, and it must give exactly `[ExecJs]`. `operation_name` is the column (`LedgerMigrations.cs:77`, migration 2), and tool links store `GenAiOperationNames.ExecuteTool`, `execute_tool`, the value the store's own tool-call queries filter on (`SqliteLedgerStore.cs:705`, `SqliteLedgerStore.Export.cs:50`; PA2's line numbers are at `1744ecd`). MD1's name and claim, that the stored names of H's tool calls are still the hash after a name is learned, are unchanged. Checking Tasks 5–9 against the code found one more slip. Task 5's `DecideStart` step 3 left `job` unassigned in its `catch`, so with `StartAsync`'s `JobState job;` (`DaemonCommands.cs:83`) the call `DetachedLaunchPolicy.Decide(job)` doesn't compile (CS0165, confirmed in a scratch build). The `catch` now sets `job = default;`, as `StartAsync` does today (`DaemonCommands.cs:86`); the steps, their order, and every outcome are the same. The rest of Tasks 5–9 was checked against the code it depends on, and where possible against today's output; nothing else needed a change. That covers: `install --dry-run` and `install` with `InstallCommandTests.WindowsPlatform()` and IN20–IN22's platforms, every line except the daemon step that Task 5 changes; the help of the built binary (29 runs, breadth-first as HL3 walks it, and `daemon stop --help` byte for byte as HL2 gives it); XH1–XH6's texts and helpers (`NewBreakerTrip`, `RecordBreakerTripAsync`, `CliContext.ConfigureWebHost`, `McpTestHarness`, and `AuditMcpTests`' context), every byte except the command that Task 7 names; BM13's `Harness.CreateAsync(…, command:)`; the guide samples and sentences that Task 7 edits; Task 8's 15 lines; and the docs anchors of Tasks 5, 6, and 9. Checked on a scratch copy of the working tree with MD1's new query, outside the repository and deleted afterward: 0 warnings, 0 errors, and 2,019 passed, 0 failed, 0 skipped; MD1–MD5 also pass with `xUnit.ParallelizeTestCollections=false`. No test or theory row is added or removed, so every count is PA1's: 2,019 after Task 4, 2,030 after Task 5, 2,041 after Task 6, 2,055 after Tasks 7 and 8, and 2,056 after Task 9 and in Task 10. Changed: the Amended row; the last sentence of MD1's Expected cell; and the `catch` of Task 5's `DecideStart` step 3. Unchanged: Tasks 1–3 and their text; every contract, decision, fixture, test vector other than MD1's last query, docs text, and count; MD2–MD6 and DF1; Tasks 6–10; and the task order.
+- **PA1 (2026-11-24, after Task 2 at `75d4131`; plan-text repair, no behavior change).** Task 3's ML5 paired a Copilot `1.0.102` log with `UnsupportedProducerVersion`, but the gate (`CopilotSessionLogSource`'s `Start`) gives a version below 1.0.103 `AggregateOnly` and one above 1.0.115 `UnsupportedProducerVersion`, as `CopilotSessionGateTests.CS2` pins. `ledger-builder` stopped on it, as the global rules say: 2,010 passed and 1 failed (ML5 only). ML5 is now a theory of `(string version, SessionLogStatus status)` with the rows `("1.0.102", SessionLogStatus.AggregateOnly)` and `("1.0.116", SessionLogStatus.UnsupportedProducerVersion)`, each asserting its status and an empty `LearnedToolNames`. That covers logs on both sides of the window: an older Copilot's, and a newer one's, which users get when Copilot updates past the window before gh-ledger does. Its name and claim, that a log whose status isn't `Read` teaches nothing, are unchanged. The second row adds one test, so Task 3 adds 17, and every later running total is one higher: 2,012 after Task 3, 2,019 after Task 4, 2,030 after Task 5, 2,041 after Task 6, 2,055 after Tasks 7 and 8, and 2,056 after Task 9 and in Task 10 (now Task 11, PA3). "Tests added this sprint" counts ML1–ML10 as 16, for a total of 96, from 1,960 to 2,056. Checked on a scratch copy of the working tree with ML5 as this theory, outside the repository and deleted afterward: 0 warnings, 0 errors, and 2,012 passed, 0 failed, 0 skipped; both rows also pass with `xUnit.ParallelizeTestCollections=false`. Changed: the Amended row; Task 3's ML5 row and acceptance; the counts in Tasks 4–9's acceptance and Task 10's gates (now Task 11, PA3); and "Tests added this sprint". Unchanged: Tasks 1 and 2 and their text; every contract, algorithm, fixture, and docs text; ML1–ML4, ML6–ML10, and IP6; the decisions; and the task order.
+- **PA2 (2026-11-25, after Task 3 at `1744ecd`; plan-text repair, no behavior change).** Task 4's MD1 ended with `SELECT DISTINCT tool_name FROM span_links WHERE trace_id = '<H>'` is `[ExecJs]`. But `AuditSeeds.LiveTrace` also stores H's `invoke_agent` link (`Agent`) and its three `chat` links (`Request` under an agent), whose `tool_name` is NULL, so the query gives `["null", ExecJs]` (`LedgerSql.RowsAsync` writes NULL as `null`). `ledger-builder` stopped on it, as the global rules say: 2,018 passed and 1 failed (MD1 only). The query is now `SELECT DISTINCT tool_name FROM span_links WHERE trace_id = '<H>' AND operation_name = 'execute_tool'`, and it must give exactly `[ExecJs]`. `operation_name` is the column (`LedgerMigrations.cs:77`, migration 2), and tool links store `GenAiOperationNames.ExecuteTool`, `execute_tool`, the value the store's own tool-call queries filter on (`SqliteLedgerStore.cs:705`, `SqliteLedgerStore.Export.cs:50`; PA2's line numbers are at `1744ecd`). MD1's name and claim, that the stored names of H's tool calls are still the hash after a name is learned, are unchanged. Checking Tasks 5–9 against the code found one more slip. Task 5's `DecideStart` step 3 left `job` unassigned in its `catch`, so with `StartAsync`'s `JobState job;` (`DaemonCommands.cs:83`) the call `DetachedLaunchPolicy.Decide(job)` doesn't compile (CS0165, confirmed in a scratch build). The `catch` now sets `job = default;`, as `StartAsync` does today (`DaemonCommands.cs:86`); the steps, their order, and every outcome are the same. The rest of Tasks 5–9 was checked against the code it depends on, and where possible against today's output; nothing else needed a change. That covers: `install --dry-run` and `install` with `InstallCommandTests.WindowsPlatform()` and IN20–IN22's platforms, every line except the daemon step that Task 5 changes; the help of the built binary (29 runs, breadth-first as HL3 walks it, and `daemon stop --help` byte for byte as HL2 gives it); XH1–XH6's texts and helpers (`NewBreakerTrip`, `RecordBreakerTripAsync`, `CliContext.ConfigureWebHost`, `McpTestHarness`, and `AuditMcpTests`' context), every byte except the command that Task 7 names; BM13's `Harness.CreateAsync(…, command:)`; the guide samples and sentences that Task 7 edits; Task 8's 15 lines; and the docs anchors of Tasks 5, 6, and 9. Checked on a scratch copy of the working tree with MD1's new query, outside the repository and deleted afterward: 0 warnings, 0 errors, and 2,019 passed, 0 failed, 0 skipped; MD1–MD5 also pass with `xUnit.ParallelizeTestCollections=false`. No test or theory row is added or removed, so every count is PA1's: 2,019 after Task 4, 2,030 after Task 5, 2,041 after Task 6, 2,055 after Tasks 7 and 8, and 2,056 after Task 9 and in Task 10 (now Task 11, PA3). Changed: the Amended row; the last sentence of MD1's Expected cell; and the `catch` of Task 5's `DecideStart` step 3. Unchanged: Tasks 1–3 and their text; every contract, decision, fixture, test vector other than MD1's last query, docs text, and count; MD2–MD6 and DF1; Tasks 6–10; and the task order.
+- **PA3 (2026-11-25, after PA2 at `6896ad2`, with Task 4 in progress; a test fix in a new task, and a plan-text clarification; no behavior change).** Task 3 said IP6 reads `ledger.db`, `-wal`, and `-shm` "as IP1 reads them", but the committed IP6 (`ImportPrivacyTests.IP6_AnMcpToolCall_KeepsOnlyItsHashedNameAndToolName`) doesn't. It calls `SqliteConnection.ClearAllPools()` right after its import, then runs two `LedgerSql.RowsAsync` queries, whose connection goes back to the pool and keeps the ledger open. It then reads each file with `FileRetry.ReadAllBytesAsync`, which opens it with `FileShare.Read`. Windows refuses that while SQLite has the file open for writing, so `FileRetry` retries for 10 seconds and throws. In a parallel run, another test's `ClearAllPools()` closes the pooled connection within those 10 seconds, which is why Task 3's run passed (`Tests: 2012 passed`); 2 of 2 parallel runs of `6896ad2` also passed while planning. Without that rescue, IP6 fails: `dotnet test CopilotLedger.slnx --filter "FullyQualifiedName~ImportPrivacyTests.IP6"` fails after 10 s with `IOException: The process cannot access the file '…\data\ledger.db' because it is being used by another process.` (`ImportPrivacyTests.cs:282`; PA3's line numbers are at `1744ecd`), and the serial run of `6896ad2` gives 2,011 passed and 1 failed (IP6 only). That breaks the global rule that every test passes with `xUnit.ParallelizeTestCollections=false`, and the final verification's serial gate. IP1 calls `ClearAllPools()` after its last `LedgerSql` query, right before its reads (`:63`), and reads each file through `new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)` copied into a `MemoryStream` (`:70–73`). It has no helper. A new Task 10, tests only, right before the final verification, makes IP6 do both. Either change alone made IP6 pass alone (3 runs each); Task 10 makes both, as IP1 does. IP6's name, setup, and every assertion are unchanged. Sprint 12's IP_AM1 also reads with `FileRetry`, but it calls `ClearAllPools()` after its runs and queries the ledger only after its reads, so it passes serially and stays as it is. The final verification becomes Task 11 and runs at the commit after Task 10. In PA1 and PA2, "Task 10" is the final verification, including at the end of PA2's "Tasks 6–10". Checked on a scratch copy of `6896ad2` with Task 10's change, outside the repository and deleted afterward: 0 warnings, 0 errors; IP6 passed alone, alone with `xUnit.ParallelizeTestCollections=false`, and serially with the rest of `ImportPrivacyTests` (7 passed); and the whole suite gave 2,012 passed, 0 failed, 0 skipped, both in parallel and with `xUnit.ParallelizeTestCollections=false`. Task 5 gets one clarification. IN20's `withState: false` row writes no `daemon.json`, so for that row, "`daemon.json`'s text is unchanged" means that `<temp>/data/daemon.json` still doesn't exist after the dry run. `DaemonFiles.IsHeld` and `DaemonFiles.TryReadState` only read, and a dry run writes nothing to the data directory (`InstallCommands.cs:279`). The cell now says so. No test or theory row is added or removed, so the counts stay: 2,019 after Task 4, 2,030 after Task 5, 2,041 after Task 6, 2,055 after Tasks 7 and 8, 2,056 after Task 9, and 2,056 in Tasks 10 and 11. Task 11's serial run must show 2,056 passed. Changed: the Amended row; the Tasks list (the new Task 10, and the final verification as Task 11); "(now Task 11, PA3)" after PA1's two mentions of Task 10 and PA2's one; IN20's Expected cell; the new Task 10 section; the final verification's heading, its first line, and its serial gate, which now states its counts; "Changed tests" under "Tests added this sprint"; and "After Task 11 (orchestrator)". Unchanged: Tasks 1–3 and their text, including Task 3's IP6 specification; Task 4, which is in progress; Tasks 5–9 apart from IN20's Expected cell; every contract, decision, fixture, other test vector, docs text, and count; what the final verification checks; and the order of Tasks 1–9.
 
 ## Task 1: MCP Tool Names: Hash, Shape, Short Form, and Display
 
@@ -615,7 +617,7 @@ The four blocked cases, as `TheoryData<string>`, build their platform as follows
 
 | ID | Name | Vector | Expected |
 |---|---|---|---|
-| IN20 | `IN20_DryRun_ReportsARunningDaemon` (theory: `withState` true, false) | `WindowsPlatform()`; create `<temp>/data`; when `withState`, write `<temp>/data/daemon.json` as `{"schemaVersion":1,"processId":4242,"startedAt":"2026-11-24T12:00:00+00:00","endpoint":"http://localhost:4318","version":"9.9.9","databasePath":"ledger.db","importRules":1}`; hold `<temp>/data/daemon.lock` open with `FileMode.OpenOrCreate`, `FileAccess.ReadWrite`, and `FileShare.None` while running `install --dry-run` and then `install` | Let `line` be `gh-ledger daemon is already running (pid 4242).` with `withState`, else `gh-ledger daemon is already running.` The dry run: exit 0; `Error` empty; `Out` is exactly these lines, each followed by `\n`: `Would set COPILOT_OTEL_ENABLED=true for your user account.`, `Would set gh alias: gh ledger runs C:\tools\gh-ledger.exe.`, `Sh`, `Would start gh-ledger when you sign in.`, `line`, and `Dry run: no changes made.` After the dry run, `UserVariableWrites`, `StartupCommandWrites`, `ProcessRuns`, and `DetachedStarts` are empty, there's no `install.json`, and `daemon.json`'s text is unchanged. The install: exit 0; `Out` contains `line + "\n"` and ends with `gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n`; `DetachedStarts` empty. |
+| IN20 | `IN20_DryRun_ReportsARunningDaemon` (theory: `withState` true, false) | `WindowsPlatform()`; create `<temp>/data`; when `withState`, write `<temp>/data/daemon.json` as `{"schemaVersion":1,"processId":4242,"startedAt":"2026-11-24T12:00:00+00:00","endpoint":"http://localhost:4318","version":"9.9.9","databasePath":"ledger.db","importRules":1}`; hold `<temp>/data/daemon.lock` open with `FileMode.OpenOrCreate`, `FileAccess.ReadWrite`, and `FileShare.None` while running `install --dry-run` and then `install` | Let `line` be `gh-ledger daemon is already running (pid 4242).` with `withState`, else `gh-ledger daemon is already running.` The dry run: exit 0; `Error` empty; `Out` is exactly these lines, each followed by `\n`: `Would set COPILOT_OTEL_ENABLED=true for your user account.`, `Would set gh alias: gh ledger runs C:\tools\gh-ledger.exe.`, `Sh`, `Would start gh-ledger when you sign in.`, `line`, and `Dry run: no changes made.` After the dry run, `UserVariableWrites`, `StartupCommandWrites`, `ProcessRuns`, and `DetachedStarts` are empty, there's no `install.json`, and `<temp>/data/daemon.json` is as it was: with `withState`, its text is unchanged; without it, it still doesn't exist (PA3). The install: exit 0; `Out` contains `line + "\n"` and ends with `gh-ledger is installed. Restart the GitHub Copilot app, VS Code, and open terminals so they pick up COPILOT_OTEL_ENABLED.\n`; `DetachedStarts` empty. |
 | IN21 | `IN21_DryRun_InABlockingJob_SaysItWouldntStartTheDaemon` (theory, the 4 cases) | `install --dry-run` | Exit 1. `Out` and `Error`, by case, below. In every case `UserVariableWrites`, `StartupCommandWrites`, `ProcessRuns`, and `DetachedStarts` are empty, and there's no `install.json`. |
 | IN22 | `IN22_DryRun_DecidesTheDaemonLikeInstall` (theory, the 4 cases) | `install --dry-run` in one temporary directory, and `install` in another, each with a new platform of the case | Both exit 1. Splitting each `Error` on `\n` gives 3 parts, the last empty. The second lines are equal. The real first line starts with `gh-ledger daemon not started: `, and the dry first line is `Wouldn't start the gh-ledger daemon: ` plus the rest of the real one. The real run's `DetachedStarts` is empty. |
 
@@ -944,14 +946,82 @@ Nothing else in the report changes. `docs/test-reports/` is outside VR3's and PN
 
 **Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
 
-## Task 10: Final Verification (no product change)
+## Task 10: IP6 Reads the Ledger as IP1 Does
 
-In a clean tree, at the commit after Task 9:
+PA3's fix. IP6 runs two `LedgerSql.RowsAsync` queries after its `SqliteConnection.ClearAllPools()`, so a pooled connection still has the ledger open when it reads the files with `FileRetry.ReadAllBytesAsync`, which opens them with `FileShare.Read`. Windows refuses that while SQLite has a file open for writing, so IP6 fails after 10 seconds unless another test clears the pools in time. It always fails alone, and always with `xUnit.ParallelizeTestCollections=false`.
+
+**Files:** `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs` only. No product, docs, or other test change.
+
+**Changes**, in `IP6_AnMcpToolCall_KeepsOnlyItsHashedNameAndToolName` only. Line numbers are at `1744ecd`; Tasks 4–9 don't edit this file.
+
+1. IP6's last `LedgerSql` query is the statement on lines 258–260:
+
+   ```csharp
+   Assert.Equal(
+       ["srv-tool"],
+       await LedgerSql.RowsAsync(harness.Context.DatabasePath, "SELECT tool_name FROM span_links;"));
+   ```
+
+   On the line right after it, add the call that IP1 makes after its last query (line 63):
+
+   ```csharp
+   SqliteConnection.ClearAllPools();
+   ```
+
+   The `ClearAllPools()` right after the import (line 250) stays, and so does the blank line before `string output = run.Out + run.Error;`.
+
+2. Replace line 282, `byte[] ledger = await FileRetry.ReadAllBytesAsync(path);`, with IP1's read (lines 70–73), inline. IP1 has no helper for it, so don't add one.
+
+   ```csharp
+   await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+   using MemoryStream copy = new();
+   await stream.CopyToAsync(copy);
+   byte[] ledger = copy.ToArray();
+   ```
+
+   The next line, `Assert.True(ledger.AsSpan().IndexOf(bytes) < 0, $"{canary} is in ledger.db{suffix}.");`, is unchanged.
+
+Nothing else changes. Keep IP6's name, its log, its import run, and every assertion:
+
+- exit code 0;
+- exactly the one `mcp_tool_names` row;
+- exactly `["srv-tool"]` from `span_links`;
+- for each of the 7 canaries, that it isn't in the run's output, or in `ledger.db`, `ledger.db-wal`, or `ledger.db-shm` when that file exists.
+
+Don't change IP1–IP5, IP_AM1, `FileRetry`, or `LedgerSql`. IP_AM1 keeps `FileRetry.ReadAllBytesAsync`: it calls `ClearAllPools()` after its runs and queries the ledger only after its reads, so nothing has the ledger open when it reads.
+
+If IP6 still fails, stop and report it. Don't change its setup or assertions to make it pass. If a run fails only in tests other than IP6, stop and report those too: they aren't this task's to fix.
+
+**Acceptance:**
+
+- `dotnet test CopilotLedger.slnx --filter "FullyQualifiedName~ImportPrivacyTests.IP6"` reports 1 passed, 0 failed, 0 skipped, well under 10 seconds (about 0.2 s while planning). So does the same command with `-- xUnit.ParallelizeTestCollections=false`.
+- `dotnet test CopilotLedger.slnx` and `dotnet test CopilotLedger.slnx -- xUnit.ParallelizeTestCollections=false` each report 0 failed, 0 skipped, and **2,056** passed. No test or theory row is added or removed, so the count stays 2,056.
+- In `ImportPrivacyTests.cs`, `FileShare.ReadWrite | FileShare.Delete` is on exactly 2 lines (IP1's and IP6's), and `FileRetry.ReadAllBytesAsync` is on exactly 1 (IP_AM1's).
+- `git diff HEAD~1 --stat` lists only `tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs` and this plan file. The plan file changes only to check off this task. The test file's diff adds 5 lines and deletes 1, all in IP6.
+
+**Verification:**
+
+```shell
+dotnet build CopilotLedger.slnx
+dotnet test CopilotLedger.slnx --filter "FullyQualifiedName~ImportPrivacyTests.IP6"
+dotnet test CopilotLedger.slnx --filter "FullyQualifiedName~ImportPrivacyTests.IP6" -- xUnit.ParallelizeTestCollections=false
+dotnet test CopilotLedger.slnx
+dotnet test CopilotLedger.slnx -- xUnit.ParallelizeTestCollections=false
+git --no-pager grep -n -F "FileShare.ReadWrite | FileShare.Delete" -- tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs
+git --no-pager grep -n -F "FileRetry.ReadAllBytesAsync" -- tests/CopilotLedger.Tests/Cli/ImportPrivacyTests.cs
+git --no-pager diff --stat
+```
+
+The build reports 0 warnings and 0 errors. Before the commit, `git --no-pager diff --stat` (the working tree against Task 9's commit) lists the two files that `git diff HEAD~1 --stat` lists after it. Record `Tests: <n> passed` and the serial run's counts in the commit body.
+
+## Task 11: Final Verification (no product change)
+
+In a clean tree, at the commit after Task 10:
 
 1. **Gates.**
    - `dotnet build CopilotLedger.slnx`: 0 warnings, 0 errors.
    - `dotnet test CopilotLedger.slnx`: 0 failed, 0 skipped, **2,056** passed.
-   - `dotnet test CopilotLedger.slnx -- xUnit.ParallelizeTestCollections=false`: the same counts.
+   - `dotnet test CopilotLedger.slnx -- xUnit.ParallelizeTestCollections=false`: the same counts: 0 failed, 0 skipped, **2,056** passed (PA3).
 
    Record both.
 2. **Publish.** Run `dotnet publish src/CopilotLedger.Cli/CopilotLedger.Cli.csproj -c Release -r win-x64 -o "$env:TEMP\gh-ledger-final"`; on another OS, use its RID. Then `& "$env:TEMP\gh-ledger-final\gh-ledger.exe" --version` must print exactly `0.7.0`.
@@ -1011,10 +1081,11 @@ Changed tests, each as strong as before:
 - `ImportPrivacyTests` (Task 3): `LeftEmpty` and IP3 include `mcp_tool_names`, and the fixture's `toolu-3` is an MCP tool call.
 - `CopilotSessionLogs.ToolStart` takes optional `mcpServerName` and `mcpToolName` (Task 3).
 - The four version tests (Task 8).
+- `ImportPrivacyTests.IP6` (Task 10, PA3): reads `ledger.db`, `-wal`, and `-shm` as IP1 does, after `ClearAllPools()`, so it passes alone and serially. Its assertions are unchanged.
 
 The guide's `breaker-status` and `mcp` samples change, and `GuideSamplesTests` checks them unchanged (Task 7).
 
-## After Task 10 (orchestrator)
+## After Task 11 (orchestrator)
 
 Hand back to `ledger-architect` for review mode. Release notes for 0.7.0 aren't committed to the repository: the architect's planning report drafts them, and the coordinator publishes them with the release. Don't push, tag, open a PR, or create a release from a builder run.
 
