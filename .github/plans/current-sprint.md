@@ -9,6 +9,7 @@
 | Branch | `swigerb-sprint-15-mcp-names-dry-run-help` |
 | Requirements | Issue [#90](https://github.com/swigerb/gh-ledger/issues/90) (live MCP tool calls are named by 129-character hashes), issue [#91](https://github.com/swigerb/gh-ledger/issues/91) (`install --dry-run` always says it would start the daemon), issue [#92](https://github.com/swigerb/gh-ledger/issues/92) and its comment (help usage lines and command hints say `gh-ledger` under the extension), docs that no longer describe these as limitations, version 0.7.0, and its 0.6.0 → 0.7.0 upgrade docs |
 | Status | Current sprint. Sprint 14's plan is archived verbatim at `.github/plans/archive/sprint-14.md` (SHA-256 `4F2DA37E44AC0BC0E3719151AC626912BA03CF87B3423EFD9D3472FF485413D5`). |
+| Amended | 2026-11-24, after Task 2 (`75d4131`): Task 3's ML5 becomes a two-row theory, so every count from Task 3 on is one higher (PA1). See "Plan amendments". |
 
 ## How to use this plan
 
@@ -130,6 +131,10 @@ Global rules for every task:
 - **D10. Bump before the docs that name the previous version.** Task 8 bumps to 0.7.0 before Task 9 writes docs that name 0.6.0. Until then, 0.6.0 is the current version, and `VR3` fails on any new mention of it (Sprint 14's D9).
 - **D11. Upgrade docs for 0.6.0 → 0.7.0.** Users of 0.6.0 need three facts: the format is unchanged, so going back is a pinned install without the copy; the first `import --all` reads every log again (A5); and the existing steps still apply. A short `**Upgrading from 0.6.0.**` paragraph in `docs/cli.md`, a sentence under `### Repairs` that names the logs read once more (those that gh-ledger 0.6.0 or earlier imported), one sentence in the guide, and `UD6` pin them. `UD5` keeps pinning 0.5.0's.
 - **D12. The 0.6.0 report gets one `**Update:**` line.** It goes under "Gaps found", after its table, as the brief asks. The 0.5.0 report has its update line near its top instead. Nothing else in a dated report changes.
+
+## Plan amendments
+
+- **PA1 (2026-11-24, after Task 2 at `75d4131`; plan-text repair, no behavior change).** Task 3's ML5 paired a Copilot `1.0.102` log with `UnsupportedProducerVersion`, but the gate (`CopilotSessionLogSource`'s `Start`) gives a version below 1.0.103 `AggregateOnly` and one above 1.0.115 `UnsupportedProducerVersion`, as `CopilotSessionGateTests.CS2` pins. `ledger-builder` stopped on it, as the global rules say: 2,010 passed and 1 failed (ML5 only). ML5 is now a theory of `(string version, SessionLogStatus status)` with the rows `("1.0.102", SessionLogStatus.AggregateOnly)` and `("1.0.116", SessionLogStatus.UnsupportedProducerVersion)`, each asserting its status and an empty `LearnedToolNames`. That covers logs on both sides of the window: an older Copilot's, and a newer one's, which users get when Copilot updates past the window before gh-ledger does. Its name and claim, that a log whose status isn't `Read` teaches nothing, are unchanged. The second row adds one test, so Task 3 adds 17, and every later running total is one higher: 2,012 after Task 3, 2,019 after Task 4, 2,030 after Task 5, 2,041 after Task 6, 2,055 after Tasks 7 and 8, and 2,056 after Task 9 and in Task 10. "Tests added this sprint" counts ML1–ML10 as 16, for a total of 96, from 1,960 to 2,056. Checked on a scratch copy of the working tree with ML5 as this theory, outside the repository and deleted afterward: 0 warnings, 0 errors, and 2,012 passed, 0 failed, 0 skipped; both rows also pass with `xUnit.ParallelizeTestCollections=false`. Changed: the Amended row; Task 3's ML5 row and acceptance; the counts in Tasks 4–9's acceptance and Task 10's gates; and "Tests added this sprint". Unchanged: Tasks 1 and 2 and their text; every contract, algorithm, fixture, and docs text; ML1–ML4, ML6–ML10, and IP6; the decisions; and the task order.
 
 ## Task 1: MCP Tool Names: Hash, Shape, Short Form, and Display
 
@@ -359,7 +364,7 @@ public const int CurrentImportRevision = 2;   // 2: every log is read once more,
 | ML2 | `ML2_OnlyThreeValidStringsTeachAName` (theory, 6 rows) | After `session.start`, one `tool.execution_start` whose data is, by row: `no tool name`: `{toolCallId "t1", mcpServerName "computer-use", mcpToolName "exec_js"}`; `no MCP tool name`: `{toolCallId, toolName "computer-use-exec_js", mcpServerName "computer-use"}`; `a numeric server name`: `{toolCallId, toolName, mcpServerName 7, mcpToolName "exec_js"}`; `an empty MCP tool name`: `{toolCallId, toolName, mcpServerName "computer-use", mcpToolName ""}`; `a server name over 256 characters`: `{toolCallId, toolName, mcpServerName new string('s', 257), mcpToolName "exec_js"}`; `a repeated property`: the raw line `{"type":"tool.execution_start","data":{"toolCallId":"t1","toolName":"computer-use-exec_js","mcpServerName":"computer-use","mcpServerName":"other","mcpToolName":"exec_js"},"id":"00000000-0000-4000-8000-0000000000ff","timestamp":"2026-11-20T12:00:01.000Z","parentId":null}` | Each: status `Read`, `LearnedToolNames` empty |
 | ML3 | `ML3_EachNameIsLearnedOnce_InOrder` | `Mcp(log, "t1")`; `Mcp(log, "t2")`; `.ToolStart("t3", "ledger-get_branch_ledger", mcpServerName: "ledger", mcpToolName: "get_branch_ledger")`; `.ToolStart("t4", "computer-use-exec_js-v2", mcpServerName: "computer-use", mcpToolName: "exec_js")`; `.ToolStart("t5", "powershell")` | `LearnedToolNames` is exactly `[(ExecJs, "computer-use-exec_js"), (ExecJs, "computer-use-exec_js-v2"), (LedgerHash, "ledger-get_branch_ledger")]` |
 | ML4 | `ML4_AStartWithoutACallIdOrCompletion_StillTeachesItsName` | `.Event("tool.execution_start", {toolName "computer-use-exec_js", mcpServerName "computer-use", mcpToolName "exec_js"})` only | `LearnedToolNames` is `[(ExecJs, "computer-use-exec_js")]`; `ToolCalls` empty |
-| ML5 | `ML5_ALogThatIsntRead_TeachesNothing` | `new CopilotSessionLogs(SessionId, "1.0.102")` with `Mcp(…, "t1")` | Status `UnsupportedProducerVersion`; `LearnedToolNames` empty |
+| ML5 | `ML5_ALogThatIsntRead_TeachesNothing` (theory, 2 rows of `(string version, SessionLogStatus status)`; PA1) | `("1.0.102", SessionLogStatus.AggregateOnly)`, below the window; `("1.0.116", SessionLogStatus.UnsupportedProducerVersion)`, above it. Each writes `new CopilotSessionLogs(SessionId, version)` with `Mcp(…, "t1")` | Each: status is the row's `status`; `LearnedToolNames` empty |
 | ML6 | `ML6_ImportRecordsTheNamesOfLiveSessionsAndOldToolCalls` | An initialized store at `<temp>/ledger.db` with `RecordAsync([ImportEntries.Live("s-live", S1)])`. Log `s-live`: `.Usage("u1", S1, numToolCalls: 1)`, `Mcp(…, "t1")`, `.ToolComplete("t1", true)`. Log `s-old`, started 2026-11-01 12:00:00 UTC: `.Usage("u2", S2, numToolCalls: 1)`, `.ToolStart("t2", "ledger-get_branch_ledger", mcpServerName: "ledger", mcpToolName: "get_branch_ledger")`, `.ToolComplete("t2", true)`. Import both. | The Copilot report has `OverlapSkipped` 1, `Recorded` 1, and `ToolLinksRecorded` 0. `Names` is `[ExecJs + "\|computer-use-exec_js", LedgerHash + "\|ledger-get_branch_ledger"]`. `SELECT COUNT(*) FROM span_links` is 0. |
 | ML7 | `ML7_AScopedImport_LearnsFromLogsOutOfScope` | Log `s-elsewhere` with `context: CopilotSessionLogs.Context(api, api, "main", "contoso/api", GitFixture.Sha1)`, where `api` = `<temp>/api`: `.Usage("u1", S1)`, `Mcp(…, "t1")`. Import with `RepositoryRoot = <temp>/repo` and `RepositorySlug = "swigerb/copilot-ledger"`. | `RecordsOutOfScope` 1 and `Recorded` 0; `Names` is `[ExecJs + "\|computer-use-exec_js"]` |
 | ML8 | `ML8_ADryRun_LearnsNothing` | Initialize the ledger; log `s-a` with `Mcp(…, "t1")`; import with `DryRun = true`, then without | 0 rows after the dry run; `[ExecJs + "\|computer-use-exec_js"]` after the import |
@@ -379,7 +384,7 @@ public const int CurrentImportRevision = 2;   // 2: every log is read once more,
 
 **Acceptance:**
 
-- ML1–ML10 and IP6 pass: **16 tests**, so 2,011 passed.
+- ML1–ML10 and IP6 pass: **17 tests** (ML5 is 2 rows, PA1), so 2,012 passed.
 - RR1 and RR8 pass with revision 2. IP1–IP5 pass with the changes above, which add assertions and weaken none.
 - `git grep -n -E 'arguments|toolTitle|"result"' -- src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` (single quotes, in PowerShell) finds nothing and exits 1, as at `c6dc935`. `git diff HEAD~1 -- src/CopilotLedger.Core/Import/CopilotSessionLogSource.cs` adds no path to any path tree other than `data.mcpServerName` and `data.mcpToolName`.
 - No CLI, export, audit, or MCP file changes.
@@ -513,7 +518,7 @@ Expected:
 
 **Acceptance:**
 
-- MD1–MD6 and DF1 pass: **7 tests**, so 2,018 passed.
+- MD1–MD6 and DF1 pass: **7 tests**, so 2,019 passed.
 - Every existing audit, export, MCP, guide, and docs test passes unchanged: `AuditDocsTests`, `ExportAllowlistTests`, `GuideSamplesTests`, `SprintThirteenDocsTests`, `AuditMcpTests.AM1`, and `ExportAuditTests.EF2`.
 - `git diff HEAD~1 -- src/CopilotLedger.Core/Audit` changes only `AuditReport.cs`.
 
@@ -633,7 +638,7 @@ IN21's expected output, each line followed by `\n`:
 
 **Acceptance:**
 
-- IN20–IN22 and DF2 pass: **11 tests**, so 2,029 passed.
+- IN20–IN22 and DF2 pass: **11 tests**, so 2,030 passed.
 - IN1–IN19, DJ1–DJ7, and DM1–DM7 pass unchanged; IN9 proves the unchanged case.
 - `SprintThirteenDocsTests.DC1` passes unchanged: the refusal block it pins isn't edited.
 
@@ -728,7 +733,7 @@ Each run uses its own `CliHarness` over the test's temporary directory.
 
 **Acceptance:**
 
-- HL1–HL3 and DF3 pass: **11 tests**, so 2,040 passed.
+- HL1–HL3 and DF3 pass: **11 tests**, so 2,041 passed.
 - No test that existed before this task changes.
 - `git diff HEAD~1 -- src` changes only `GhLedgerCli.cs` and adds `ExtensionHelpAction.cs`.
 
@@ -835,7 +840,7 @@ Expected: the flag file's `openTrips[0].resetCommand` is `gh ledger breaker rese
 
 **Acceptance:**
 
-- XH1–XH6, BM13, and DF4 pass: **14 tests**, so 2,054 passed.
+- XH1–XH6, BM13, and DF4 pass: **14 tests**, so 2,055 passed.
 - Every existing test passes unchanged, including:
   - `BreakerCommandTests` BC2 and BC5;
   - `InstallCommandTests` IN14;
@@ -880,7 +885,7 @@ Don't touch `VersionPlacesTests.cs` unless VR1–VR3 fail; if they do, stop and 
 
 - `git grep -n -E "(^|[^0-9.])0\.7\.0([^0-9]|$)" -- README.md ':(glob)docs/*.md' .github/workflows src tests` lists exactly the places above: 15 lines. The `:(glob)` pathspec keeps `docs/test-reports/` out, as VR3 does; a plain `docs/*.md` would match it too.
 - `git grep -n -E "(^|[^0-9.])0\.6\.0([^0-9]|$)" -- README.md ':(glob)docs/*.md' .github/workflows src tests` finds nothing.
-- `VersionPlacesTests`, `GuideSamplesTests`, and the four named tests pass. The count stays 2,054.
+- `VersionPlacesTests`, `GuideSamplesTests`, and the four named tests pass. The count stays 2,055.
 - `git diff c6dc935 -- src/CopilotLedger.Core/Pricing/rates.json global.json` is empty.
 
 **Verification:** `dotnet build CopilotLedger.slnx`; `dotnet test CopilotLedger.slnx`.
@@ -932,7 +937,7 @@ Nothing else in the report changes. `docs/test-reports/` is outside VR3's and PN
 
 **Acceptance:**
 
-- UD1–UD6, VR1–VR3, `ProductNameTests`, `GuideSamplesTests`, and `SprintFifteenDocsTests` pass: **1 test** added, so 2,055 passed.
+- UD1–UD6, VR1–VR3, `ProductNameTests`, `GuideSamplesTests`, and `SprintFifteenDocsTests` pass: **1 test** added, so 2,056 passed.
 - The cli.md steps still read stop → copy → upgrade → start → import (UD1).
 - `git grep -n -E "(^|[^0-9.])0\.7\.0([^0-9]|$)" -- README.md ':(glob)docs/*.md' .github/workflows src tests` still lists exactly Task 8's 15 lines. The report's new line is under `docs/test-reports/`, which that pathspec and VR3 leave out.
 
@@ -944,7 +949,7 @@ In a clean tree, at the commit after Task 9:
 
 1. **Gates.**
    - `dotnet build CopilotLedger.slnx`: 0 warnings, 0 errors.
-   - `dotnet test CopilotLedger.slnx`: 0 failed, 0 skipped, **2,055** passed.
+   - `dotnet test CopilotLedger.slnx`: 0 failed, 0 skipped, **2,056** passed.
    - `dotnet test CopilotLedger.slnx -- xUnit.ParallelizeTestCollections=false`: the same counts.
 
    Record both.
@@ -983,7 +988,7 @@ In a clean tree, at the commit after Task 9:
 |---|---|---|
 | 1 | `Telemetry/McpToolNamesTests.cs` | MN1–MN6: 24 |
 | 2 | `Storage/McpToolNameStoreTests.cs` | MT1–MT8: 11 |
-| 3 | `Import/McpToolNameImportTests.cs` | ML1–ML10: 15 |
+| 3 | `Import/McpToolNameImportTests.cs` | ML1–ML10: 16 |
 | 3 | `Cli/ImportPrivacyTests.cs` | IP6: 1 |
 | 4 | `Cli/McpToolNameDisplayTests.cs` | MD1–MD5: 5 |
 | 4 | `Audit/AuditToolNameTests.cs` | MD6: 1 |
@@ -997,7 +1002,7 @@ In a clean tree, at the commit after Task 9:
 | 7 | `Docs/SprintFifteenDocsTests.cs` | DF4: 1 |
 | 9 | `Docs/UpgradeDocsTests.cs` | UD6: 1 |
 
-Total: 95, from 1,960 to 2,055.
+Total: 96, from 1,960 to 2,056.
 
 Changed tests, each as strong as before:
 
